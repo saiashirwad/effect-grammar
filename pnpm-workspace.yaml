@@ -1,0 +1,4 @@
+allowBuilds:
+  msgpackr-extract: false
+ignoredBuiltDependencies:
+  - msgpackr-extract

@@ -1,0 +1,57 @@
+{
+  "name": "effect-grammar",
+  "version": "0.0.1",
+  "description": "Effect Schema, but for text formats: one grammar yields a parser, printer, rendered form, and Schema",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "import": "./dist/parser.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saiashirwad/effect-grammar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/saiashirwad/effect-grammar/issues"
+  },
+  "homepage": "https://github.com/saiashirwad/effect-grammar#readme",
+  "keywords": [
+    "effect",
+    "parser",
+    "printer",
+    "grammar",
+    "combinators",
+    "schema",
+    "round-trip",
+    "bidirectional"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test 'test/**/*.test.ts'",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "prepare": "effect-tsgo patch",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "@effect/language-service": "^0.87.1",
+    "@effect/tsgo": "0.24.3",
+    "@types/node": "^26.1.2",
+    "oxfmt": "^0.61.0",
+    "typescript": "^7.0.2"
+  }
+}
