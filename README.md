@@ -6,7 +6,7 @@ a rendered grammar, and a `Schema<A, string>`.
 ## Install
 
 ```bash
-pnpm add effect-grammar effect
+pnpm add effect-grammar
 ```
 
 Depends on Effect v4.
