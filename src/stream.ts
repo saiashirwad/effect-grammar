@@ -1,6 +1,7 @@
-import { Effect, Option, Scope, Stream } from "effect";
-import { UpstreamError } from "./error.ts";
-import { getPos, isEof, makeStreamState, ParseState, release } from "./state.ts";
+import { Effect, Option, Scope, Stream } from "effect"
+
+import { UpstreamError } from "./error.ts"
+import { getPos, isEof, makeStreamState, ParseState, release } from "./state.ts"
 
 /**
  * Run a parser once over a stream of chunks, pulling input on demand. The
@@ -13,11 +14,11 @@ export const parseStream = <A, E, E2, R2>(
 ): Effect.Effect<A, E | UpstreamError, Exclude<R2, Scope.Scope>> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const pull = yield* Stream.toPull(input);
-      const state = yield* makeStreamState(pull);
-      return yield* p.pipe(Effect.provideService(ParseState, state));
+      const pull = yield* Stream.toPull(input)
+      const state = yield* makeStreamState(pull)
+      return yield* p.pipe(Effect.provideService(ParseState, state))
     }),
-  );
+  )
 
 /**
  * Parse a stream of chunks into a stream of values: run `element` repeatedly
@@ -32,22 +33,22 @@ export const streamElements = <A, E, E2, R2>(
 ): Stream.Stream<A, E | UpstreamError, Exclude<R2, Scope.Scope>> =>
   Stream.unwrap(
     Effect.gen(function* () {
-      const pull = yield* Stream.toPull(input);
-      const state = yield* makeStreamState(pull);
+      const pull = yield* Stream.toPull(input)
+      const state = yield* makeStreamState(pull)
       const withState = <X, EX>(eff: Effect.Effect<X, EX, ParseState>) =>
-        eff.pipe(Effect.provideService(ParseState, state));
+        eff.pipe(Effect.provideService(ParseState, state))
       const step = Effect.gen(function* () {
-        if (yield* withState(isEof)) return [[], Option.none()] as const;
-        const mark = yield* withState(getPos);
-        const a = yield* withState(element);
+        if (yield* withState(isEof)) return [[], Option.none()] as const
+        const mark = yield* withState(getPos)
+        const a = yield* withState(element)
         if ((yield* withState(getPos)) === mark) {
           return yield* Effect.die(
             new Error("streamElements: element parser succeeded without consuming input"),
-          );
+          )
         }
-        yield* withState(release);
-        return [[a], Option.some(undefined)] as const;
-      });
-      return Stream.paginate(undefined, () => step);
+        yield* withState(release)
+        return [[a], Option.some(undefined)] as const
+      })
+      return Stream.paginate(undefined, () => step)
     }),
-  );
+  )

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema } from "effect"
 
 export class ParseError extends Schema.TaggedErrorClass<ParseError>()("ParseError", {
   pos: Schema.Finite,
@@ -13,9 +13,9 @@ export class ParseError extends Schema.TaggedErrorClass<ParseError>()("ParseErro
     const loc =
       this.line !== undefined && this.column !== undefined
         ? `line ${this.line}, column ${this.column}`
-        : `position ${this.pos}`;
-    const found = this.found === undefined ? "end of input" : JSON.stringify(this.found);
-    return `${loc}: expected ${this.expected}, found ${found}`;
+        : `position ${this.pos}`
+    const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
+    return `${loc}: expected ${this.expected}, found ${found}`
   }
 }
 
@@ -29,28 +29,28 @@ export const offsetToLineColumn = (
   input: string,
   pos: number,
 ): { readonly line: number; readonly column: number } => {
-  let line = 1;
-  let column = 1;
+  let line = 1
+  let column = 1
   for (let i = 0; i < pos; i++) {
     if (input.charCodeAt(i) === 10 /* \n */) {
-      line++;
-      column = 1;
+      line++
+      column = 1
     } else {
-      column++;
+      column++
     }
   }
-  return { line, column };
-};
+  return { line, column }
+}
 
 /** Attach line/column from `input` at `e.pos`. */
 export const locateParseError = (input: string, e: ParseError): ParseError => {
-  if (e.line !== undefined && e.column !== undefined) return e;
-  const { line, column } = offsetToLineColumn(input, e.pos);
+  if (e.line !== undefined && e.column !== undefined) return e
+  const { line, column } = offsetToLineColumn(input, e.pos)
   return new ParseError({
     pos: e.pos,
     expected: e.expected,
     found: e.found,
     line,
     column,
-  });
-};
+  })
+}

@@ -18,16 +18,15 @@ This pattern is known as **invertible syntax descriptions**, from:
 ## Prior art
 
 - **Haskell** — several libraries implement the pattern, e.g. `roundtrip-aeson`
-  (JSON un-/parsing from one invertible definition) and Happstack's
-  `boomerang` (bidirectional URL routing). See
-  <https://hackage.haskell.org/packages/>
+  (JSON un-/parsing from one invertible definition) and Happstack's `boomerang`
+  (bidirectional URL routing). See <https://hackage.haskell.org/packages/>
 - **fp-ts** — `fp-ts-routing`: the same trick for bidirectional route
   parsing/printing in TypeScript.
 - **Effect** — no official parser-combinator package. `@effect/printer`
   (<https://github.com/Effect-TS/effect/blob/main/packages/printer/README.md>)
-  is only the print half (Wadler-style pretty-printing, no parsing).
-  Effect **Schema** is the closest relative philosophically — one definition,
-  both decode and encode — but it transforms data structures, not text;
+  is only the print half (Wadler-style pretty-printing, no parsing). Effect
+  **Schema** is the closest relative philosophically — one definition, both
+  decode and encode — but it transforms data structures, not text;
   `grammar.ts`'s `toSchema` bridges the two by embedding the grammar as a
   `SchemaTransformation`.
 
@@ -44,5 +43,5 @@ This pattern is known as **invertible syntax descriptions**, from:
 
 - `examples/connection-string.ts` — the showcase for `grammar.ts`: parses
   PostgreSQL DSNs, prints them back, derives a Schema, renders the grammar.
-- `examples/schema-derivation.ts` — smaller IP-address version of the same
-  idea, plus the `fromEffect` escape hatch.
+- `examples/schema-derivation.ts` — smaller IP-address version of the same idea,
+  plus the `fromEffect` escape hatch.

@@ -1,14 +1,15 @@
-import { Console, Effect, Schema } from "effect";
-import * as Grammar from "../src/grammar.ts";
+import { Console, Effect, Schema } from "effect"
 
-const user = Grammar.label("user", Grammar.regex(/[^:@/?#]+/, "user"));
-const password = Grammar.label("password", Grammar.regex(/[^@/?#]+/, "password"));
-const host = Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host"));
+import * as Grammar from "../src/grammar.ts"
+
+const user = Grammar.label("user", Grammar.regex(/[^:@/?#]+/, "user"))
+const password = Grammar.label("password", Grammar.regex(/[^@/?#]+/, "password"))
+const host = Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host"))
 const port = Grammar.map(Grammar.label("port", Grammar.regex(/\d+/, "digits")), {
   to: Number,
   from: String,
-});
-const database = Grammar.label("database", Grammar.regex(/[^/?#]+/, "database"));
+})
+const database = Grammar.label("database", Grammar.regex(/[^/?#]+/, "database"))
 
 const pair = Grammar.map(
   Grammar.struct({
@@ -20,11 +21,11 @@ const pair = Grammar.map(
     to: ({ key, value }) => [key, value] as const,
     from: ([key, value]) => ({ key, equals: "=" as const, value }),
   },
-);
+)
 const params = Grammar.map(Grammar.sepBy(pair, Grammar.literal("&")), {
   to: Object.fromEntries,
   from: Object.entries,
-});
+})
 
 const credentials = Grammar.map(
   Grammar.struct({
@@ -38,7 +39,7 @@ const credentials = Grammar.map(
       colon: password === undefined ? undefined : { sep: ":" as const, password },
     }),
   },
-);
+)
 
 const dsn = Grammar.map(
   Grammar.struct({
@@ -71,7 +72,7 @@ const dsn = Grammar.map(
       query: Object.keys(params).length === 0 ? undefined : { sep: "?" as const, params },
     }),
   },
-);
+)
 
 const ConnectionInfo = Schema.Struct({
   user: Schema.NonEmptyString,
@@ -80,14 +81,14 @@ const ConnectionInfo = Schema.Struct({
   port: Schema.UndefinedOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
   database: Schema.NonEmptyString,
   params: Schema.Record(Schema.String, Schema.String),
-});
-const Dsn = Grammar.toSchema(dsn, ConnectionInfo, { identifier: "Dsn" });
+})
+const Dsn = Grammar.toSchema(dsn, ConnectionInfo, { identifier: "Dsn" })
 
-const decode = Schema.decodeUnknownEffect(Dsn);
-const encode = Schema.encodeEffect(Dsn);
-const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decode = Schema.decodeUnknownEffect(Dsn)
+const encode = Schema.encodeEffect(Dsn)
+const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-Effect.runSync(Console.log(`grammar: ${Grammar.render(dsn)}\n`));
+Effect.runSync(Console.log(`grammar: ${Grammar.render(dsn)}\n`))
 
 for (const source of [
   "postgres://alice:s3cret@db.internal:5432/shop?sslmode=require&connect_timeout=10",
@@ -96,14 +97,14 @@ for (const source of [
   "postgres://no-host-at-all",
   "postgres://bob@localhost/postgres#leftover",
 ]) {
-  const r = Effect.runSync(Effect.result(decode(source)));
+  const r = Effect.runSync(Effect.result(decode(source)))
   Effect.runSync(
     Console.log(
       r._tag === "Success"
         ? `decode ${source}\n  →  ${json(r.success)}`
         : `decode ${source}\n  →  ${String(r.failure)}`,
     ),
-  );
+  )
 }
 
 const value = {
@@ -113,9 +114,9 @@ const value = {
   port: 5432,
   database: "shop",
   params: { sslmode: "require" },
-};
-const encoded = Effect.runSync(encode(value));
-const roundTripped = Effect.runSync(decode(encoded));
+}
+const encoded = Effect.runSync(encode(value))
+const roundTripped = Effect.runSync(decode(encoded))
 Effect.runSync(
   Console.log(`\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`),
-);
+)

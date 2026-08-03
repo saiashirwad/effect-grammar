@@ -1,8 +1,9 @@
-import { Console, Effect, Stream } from "effect";
-import * as Grammar from "../src/grammar.ts";
+import { Console, Effect, Stream } from "effect"
 
-const dot = Grammar.literal(".");
-const octet = Grammar.map(Grammar.regex(/\d{1,3}/, "octet"), { to: Number, from: String });
+import * as Grammar from "../src/grammar.ts"
+
+const dot = Grammar.literal(".")
+const octet = Grammar.map(Grammar.regex(/\d{1,3}/, "octet"), { to: Number, from: String })
 
 const ipLine = Grammar.map(
   Grammar.struct({
@@ -28,12 +29,12 @@ const ipLine = Grammar.map(
       eol: "\n" as const,
     }),
   },
-);
+)
 
-const chunks = Stream.fromIterable(["192.168", ".1.1\n10.", "0.0.1\n172", ".16.0.1\n"]);
+const chunks = Stream.fromIterable(["192.168", ".1.1\n10.", "0.0.1\n172", ".16.0.1\n"])
 
 await Effect.runPromise(
   Grammar.streamElements(chunks, ipLine).pipe(
     Stream.runForEach((ip) => Console.log(`emitted: ${ip.join(".")}`)),
   ),
-);
+)

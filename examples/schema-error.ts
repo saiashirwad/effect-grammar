@@ -1,10 +1,11 @@
-import { Console, Effect, Schema, SchemaIssue } from "effect";
-import * as Grammar from "../src/grammar.ts";
+import { Console, Effect, Schema, SchemaIssue } from "effect"
+
+import * as Grammar from "../src/grammar.ts"
 
 const age = Grammar.map(Grammar.label("age", Grammar.regex(/\d+/, "digits")), {
   to: Number,
   from: String,
-});
+})
 
 const Person = Grammar.toSchema(
   Grammar.map(
@@ -22,10 +23,10 @@ const Person = Grammar.toSchema(
     name: Schema.String.check(Schema.isMinLength(3)),
     age: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 120 })),
   }),
-);
+)
 
 Effect.runSync(
   Schema.decodeUnknownEffect(Person, { errors: "all" })("ab:200").pipe(
     Effect.catch((err) => Console.error(SchemaIssue.makeFormatterDefault()(err.issue))),
   ),
-);
+)

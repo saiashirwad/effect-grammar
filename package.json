@@ -2,11 +2,29 @@
   "name": "effect-grammar",
   "version": "0.0.1",
   "description": "Effect Schema, but for text formats: one grammar yields a parser, printer, rendered form, and Schema",
+  "keywords": [
+    "bidirectional",
+    "combinators",
+    "effect",
+    "grammar",
+    "parser",
+    "printer",
+    "round-trip",
+    "schema"
+  ],
+  "homepage": "https://github.com/saiashirwad/effect-grammar#readme",
+  "bugs": {
+    "url": "https://github.com/saiashirwad/effect-grammar/issues"
+  },
   "license": "MIT",
-  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saiashirwad/effect-grammar.git"
+  },
   "files": [
     "dist"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,30 +35,12 @@
       "import": "./dist/parser.js"
     }
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/saiashirwad/effect-grammar.git"
-  },
-  "bugs": {
-    "url": "https://github.com/saiashirwad/effect-grammar/issues"
-  },
-  "homepage": "https://github.com/saiashirwad/effect-grammar#readme",
-  "keywords": [
-    "effect",
-    "parser",
-    "printer",
-    "grammar",
-    "combinators",
-    "schema",
-    "round-trip",
-    "bidirectional"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test 'test/**/*.test.ts'",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
+    "fmt": "oxfmt --config=.oxfmt.jsonc",
+    "fmt:check": "oxfmt --config=.oxfmt.jsonc --check",
     "prepare": "effect-tsgo patch",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
