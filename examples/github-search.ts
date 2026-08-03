@@ -2,7 +2,7 @@
  * GitHub search query: grammar owns shape; catalog owns qualifier refinement.
  * Spec: https://docs.github.com/en/search-github
  */
-import { Console, Effect, Equal, Schema } from "effect"
+import { Console, Effect, Equal, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/grammar.ts"
 
@@ -180,13 +180,10 @@ const group = Grammar.guard(
 
 // Bare words exclude standalone AND/OR/NOT so those stay operators.
 const termWord = Grammar.guard(
-  Grammar.map(
-    Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term"),
-    {
-      to: (value): Query => ({ kind: "term", quoted: false, value }),
-      from: (t) => (t as Term).value,
-    },
-  ),
+  Grammar.map(Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term"), {
+    to: (value): Query => ({ kind: "term", quoted: false, value }),
+    from: (t) => (t as Term).value,
+  }),
   (v) => v.kind === "term" && !v.quoted,
 )
 
@@ -249,29 +246,23 @@ const andSep = Grammar.map(
 )
 
 const andRest = Grammar.attempt(
-  Grammar.map(
-    Grammar.struct({ sep: andSep, atom: notExpr }),
-    {
-      to: ({ atom }): Query => atom,
-      from: (atom) => ({ sep: undefined, atom }),
-    },
-  ),
+  Grammar.map(Grammar.struct({ sep: andSep, atom: notExpr }), {
+    to: ({ atom }): Query => atom,
+    from: (atom) => ({ sep: undefined, atom }),
+  }),
 )
 
-const andExpr = Grammar.map(
-  Grammar.struct({ first: notExpr, rest: Grammar.many(andRest) }),
-  {
-    to: ({ first, rest }): Query =>
-      rest.length === 0 ? first : { kind: "and", parts: [first, ...rest] },
-    from: (q) => {
-      if (q.kind === "and") {
-        const [first, ...rest] = q.parts
-        if (first !== undefined) return { first, rest }
-      }
-      return { first: q, rest: [] }
-    },
+const andExpr = Grammar.map(Grammar.struct({ first: notExpr, rest: Grammar.many(andRest) }), {
+  to: ({ first, rest }): Query =>
+    rest.length === 0 ? first : { kind: "and", parts: [first, ...rest] },
+  from: (q) => {
+    if (q.kind === "and") {
+      const [first, ...rest] = q.parts
+      if (first !== undefined) return { first, rest }
+    }
+    return { first: q, rest: [] }
   },
-)
+})
 
 const orSep = Grammar.map(
   Grammar.struct({
@@ -286,29 +277,23 @@ const orSep = Grammar.map(
 )
 
 const orRest = Grammar.attempt(
-  Grammar.map(
-    Grammar.struct({ sep: orSep, atom: andExpr }),
-    {
-      to: ({ atom }): Query => atom,
-      from: (atom) => ({ sep: undefined, atom }),
-    },
-  ),
+  Grammar.map(Grammar.struct({ sep: orSep, atom: andExpr }), {
+    to: ({ atom }): Query => atom,
+    from: (atom) => ({ sep: undefined, atom }),
+  }),
 )
 
-const orExpr = Grammar.map(
-  Grammar.struct({ first: andExpr, rest: Grammar.many(orRest) }),
-  {
-    to: ({ first, rest }): Query =>
-      rest.length === 0 ? first : { kind: "or", parts: [first, ...rest] },
-    from: (q) => {
-      if (q.kind === "or") {
-        const [first, ...rest] = q.parts
-        if (first !== undefined) return { first, rest }
-      }
-      return { first: q, rest: [] }
-    },
+const orExpr = Grammar.map(Grammar.struct({ first: andExpr, rest: Grammar.many(orRest) }), {
+  to: ({ first, rest }): Query =>
+    rest.length === 0 ? first : { kind: "or", parts: [first, ...rest] },
+  from: (q) => {
+    if (q.kind === "or") {
+      const [first, ...rest] = q.parts
+      if (first !== undefined) return { first, rest }
+    }
+    return { first: q, rest: [] }
   },
-)
+})
 
 const whole = Grammar.map(
   Grammar.struct({ ws1: skipWs, q: query, ws2: skipWs, end: Grammar.end }),
@@ -322,102 +307,122 @@ export const parse = (input: string) => Grammar.parse(input, whole)
 export const print = (q: Query) => Grammar.print(whole, q)
 export const render = () => Grammar.render(whole)
 
-type ValueKind = "boolean" | "enum" | "date" | "number" | "user" | "repo" | "label" | "text"
+const formatIssue = SchemaIssue.makeFormatterDefault()
+
+const wordOnly: ReadonlyArray<QualifierValue["kind"]> = ["word"]
+
+const GithubBool = Schema.Literals(["true", "false"])
+const GithubNumber = Schema.String.check(
+  Schema.isPattern(/^\d+$/, {
+    identifier: "GithubNumber",
+    message: "expected digits",
+  }),
+)
+// Partial dates: YYYY, YYYY-MM, or YYYY-MM-DD (not Schema.DateFromString).
+const GithubDate = Schema.String.check(
+  Schema.isPattern(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/, {
+    identifier: "GithubDate",
+    message: "expected a date (YYYY[-MM[-DD]])",
+  }),
+)
+const GithubUser = Schema.Union([
+  Schema.Literal("@me"),
+  Schema.String.check(
+    Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, {
+      identifier: "GithubUser",
+      message: "expected a GitHub username",
+    }),
+  ),
+])
+const GithubRepo = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, {
+    identifier: "GithubRepo",
+    message: "expected owner/name",
+  }),
+)
+const GithubText = Schema.String
 
 interface Spec {
-  readonly kind: ValueKind
-  readonly values?: ReadonlyArray<string>
+  /** Schema for each string atom in the qualifier value. */
+  readonly atom: Schema.ConstraintDecoder<unknown>
+  /** Allowed value shapes; default is any. Enum/boolean are word-only. */
+  readonly shapes?: ReadonlyArray<QualifierValue["kind"]>
 }
 
-/** Representative GitHub qualifiers; unknown keys fail `validate`. */
+const enumOf = <const L extends ReadonlyArray<string>>(values: L): Spec => ({
+  atom: Schema.Literals(values),
+  shapes: wordOnly,
+})
+
+const boolSpec: Spec = { atom: GithubBool, shapes: wordOnly }
+const numberSpec: Spec = { atom: GithubNumber }
+const dateSpec: Spec = { atom: GithubDate }
+const userSpec: Spec = { atom: GithubUser }
+const repoSpec: Spec = { atom: GithubRepo }
+const textSpec: Spec = { atom: GithubText }
+
+/** Representative GitHub qualifiers; unknown keys fail validation. */
 const catalog: Record<string, Spec> = {
-  is: {
-    kind: "enum",
-    values: [
-      "open",
-      "closed",
-      "merged",
-      "pr",
-      "issue",
-      "public",
-      "private",
-      "archived",
-      "unarchived",
-      "locked",
-      "unlocked",
-    ],
-  },
-  state: { kind: "enum", values: ["open", "closed"] },
-  type: { kind: "enum", values: ["pr", "issue", "repositories", "commits"] },
-  status: { kind: "enum", values: ["pending", "success", "failure", "neutral"] },
-  review: {
-    kind: "enum",
-    values: ["none", "required", "approved", "changes_requested", "dismissed"],
-  },
-  linked: { kind: "enum", values: ["issue", "pr"] },
-  visibility: { kind: "enum", values: ["public", "private", "internal"] },
-  in: { kind: "enum", values: ["title", "body", "comments", "file", "path"] },
-  no: { kind: "enum", values: ["label", "milestone", "assignee", "project"] },
-  archived: { kind: "boolean" },
-  draft: { kind: "boolean" },
-  locked: { kind: "boolean" },
-  created: { kind: "date" },
-  updated: { kind: "date" },
-  closed: { kind: "date" },
-  merged: { kind: "date" },
-  pushed: { kind: "date" },
-  stars: { kind: "number" },
-  forks: { kind: "number" },
-  size: { kind: "number" },
-  comments: { kind: "number" },
-  interactions: { kind: "number" },
-  reactions: { kind: "number" },
-  commits: { kind: "number" },
-  author: { kind: "user" },
-  assignee: { kind: "user" },
-  commenter: { kind: "user" },
-  mentions: { kind: "user" },
-  involves: { kind: "user" },
-  "reviewed-by": { kind: "user" },
-  "review-requested": { kind: "user" },
-  user: { kind: "user" },
-  org: { kind: "user" },
-  repo: { kind: "repo" },
-  label: { kind: "label" },
-  milestone: { kind: "label" },
-  project: { kind: "label" },
-  language: { kind: "label" },
-  license: { kind: "label" },
-  team: { kind: "text" },
-  head: { kind: "text" },
-  base: { kind: "text" },
-  filename: { kind: "text" },
-  path: { kind: "text" },
-  extension: { kind: "text" },
+  is: enumOf([
+    "open",
+    "closed",
+    "merged",
+    "pr",
+    "issue",
+    "public",
+    "private",
+    "archived",
+    "unarchived",
+    "locked",
+    "unlocked",
+  ]),
+  state: enumOf(["open", "closed"]),
+  type: enumOf(["pr", "issue", "repositories", "commits"]),
+  status: enumOf(["pending", "success", "failure", "neutral"]),
+  review: enumOf(["none", "required", "approved", "changes_requested", "dismissed"]),
+  linked: enumOf(["issue", "pr"]),
+  visibility: enumOf(["public", "private", "internal"]),
+  in: enumOf(["title", "body", "comments", "file", "path"]),
+  no: enumOf(["label", "milestone", "assignee", "project"]),
+  archived: boolSpec,
+  draft: boolSpec,
+  locked: boolSpec,
+  created: dateSpec,
+  updated: dateSpec,
+  closed: dateSpec,
+  merged: dateSpec,
+  pushed: dateSpec,
+  stars: numberSpec,
+  forks: numberSpec,
+  size: numberSpec,
+  comments: numberSpec,
+  interactions: numberSpec,
+  reactions: numberSpec,
+  commits: numberSpec,
+  author: userSpec,
+  assignee: userSpec,
+  commenter: userSpec,
+  mentions: userSpec,
+  involves: userSpec,
+  "reviewed-by": userSpec,
+  "review-requested": userSpec,
+  user: userSpec,
+  org: userSpec,
+  repo: repoSpec,
+  label: textSpec,
+  milestone: textSpec,
+  project: textSpec,
+  language: textSpec,
+  license: textSpec,
+  team: textSpec,
+  head: textSpec,
+  base: textSpec,
+  filename: textSpec,
+  path: textSpec,
+  extension: textSpec,
 }
 
-const isDate = (s: string) => {
-  const m = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(s)
-  if (m === null) return false
-  const month = m[2]
-  const day = m[3]
-  if (month !== undefined && (month < "01" || month > "12")) return false
-  if (day !== undefined && (day < "01" || day > "31")) return false
-  return true
-}
-const isNumber = (s: string) => /^\d+$/.test(s)
-const isUser = (s: string) =>
-  s === "@me" || /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(s)
-const isRepo = (s: string) => /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(s)
-
-const valuePred: Partial<Record<ValueKind, (s: string) => boolean>> = {
-  date: isDate,
-  number: isNumber,
-  user: isUser,
-  repo: isRepo,
-}
-
-/** Value atoms (`*` range ends are open, not data). */
+/** String atoms in a value (`*` range ends are open, not data). */
 const atoms = (v: QualifierValue): ReadonlyArray<string> => {
   switch (v.kind) {
     case "word":
@@ -427,34 +432,6 @@ const atoms = (v: QualifierValue): ReadonlyArray<string> => {
     case "range":
       return [v.from, v.to].filter((x): x is string => x !== undefined && x !== "*")
   }
-}
-
-const validateQualifier = (q: Qualifier): string | null => {
-  const spec = catalog[q.key]
-  if (!spec) return `unknown qualifier "${q.key}"`
-
-  if ((spec.kind === "enum" || spec.kind === "boolean") && q.value.kind !== "word") {
-    return `${q.key}: expected a single value, got ${q.value.kind}`
-  }
-  if (
-    spec.kind === "boolean" &&
-    !(q.value.kind === "word" && (q.value.value === "true" || q.value.value === "false"))
-  ) {
-    return `${q.key}: expected true or false`
-  }
-  if (spec.kind === "enum") {
-    const allowed = spec.values
-    if (q.value.kind === "word" && allowed !== undefined && !allowed.includes(q.value.value)) {
-      return `${q.key}: expected one of ${allowed.join(", ")}`
-    }
-  }
-  const pred = valuePred[spec.kind]
-  if (pred !== undefined) {
-    for (const a of atoms(q.value)) {
-      if (!pred(a)) return `${q.key}: invalid value "${a}"`
-    }
-  }
-  return null
 }
 
 const walkQualifiers = function* (q: Query): Generator<Qualifier> {
@@ -475,11 +452,28 @@ const walkQualifiers = function* (q: Query): Generator<Qualifier> {
   }
 }
 
+/** Schema issues for one qualifier (no key prefix — path carries the key). */
+const checkQualifier = (q: Qualifier): ReadonlyArray<string> => {
+  const spec = catalog[q.key]
+  if (spec === undefined) return [`unknown qualifier`]
+
+  if (spec.shapes !== undefined && !spec.shapes.includes(q.value.kind)) {
+    return [`expected a single value, got ${q.value.kind}`]
+  }
+
+  const out: Array<string> = []
+  for (const a of atoms(q.value)) {
+    const r = Schema.decodeUnknownResult(spec.atom)(a)
+    if (Result.isFailure(r)) out.push(formatIssue(r.failure.issue))
+  }
+  return out
+}
+
+/** Human-readable catalog problems on a parsed query. */
 export const validate = (q: Query): ReadonlyArray<string> => {
   const out: Array<string> = []
   for (const node of walkQualifiers(q)) {
-    const err = validateQualifier(node)
-    if (err !== null) out.push(err)
+    for (const msg of checkQualifier(node)) out.push(`${node.key}: ${msg}`)
   }
   return out
 }
@@ -488,11 +482,20 @@ export const GithubQuery = Grammar.toSchema(whole, Schema.Unknown, {
   identifier: "GithubQuery",
 })
 
-export const ValidGithubQuery = GithubQuery.pipe(
-  Schema.refine((q): q is Query => validate(q as Query).length === 0, {
-    message: "invalid GitHub search query",
-    identifier: "ValidGithubQuery",
-  }),
+/** Structure from the grammar; values refined by the Schema catalog. */
+export const ValidGithubQuery = GithubQuery.check(
+  Schema.makeFilter(
+    (q: unknown) => {
+      const issues: Array<Schema.FilterIssue> = []
+      for (const node of walkQualifiers(q as Query)) {
+        for (const msg of checkQualifier(node)) {
+          issues.push({ path: [node.key], issue: msg })
+        }
+      }
+      return issues
+    },
+    { identifier: "ValidGithubQuery" },
+  ),
 )
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
@@ -565,12 +568,11 @@ const run = Effect.gen(function* () {
     `\nround-trip ${json(asString)} → ${Equal.equals(back, built) ? "equal" : "MISMATCH"}`,
   )
 
-  const decoded = yield* Effect.result(
-    Schema.decodeUnknownEffect(ValidGithubQuery)("is:maybe"),
-  )
-  yield* Console.log(
-    `schema   decode "is:maybe" → ${decoded._tag === "Success" ? "accepted" : "rejected (refinement)"}`,
-  )
+  for (const bad of ["is:maybe", "stars:abc", "repo:notasluginthere"] as const) {
+    const decoded = yield* Effect.result(Schema.decodeUnknownEffect(ValidGithubQuery)(bad))
+    const msg = decoded._tag === "Success" ? "accepted" : formatIssue(decoded.failure.issue)
+    yield* Console.log(`schema   decode ${json(bad)} → ${msg}`)
+  }
 })
 
 if (import.meta.url === `file://${process.argv[1]}`) {
