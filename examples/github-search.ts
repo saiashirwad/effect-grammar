@@ -426,32 +426,35 @@ const QuerySchema: Schema.Codec<Query> = Schema.Union([
 ])
 
 const ValidGithubQuery = Grammar.toSchema(whole, QuerySchema, { identifier: "GithubQuery" }).check(
-  Schema.makeFilter(catalogIssues, { identifier: "ValidGithubQuery" }),
+  Schema.makeFilter(catalogIssues),
 )
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
-Effect.gen(function* () {
-  for (const source of [
-    "is:pr author:foo label:bug",
-    "(author:foo OR author:bar) is:pr -is:archived",
-    "NOT draft:true stars:10..1000 language:TypeScript",
-    'label:"help wanted" in:title created:>=2024-01-01 pushed:*..2024-06-30',
-    "repo:effect-ts/effect path:src extension:ts",
-    "is:maybe",
-    "stars:abc",
-    "created:2020-13-99",
-    "frobnicate:x",
-    "repo:notasluginthere",
-    "is:pr (unclosed",
-    "is:",
-  ]) {
-    const r = yield* Effect.result(Schema.decodeUnknownEffect(ValidGithubQuery)(source))
-    if (r._tag === "Success") {
-      yield* Console.log(`decode ${json(source)}\n  →  ${json(r.success)}`)
-    } else {
-      yield* Console.log(`decode ${json(source)}\n  →  ${formatIssue(r.failure.issue)}`)
-    }
-  }
-}).pipe(Effect.runFork)
+const samples = [
+  "is:pr author:foo label:bug",
+  "(author:foo OR author:bar) is:pr -is:archived",
+  "NOT draft:true stars:10..1000 language:TypeScript",
+  'label:"help wanted" in:title created:>=2024-01-01 pushed:*..2024-06-30',
+  "repo:effect-ts/effect path:src extension:ts",
+  "is:maybe",
+  "stars:abc",
+  "created:2020-13-99",
+  "frobnicate:x",
+  "repo:notasluginthere",
+  "is:pr (unclosed",
+  "is:",
+] as const
+
+Effect.all(
+  samples.map((source) =>
+    Schema.decodeUnknownEffect(ValidGithubQuery)(source).pipe(
+      Effect.match({
+        onSuccess: (value) => `decode ${json(source)}\n  →  ${json(value)}`,
+        onFailure: (err) => `decode ${json(source)}\n  →  ${formatIssue(err.issue)}`,
+      }),
+      Effect.flatMap(Console.log),
+    ),
+  ),
+).pipe(Effect.runFork)
