@@ -22,14 +22,12 @@ export interface ParseStateShape {
 export class ParseState extends Context.Service<ParseState, ParseStateShape>()("ParseState") {}
 
 export const makeStringState = (input: string): Effect.Effect<ParseStateShape> =>
-  Effect.gen(function* () {
-    return {
-      buffer: yield* Ref.make(input),
-      pos: yield* Ref.make(0),
-      base: yield* Ref.make(0),
-      fill: Effect.void,
-      done: yield* Ref.make(true),
-    }
+  Effect.all({
+    buffer: Ref.make(input),
+    pos: Ref.make(0),
+    base: Ref.make(0),
+    fill: Effect.succeed(Effect.void),
+    done: Ref.make(true),
   })
 
 export const makeStreamState = <E>(

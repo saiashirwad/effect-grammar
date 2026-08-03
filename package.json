@@ -42,8 +42,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test 'test/**/*.test.ts'",
-    "fmt": "oxfmt --config=.oxfmt.jsonc",
-    "fmt:check": "oxfmt --config=.oxfmt.jsonc --check",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "prepare": "effect-tsgo patch",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
