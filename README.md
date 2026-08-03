@@ -1,7 +1,7 @@
 # effect-grammar
 
 Effect Schema, but for text formats. One definition yields a parser, a printer,
-a rendered grammar, and a `Schema<A, string>`.
+a rendered grammar, and a `Schema.Codec<A, string>`.
 
 ## Install
 
@@ -14,13 +14,20 @@ Depends on Effect v4.
 ## Grammar
 
 Define an HTTPS endpoint once, then parse it, print it, or derive a validated
-Schema.
+Schema. `mapSchema` ties the mapped value to a Schema — the Schema types the
+mapping, doubles as the print-time guard, and is reused as the `toSchema`
+target, so grammar and Schema can't drift apart.
 
 ```ts
 import { Schema } from "effect"
 import { Grammar } from "effect-grammar"
 
-const endpoint = Grammar.map(
+const EndpointStruct = Schema.Struct({
+  host: Schema.NonEmptyString,
+  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+})
+
+const endpoint = Grammar.mapSchema(
   Grammar.struct({
     scheme: Grammar.literal("https://"),
     host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
@@ -28,6 +35,7 @@ const endpoint = Grammar.map(
       Grammar.struct({ sep: Grammar.literal(":"), port: Grammar.integer }),
     ),
   }),
+  EndpointStruct,
   {
     to: ({ host, portPart }) => ({ host, port: portPart?.port ?? 443 }),
     from: ({ host, port }) => ({
@@ -37,14 +45,9 @@ const endpoint = Grammar.map(
     }),
   },
 )
-const Endpoint = Grammar.toSchema(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-  }),
-  { identifier: "Endpoint" },
-)
+const Endpoint = Grammar.toSchema(endpoint, EndpointStruct, {
+  identifier: "Endpoint",
+})
 Schema.decodeUnknownSync(Endpoint)("https://effect.website:443") // { host: "effect.website", port: 443 }
 Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 }) // "https://effect.website:443"
 ```

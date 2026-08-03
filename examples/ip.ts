@@ -1,37 +1,55 @@
-import { Console, Effect, Schema } from "effect"
+import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import { char, digit, endOfInput, many, parse, ParseError } from "../src/parser.ts"
+import * as Grammar from "../src/grammar.ts"
 
-class OutOfRange extends Schema.TaggedErrorClass<OutOfRange>()("OutOfRange", {
-  n: Schema.Finite,
-}) {}
+const Octet = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
+const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
 
-const byte = Effect.gen(function* () {
-  const digits = yield* many(digit, { atLeast: 1 })
-  const n = Number(digits.join(""))
-  if (n > 255) return yield* new OutOfRange({ n })
-  return n
+const octet = Grammar.mapSchema(Grammar.regex(/\d{1,3}/, "octet"), Octet, {
+  to: Number,
+  from: String,
 })
 
-const ip = Effect.gen(function* () {
-  const a = yield* byte
-  yield* char(".")
-  const b = yield* byte
-  yield* char(".")
-  const c = yield* byte
-  yield* char(".")
-  const d = yield* byte
-  yield* endOfInput
-  return [a, b, c, d] as const
-})
+const dot = Grammar.literal(".")
 
-for (const source of ["192.168.1.1", "10.0.300.7", "192.168.1", "not-an-ip"]) {
-  const r = Effect.runSync(parse(source, ip))
-  if (r._tag === "Success") {
-    Effect.runSync(Console.log(`${source}  →  parsed: ${r.success.join(".")}`))
-  } else if (Schema.is(ParseError)(r.failure)) {
-    Effect.runSync(Console.log(`${source}  →  ${r.failure.message}`))
-  } else if (Schema.is(OutOfRange)(r.failure)) {
-    Effect.runSync(Console.log(`${source}  →  out of range: ${r.failure.n} (0-255)`))
-  }
-}
+const ip = Grammar.mapSchema(
+  Grammar.struct({
+    a: octet,
+    dot1: dot,
+    b: octet,
+    dot2: dot,
+    c: octet,
+    dot3: dot,
+    d: octet,
+  }),
+  IpAddress,
+  {
+    to: ({ a, b, c, d }) => [a, b, c, d] as const,
+    from: ([a, b, c, d]) => ({
+      a,
+      b,
+      c,
+      d,
+      dot1: "." as const,
+      dot2: "." as const,
+      dot3: "." as const,
+    }),
+  },
+)
+
+const Ip = Grammar.toSchema(ip, IpAddress, { identifier: "IpAddress" })
+
+const formatIssue = SchemaIssue.makeFormatterDefault()
+
+const samples = ["192.168.1.1", "10.0.300.7", "192.168.1", "not-an-ip"] as const
+
+const check = (source: string) =>
+  Schema.decodeUnknownEffect(Ip)(source).pipe(
+    Effect.match({
+      onSuccess: (value) => `${source}  →  ${value.join(".")}`,
+      onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
+    }),
+    Effect.flatMap(Console.log),
+  )
+
+Effect.runFork(Effect.forEach(samples, check, { discard: true }))

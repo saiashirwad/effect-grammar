@@ -2,7 +2,12 @@ import { Console, Effect, Schema } from "effect"
 
 import * as Grammar from "../src/grammar.ts"
 
-const endpoint = Grammar.map(
+const EndpointStruct = Schema.Struct({
+  host: Schema.NonEmptyString,
+  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+})
+
+const endpoint = Grammar.mapSchema(
   Grammar.struct({
     scheme: Grammar.literal("https://"),
     host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
@@ -10,6 +15,7 @@ const endpoint = Grammar.map(
       Grammar.struct({ sep: Grammar.literal(":"), port: Grammar.integer }),
     ),
   }),
+  EndpointStruct,
   {
     to: ({ host, portPart }) => ({ host, port: portPart?.port ?? 443 }),
     from: ({ host, port }) => ({
@@ -19,14 +25,8 @@ const endpoint = Grammar.map(
     }),
   },
 )
-const Endpoint = Grammar.toSchema(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-  }),
-  { identifier: "Endpoint" },
-)
+
+const Endpoint = Grammar.toSchema(endpoint, EndpointStruct, { identifier: "Endpoint" })
 
 const source = "https://effect.website:443"
 const decoded = Schema.decodeUnknownSync(Endpoint)(source)
