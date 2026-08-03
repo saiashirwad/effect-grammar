@@ -74,7 +74,7 @@ const quoteExpr: Grammar.Grammar<Quote> = Grammar.guard(
   (v) => v.kind === "quote",
 )
 
-const whole = Grammar.map(
+const document = Grammar.map(
   Grammar.struct({
     ws1: Grammar.map(Grammar.regex(/\s*/, "whitespace"), { to: () => "", from: () => "" }),
     e: expr,
@@ -184,13 +184,38 @@ const ExprSchema: Schema.Codec<Expr> = Schema.Union([
   }),
 ])
 
-const ValidScheme = Grammar.toSchema(whole, ExprSchema, { identifier: "Scheme" }).check(
-  Schema.makeFilter(catalogIssues),
-)
-
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
-const displaySource = (source: string) => (source === "" ? "(empty)" : source)
+const show = (e: Expr): string => {
+  switch (e.kind) {
+    case "number":
+      return String(e.value)
+    case "string":
+      return JSON.stringify(e.value)
+    case "boolean":
+      return e.value ? "#t" : "#f"
+    case "symbol":
+      return e.value
+    case "quote":
+      return "'" + show(e.inner)
+    case "list":
+      return "(" + e.elements.map(show).join(" ") + ")"
+  }
+}
+
+const report = (source: string, detail: string, ok: boolean) => {
+  const label = ok ? "ok  " : "fail"
+  const input = source === "" ? "(empty)" : source
+  const body = detail
+    .split("\n")
+    .map((line) => `      ${line}`)
+    .join("\n")
+  return `${label}  ${input}\n${body}`
+}
+
+const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme" }).check(
+  Schema.makeFilter(catalogIssues),
+)
 
 const samples = [
   "(+ 1 2)",
@@ -215,9 +240,8 @@ Effect.all(
   samples.map((source) =>
     Schema.decodeUnknownEffect(ValidScheme)(source).pipe(
       Effect.match({
-        onSuccess: (value) => `ok    ${displaySource(source)}\n${JSON.stringify(value, null, 2)}`,
-        onFailure: (err) =>
-          `fail  ${displaySource(source)}\n${formatIssue(err.issue).replace(/\s*\n\s*/g, " · ")}`,
+        onSuccess: (value) => report(source, show(value), true),
+        onFailure: (err) => report(source, formatIssue(err.issue), false),
       }),
       Effect.flatMap(Console.log),
     ),
