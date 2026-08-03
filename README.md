@@ -84,6 +84,9 @@ Effect.runSync(parse("192.168.1.1", ip))
 // { _tag: "Success", value: [192, 168, 1, 1] }
 ```
 
+Parsing is strict by default, so `parse` rejects trailing input. Use
+`parsePrefix` when the input may contain content after the parsed value.
+
 ## Releasing
 
 Add a changeset for a user-facing change:
