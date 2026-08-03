@@ -13,40 +13,40 @@ Depends on Effect v4.
 
 ## Grammar
 
-Round-trip parse and print; `Grammar.toSchema` gives a Schema for free.
+Define an HTTPS endpoint once, then parse it, print it, or derive a validated
+Schema.
 
 ```ts
 import { Schema } from "effect"
 import { Grammar } from "effect-grammar"
 
-const port = Grammar.map(
-  Grammar.label("port", Grammar.regex(/\d+/, "digits")),
+const endpoint = Grammar.map(
+  Grammar.struct({
+    scheme: Grammar.literal("https://"),
+    host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
+    portPart: Grammar.optional(
+      Grammar.struct({ sep: Grammar.literal(":"), port: Grammar.integer }),
+    ),
+  }),
   {
-    to: Number,
-    from: String,
+    to: ({ host, portPart }) => ({ host, port: portPart?.port ?? 443 }),
+    from: ({ host, port }) => ({
+      scheme: "https://" as const,
+      host,
+      portPart: { sep: ":" as const, port },
+    }),
   },
 )
-
-const dsn = Grammar.struct({
-  scheme: Grammar.literal("postgres://"),
-  user: Grammar.label("user", Grammar.regex(/[^:@/?#]+/, "user")),
-  at: Grammar.literal("@"),
-  host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
-  portPart: Grammar.optional(
-    Grammar.struct({ sep: Grammar.literal(":"), port }),
-  ),
-})
-
-Grammar.parse("postgres://alice@db.internal:5432", dsn)
-// Effect<{ scheme, user, at, host, portPart: { sep, port: 5432 } }>
-
-const Port = Grammar.toSchema(
-  port,
-  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-  { identifier: "Port" },
+const Endpoint = Grammar.toSchema(
+  endpoint,
+  Schema.Struct({
+    host: Schema.NonEmptyString,
+    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+  }),
+  { identifier: "Endpoint" },
 )
-Schema.decodeUnknownSync(Port)("5432") // 5432
-Schema.encodeSync(Port)(5432) // "5432"
+Schema.decodeUnknownSync(Endpoint)("https://effect.website:443") // { host: "effect.website", port: 443 }
+Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 }) // "https://effect.website:443"
 ```
 
 ## Parse-only with `Effect.gen`
