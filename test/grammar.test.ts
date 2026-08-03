@@ -597,6 +597,71 @@ describe("guard", () => {
 })
 
 // ---------------------------------------------------------------------------
+// mapSchema
+// ---------------------------------------------------------------------------
+
+describe("mapSchema", () => {
+  const num = Grammar.mapSchema(Grammar.regex(/\d+/, "digits"), Schema.Finite, {
+    to: Number,
+    from: String,
+  })
+  const word = Grammar.mapSchema(Grammar.regex(/[a-z]+/, "word"), Schema.String, {
+    to: (s) => s,
+    from: (s) => s,
+  })
+  const g = Grammar.choice(num, word)
+
+  it("parse is unaffected by the schema", () => {
+    assert.equal(parseOk("42", g), 42)
+    assert.equal(parseOk("hi", g), "hi")
+  })
+
+  it("print rejects values the schema rejects", () => {
+    const e = printFail(num, Number.NaN)
+    assert.match(e.message, /rejected by guard/)
+  })
+
+  it("choice skips options whose schema rejects the value", () => {
+    assert.equal(printOk(g, 9), "9")
+    assert.equal(printOk(g, "ok"), "ok")
+  })
+
+  it("round-trips", () => {
+    assertRoundTrip(g, 12)
+    assertRoundTrip(g, "ab")
+  })
+
+  it("supports recursive schemas via lazy guard compilation", () => {
+    type Tree = { readonly value: number; readonly children: ReadonlyArray<Tree> }
+    const TreeSchema: Schema.Codec<Tree> = Schema.Struct({
+      value: Schema.Finite,
+      children: Schema.Array(Schema.suspend((): Schema.Codec<Tree> => TreeSchema)),
+    })
+    // Defined before the const below finishes initializing — must not throw.
+    const tree: Grammar.Grammar<Tree> = Grammar.mapSchema(
+      Grammar.struct({
+        value: Grammar.integer,
+        children: Grammar.between(
+          Grammar.symbol("("),
+          Grammar.symbol(")"),
+          Grammar.sepBy(
+            Grammar.lazy(() => tree),
+            Grammar.symbol(","),
+          ),
+        ),
+      }),
+      TreeSchema,
+      {
+        to: ({ value, children }): Tree => ({ value, children }),
+        from: (t) => ({ value: t.value, children: [...t.children] }),
+      },
+    )
+    const value: Tree = { value: 1, children: [{ value: 2, children: [] }] }
+    assertRoundTrip(tree, value)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // fromEffect
 // ---------------------------------------------------------------------------
 
@@ -887,5 +952,44 @@ describe("checkRoundTrip", () => {
       assert.match(r.failure.message, /original/)
       assert.match(r.failure.message, /reparsed/)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// deep recursion (stack safety)
+// ---------------------------------------------------------------------------
+
+describe("deep recursion", () => {
+  const depth = 1000
+  const deep = "[".repeat(depth) + "1" + "]".repeat(depth)
+
+  const nested: Grammar.Grammar<unknown> = Grammar.lazy(() =>
+    Grammar.choice(
+      Grammar.map(Grammar.regex(/\d+/, "digits"), { to: Number, from: String }),
+      Grammar.between(
+        Grammar.symbol("["),
+        Grammar.symbol("]"),
+        Grammar.sepBy(nested, Grammar.symbol(",")),
+      ),
+    ),
+  )
+
+  it("parses without blowing the stack", () => {
+    // Walk the result iteratively — structural deepEqual recurses and would
+    // blow the stack all by itself.
+    let v: unknown = parseOk(deep, nested)
+    let d = 0
+    while (Array.isArray(v)) {
+      v = v[0]
+      d++
+    }
+    assert.equal(d, depth)
+    assert.equal(v, 1)
+  })
+
+  it("prints and re-parses without blowing the stack", () => {
+    // Same story for equality: compare print fixpoints, not nested values.
+    const printed = printOk(nested, parseOk(deep, nested))
+    assert.equal(printed, printOk(nested, parseOk(printed, nested)))
   })
 })

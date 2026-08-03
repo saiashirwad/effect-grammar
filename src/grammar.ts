@@ -223,6 +223,27 @@ export const guard = <A>(inner: Grammar<A>, pred: (value: A) => boolean): Gramma
 })
 
 /**
+ * {@link map} with a Schema as the value contract: the schema types the mapped
+ * value and doubles as the print-time {@link guard}, so an enclosing `choice`
+ * skips values the schema rejects. Tying `to`/`from` to `S["Type"]` means the
+ * grammar and the schema can't drift apart.
+ *
+ * The guard compiles lazily on first print, so recursive schemas
+ * (`Schema.suspend`) are safe even while their definition is still in progress.
+ */
+export const mapSchema = <S extends Schema.Top, A>(
+  inner: Grammar<A>,
+  schema: S,
+  f: {
+    readonly to: (a: A) => S["Type"]
+    readonly from?: (b: S["Type"]) => A
+  },
+): Grammar<S["Type"]> => {
+  let is: ((u: unknown) => boolean) | undefined
+  return guard(map(inner, f), (value) => (is ??= Schema.is(schema))(value))
+}
+
+/**
  * Name a grammar for error messages. Replaces `expected` only when `inner`
  * fails without consuming input. Print is transparent; render shows
  * `<expected>` when `inner` is a raw regex.

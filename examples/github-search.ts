@@ -27,6 +27,73 @@ type Or = { readonly kind: "or"; readonly parts: ReadonlyArray<Query> }
 type Group = { readonly kind: "group"; readonly inner: Query }
 type Query = Term | Qualifier | Not | And | Or | Group
 
+// --- AST schemas (Encoded/Type = Query so Grammar.toSchema is typed, not Schema.Unknown) ---
+
+const WordValueSchema = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
+const QuotedValueSchema = Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String })
+const CompareValueSchema = Schema.Struct({
+  kind: Schema.Literal("compare"),
+  op: Schema.Literals([">", ">=", "<", "<="]),
+  value: Schema.String,
+})
+const RangeValueSchema = Schema.Struct({
+  kind: Schema.Literal("range"),
+  from: Schema.UndefinedOr(Schema.String),
+  to: Schema.UndefinedOr(Schema.String),
+})
+
+const QualifierValueSchema = Schema.Union([
+  WordValueSchema,
+  QuotedValueSchema,
+  CompareValueSchema,
+  RangeValueSchema,
+])
+
+const TermWordSchema = Schema.Struct({
+  kind: Schema.Literal("term"),
+  quoted: Schema.Literal(false),
+  value: Schema.String,
+})
+const TermQuotedSchema = Schema.Struct({
+  kind: Schema.Literal("term"),
+  quoted: Schema.Literal(true),
+  value: Schema.String,
+})
+const QualifierSchema = Schema.Struct({
+  kind: Schema.Literal("qualifier"),
+  negate: Schema.Boolean,
+  key: Schema.String,
+  value: QualifierValueSchema,
+})
+const NotSchema: Schema.Codec<Not> = Schema.Struct({
+  kind: Schema.Literal("not"),
+  inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+})
+const AndSchema: Schema.Codec<And> = Schema.Struct({
+  kind: Schema.Literal("and"),
+  parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+})
+const OrSchema: Schema.Codec<Or> = Schema.Struct({
+  kind: Schema.Literal("or"),
+  parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+})
+const GroupSchema: Schema.Codec<Group> = Schema.Struct({
+  kind: Schema.Literal("group"),
+  inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+})
+
+const QuerySchema: Schema.Codec<Query> = Schema.Union([
+  TermWordSchema,
+  TermQuotedSchema,
+  QualifierSchema,
+  NotSchema,
+  AndSchema,
+  OrSchema,
+  GroupSchema,
+])
+
+// --- grammar ---
+
 const skipWs = Grammar.map(Grammar.regex(/\s*/, "whitespace"), {
   to: () => "",
   from: () => "",
@@ -44,29 +111,29 @@ type QuotedValue = Extract<QualifierValue, { readonly kind: "quoted" }>
 type CompareValue = Extract<QualifierValue, { readonly kind: "compare" }>
 type RangeValue = Extract<QualifierValue, { readonly kind: "range" }>
 
-const compareValue = Grammar.guard(
+const compareValue = Grammar.mapSchema(
   Grammar.attempt(
-    Grammar.map(
-      Grammar.struct({
-        op: Grammar.choice(
-          Grammar.literal(">="),
-          Grammar.literal("<="),
-          Grammar.literal(">"),
-          Grammar.literal("<"),
-        ),
-        value: token("compare value"),
-      }),
-      {
-        to: ({ op, value }): CompareValue => ({ kind: "compare", op, value }),
-        from: (v) => ({ op: v.op, value: v.value }),
-      },
-    ),
+    Grammar.struct({
+      op: Grammar.choice(
+        Grammar.literal(">="),
+        Grammar.literal("<="),
+        Grammar.literal(">"),
+        Grammar.literal("<"),
+      ),
+      value: token("compare value"),
+    }),
   ),
-  (v) => v.kind === "compare",
+  CompareValueSchema,
+  {
+    to: ({ op, value }): CompareValue => ({ kind: "compare", op, value }),
+    from: (v) => ({ op: v.op, value: v.value }),
+  },
 )
 
-const rangeValue = Grammar.guard(
-  Grammar.map(Grammar.regex(/[^\s():"']*\.\.[^\s():"']*/, "range"), {
+const rangeValue = Grammar.mapSchema(
+  Grammar.regex(/[^\s():"']*\.\.[^\s():"']*/, "range"),
+  RangeValueSchema,
+  {
     to: (raw): RangeValue => {
       const i = raw.indexOf("..")
       const from = raw.slice(0, i)
@@ -78,91 +145,78 @@ const rangeValue = Grammar.guard(
       }
     },
     from: (v) => (v.from ?? "") + ".." + (v.to ?? ""),
-  }),
-  (v) => v.kind === "range",
+  },
 )
 
-const wordValue = Grammar.guard(
-  Grammar.map(token("qualifier value"), {
-    to: (value): WordValue => ({ kind: "word", value }),
-    from: (v) => v.value,
-  }),
-  (v) => v.kind === "word",
-)
+const wordValue = Grammar.mapSchema(token("qualifier value"), WordValueSchema, {
+  to: (value): WordValue => ({ kind: "word", value }),
+  from: (v) => v.value,
+})
 
-const quotedValue = Grammar.guard(
-  Grammar.map(doubleQuoted, {
-    to: (value): QuotedValue => ({ kind: "quoted", value }),
-    from: (v) => v.value,
-  }),
-  (v) => v.kind === "quoted",
-)
+const quotedValue = Grammar.mapSchema(doubleQuoted, QuotedValueSchema, {
+  to: (value): QuotedValue => ({ kind: "quoted", value }),
+  from: (v) => v.value,
+})
 
 const qualifierValue = Grammar.choice(quotedValue, compareValue, rangeValue, wordValue)
 
 const qualifier = Grammar.attempt(
-  Grammar.guard(
-    Grammar.map(
-      Grammar.struct({
-        neg: Grammar.optional(Grammar.literal("-")),
-        key: Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name"),
-        colon: Grammar.literal(":"),
-        value: qualifierValue,
+  Grammar.mapSchema(
+    Grammar.struct({
+      neg: Grammar.optional(Grammar.literal("-")),
+      key: Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name"),
+      colon: Grammar.literal(":"),
+      value: qualifierValue,
+    }),
+    QualifierSchema,
+    {
+      to: ({ neg, key, value }): Qualifier => ({
+        kind: "qualifier",
+        negate: neg !== undefined,
+        key,
+        value,
       }),
-      {
-        to: ({ neg, key, value }): Qualifier => ({
-          kind: "qualifier",
-          negate: neg !== undefined,
-          key,
-          value,
-        }),
-        from: (q) => ({
-          neg: q.negate ? ("-" as const) : undefined,
-          key: q.key,
-          colon: ":" as const,
-          value: q.value,
-        }),
-      },
-    ),
-    (v) => v.kind === "qualifier",
+      from: (q) => ({
+        neg: q.negate ? ("-" as const) : undefined,
+        key: q.key,
+        colon: ":" as const,
+        value: q.value,
+      }),
+    },
   ),
 )
 
 const query: Grammar.Grammar<Query> = Grammar.lazy(() => orExpr, { name: "query" })
 
-const group: Grammar.Grammar<Group> = Grammar.guard(
-  Grammar.map(
-    Grammar.between(
-      Grammar.literal("("),
-      Grammar.literal(")"),
-      Grammar.map(Grammar.struct({ ws1: skipWs, inner: query, ws2: skipWs }), {
-        to: ({ inner }) => inner,
-        from: (inner) => ({ ws1: "", inner, ws2: "" }),
-      }),
-    ),
-    {
-      to: (inner): Group => ({ kind: "group", inner }),
-      from: (g) => g.inner,
-    },
+const group: Grammar.Grammar<Group> = Grammar.mapSchema(
+  Grammar.between(
+    Grammar.literal("("),
+    Grammar.literal(")"),
+    Grammar.map(Grammar.struct({ ws1: skipWs, inner: query, ws2: skipWs }), {
+      to: ({ inner }) => inner,
+      from: (inner) => ({ ws1: "", inner, ws2: "" }),
+    }),
   ),
-  (v) => v.kind === "group",
+  GroupSchema,
+  {
+    to: (inner): Group => ({ kind: "group", inner }),
+    from: (g) => g.inner,
+  },
 )
 
-const termWord = Grammar.guard(
-  Grammar.map(Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term"), {
-    to: (value): Term => ({ kind: "term", quoted: false, value }),
+const termWord: Grammar.Grammar<Term> = Grammar.mapSchema(
+  Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term"),
+  TermWordSchema,
+  {
+    to: (value): typeof TermWordSchema.Type => ({ kind: "term", quoted: false, value }),
     from: (t) => t.value,
-  }),
-  (v) => v.kind === "term" && !v.quoted,
+  },
 )
 
-const termQuoted = Grammar.guard(
-  Grammar.map(doubleQuoted, {
-    to: (value): Term => ({ kind: "term", quoted: true, value }),
-    from: (t) => t.value,
-  }),
-  (v) => v.kind === "term" && v.quoted,
-)
+const termQuoted: Grammar.Grammar<Term> = Grammar.mapSchema(doubleQuoted, TermQuotedSchema, {
+  to: (value): typeof TermQuotedSchema.Type => ({ kind: "term", quoted: true, value }),
+  from: (t) => t.value,
+})
 
 const atom: Grammar.Grammar<Query> = Grammar.choice(qualifier, group, termQuoted, termWord)
 
@@ -171,14 +225,13 @@ const notExpr: Grammar.Grammar<Query> = Grammar.lazy(() => Grammar.choice(notBra
   name: "not",
 })
 
-const notBranch: Grammar.Grammar<Not> = Grammar.guard(
-  Grammar.attempt(
-    Grammar.map(Grammar.struct({ kw: Grammar.literal("NOT"), ws, inner: notExpr }), {
-      to: ({ inner }): Not => ({ kind: "not", inner }),
-      from: (n) => ({ kw: "NOT" as const, ws: " ", inner: n.inner }),
-    }),
-  ),
-  (v) => v.kind === "not",
+const notBranch: Grammar.Grammar<Not> = Grammar.mapSchema(
+  Grammar.attempt(Grammar.struct({ kw: Grammar.literal("NOT"), ws, inner: notExpr })),
+  NotSchema,
+  {
+    to: ({ inner }): Not => ({ kind: "not", inner }),
+    from: (n) => ({ kw: "NOT" as const, ws: " ", inner: n.inner }),
+  },
 )
 
 const restAfter = <A>(
@@ -379,52 +432,6 @@ const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> => {
   return issues
 }
 
-// AST schema: Encoded/Type = Query so Grammar.toSchema is typed (not Schema.Unknown).
-const QualifierValueSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("compare"),
-    op: Schema.Literals([">", ">=", "<", "<="]),
-    value: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("range"),
-    from: Schema.UndefinedOr(Schema.String),
-    to: Schema.UndefinedOr(Schema.String),
-  }),
-])
-
-const QuerySchema: Schema.Codec<Query> = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("term"),
-    quoted: Schema.Boolean,
-    value: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("qualifier"),
-    negate: Schema.Boolean,
-    key: Schema.String,
-    value: QualifierValueSchema,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("not"),
-    inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("and"),
-    parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("or"),
-    parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("group"),
-    inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
-  }),
-])
-
 const ValidGithubQuery = Grammar.toSchema(whole, QuerySchema, { identifier: "GithubQuery" }).check(
   Schema.makeFilter(catalogIssues),
 )
@@ -445,7 +452,7 @@ const samples = [
   "repo:notasluginthere",
   "is:pr (unclosed",
   "is:",
-] as const
+]
 
 Effect.all(
   samples.map((source) =>

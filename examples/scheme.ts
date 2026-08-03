@@ -1,55 +1,90 @@
 /**
  * Scheme S-expressions: grammar owns shape; Schema catalog owns special-form arity.
  * Minimal subset: numbers, strings, booleans, symbols, lists, and quote.
+ *
+ * The schemas are the single source of truth for the AST: atom types are
+ * derived from them, and `Grammar.mapSchema` reuses them as print-time guards
+ * instead of hand-written `kind` checks.
  */
-import { Console, Effect, Schema, SchemaIssue } from "effect"
+import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/grammar.ts"
 
-type NumberAtom = { readonly kind: "number"; readonly value: number }
-type StringAtom = { readonly kind: "string"; readonly value: string }
-type BooleanAtom = { readonly kind: "boolean"; readonly value: boolean }
-type SymbolAtom = { readonly kind: "symbol"; readonly value: string }
-type Atom = NumberAtom | StringAtom | BooleanAtom | SymbolAtom
+// --- AST schemas ---
 
+const NumberAtom = Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite })
+const StringAtom = Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String })
+const BooleanAtom = Schema.Struct({ kind: Schema.Literal("boolean"), value: Schema.Boolean })
+const SymbolAtom = Schema.Struct({ kind: Schema.Literal("symbol"), value: Schema.String })
+
+const AtomSchema = Schema.Union([NumberAtom, StringAtom, BooleanAtom, SymbolAtom])
+
+type Atom = typeof AtomSchema.Type
+
+// The recursive variants can't be derived from their own schemas — declared once, by hand.
 type List = { readonly kind: "list"; readonly elements: ReadonlyArray<Expr> }
 type Quote = { readonly kind: "quote"; readonly inner: Expr }
 type Expr = Atom | List | Quote
 
-const numberAtom = Grammar.guard(
-  Grammar.map(Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")), {
-    to: (raw): NumberAtom => ({ kind: "number", value: Number(raw) }),
+const ListSchema: Schema.Codec<List> = Schema.Struct({
+  kind: Schema.Literal("list"),
+  elements: Schema.Array(Schema.suspend((): Schema.Codec<Expr> => ExprSchema)),
+})
+
+const QuoteSchema: Schema.Codec<Quote> = Schema.Struct({
+  kind: Schema.Literal("quote"),
+  inner: Schema.suspend((): Schema.Codec<Expr> => ExprSchema),
+})
+
+const ExprSchema: Schema.Codec<Expr> = Schema.Union([
+  NumberAtom,
+  StringAtom,
+  BooleanAtom,
+  SymbolAtom,
+  ListSchema,
+  QuoteSchema,
+])
+
+// --- grammar ---
+
+const numberAtom = Grammar.mapSchema(
+  Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")),
+  NumberAtom,
+  {
+    to: (raw): typeof NumberAtom.Type => ({ kind: "number", value: Number(raw) }),
     from: (n) => String(n.value),
-  }),
-  (v) => v.kind === "number",
+  },
 )
 
-const stringAtom = Grammar.guard(
-  Grammar.map(Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")), {
-    to: (raw): StringAtom => ({ kind: "string", value: JSON.parse(raw) }),
+const stringAtom = Grammar.mapSchema(
+  Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")),
+  StringAtom,
+  {
+    to: (raw): typeof StringAtom.Type => ({ kind: "string", value: JSON.parse(raw) }),
     from: (s) => JSON.stringify(s.value),
-  }),
-  (v) => v.kind === "string",
+  },
 )
 
-const booleanAtom = Grammar.guard(
-  Grammar.map(Grammar.lexeme(Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean")), {
-    to: (raw): BooleanAtom => ({
+const booleanAtom = Grammar.mapSchema(
+  Grammar.lexeme(Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean")),
+  BooleanAtom,
+  {
+    to: (raw): typeof BooleanAtom.Type => ({
       kind: "boolean",
       value: raw === "#t" || raw === "#true",
     }),
     from: (b) => (b.value ? "#t" : "#f"),
-  }),
-  (v) => v.kind === "boolean",
+  },
 )
 
 // After numbers/booleans; excludes whitespace, delimiters, and string quotes.
-const symbolAtom = Grammar.guard(
-  Grammar.map(Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")), {
-    to: (value): SymbolAtom => ({ kind: "symbol", value }),
+const symbolAtom = Grammar.mapSchema(
+  Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")),
+  SymbolAtom,
+  {
+    to: (value): typeof SymbolAtom.Type => ({ kind: "symbol", value }),
     from: (s) => s.value,
-  }),
-  (v) => v.kind === "symbol",
+  },
 )
 
 const atom: Grammar.Grammar<Atom> = Grammar.choice(numberAtom, stringAtom, booleanAtom, symbolAtom)
@@ -58,20 +93,22 @@ const expr: Grammar.Grammar<Expr> = Grammar.lazy(() => Grammar.choice(quoteExpr,
   name: "expr",
 })
 
-const list: Grammar.Grammar<List> = Grammar.guard(
-  Grammar.map(Grammar.between(Grammar.symbol("("), Grammar.symbol(")"), Grammar.many(expr)), {
+const list: Grammar.Grammar<List> = Grammar.mapSchema(
+  Grammar.between(Grammar.symbol("("), Grammar.symbol(")"), Grammar.many(expr)),
+  ListSchema,
+  {
     to: (elements): List => ({ kind: "list", elements }),
     from: (l) => [...l.elements],
-  }),
-  (v) => v.kind === "list",
+  },
 )
 
-const quoteExpr: Grammar.Grammar<Quote> = Grammar.guard(
-  Grammar.map(Grammar.struct({ tick: Grammar.literal("'"), inner: expr }), {
+const quoteExpr: Grammar.Grammar<Quote> = Grammar.mapSchema(
+  Grammar.struct({ tick: Grammar.literal("'"), inner: expr }),
+  QuoteSchema,
+  {
     to: ({ inner }): Quote => ({ kind: "quote", inner }),
     from: (q) => ({ tick: "'" as const, inner: q.inner }),
-  }),
-  (v) => v.kind === "quote",
+  },
 )
 
 const document = Grammar.map(
@@ -89,14 +126,9 @@ const document = Grammar.map(
 
 // --- special-form catalog (arity only; unknown heads are free) ---
 
-interface Spec {
-  readonly min: number
-  readonly max?: number
-}
+const form = (min: number, max = Number.POSITIVE_INFINITY) => ({ min, max })
 
-const form = (min: number, max?: number): Spec => (max === undefined ? { min } : { min, max })
-
-const catalog: Record<string, Spec> = {
+const catalog: Record<string, { readonly min: number; readonly max: number }> = {
   if: form(2, 3),
   quote: form(1, 1),
   lambda: form(2),
@@ -143,46 +175,35 @@ const headSymbol = (list: List): string | undefined => {
   return head?.kind === "symbol" ? head.value : undefined
 }
 
-const catalogIssues = (e: Expr): ReadonlyArray<Schema.FilterIssue> => {
-  const issues: Array<Schema.FilterIssue> = []
-  for (const node of walkLists(e)) {
-    const name = headSymbol(node)
-    if (name === undefined) continue
-    const spec = catalog[name]
-    if (spec === undefined) continue
-    const arity = node.elements.length - 1
-    if (arity < spec.min) {
-      issues.push({
-        path: [name],
-        issue: `expected at least ${spec.min} argument(s), got ${arity}`,
-      })
-      continue
-    }
-    if (spec.max !== undefined && arity > spec.max) {
-      issues.push({
-        path: [name],
-        issue: `expected at most ${spec.max} argument(s), got ${arity}`,
-      })
-    }
+const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
+  const name = headSymbol(node)
+  const spec = name === undefined ? undefined : catalog[name]
+  if (name === undefined || spec === undefined) return Result.failVoid
+  const arity = node.elements.length - 1
+  if (arity < spec.min) {
+    return Result.succeed({
+      path: [name],
+      issue: `expected at least ${spec.min} argument(s), got ${arity}`,
+    })
   }
-  return issues
+  if (arity > spec.max) {
+    return Result.succeed({
+      path: [name],
+      issue: `expected at most ${spec.max} argument(s), got ${arity}`,
+    })
+  }
+  return Result.failVoid
 }
 
-// AST schema: Encoded/Type = Expr so Grammar.toSchema is typed (not Schema.Unknown).
-const ExprSchema: Schema.Codec<Expr> = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite }),
-  Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("boolean"), value: Schema.Boolean }),
-  Schema.Struct({ kind: Schema.Literal("symbol"), value: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("list"),
-    elements: Schema.Array(Schema.suspend((): Schema.Codec<Expr> => ExprSchema)),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("quote"),
-    inner: Schema.suspend((): Schema.Codec<Expr> => ExprSchema),
-  }),
-])
+const catalogIssues = Schema.makeFilter((e: Expr) =>
+  Array.from(Iterable.filterMap(walkLists(e), arityIssue)),
+)
+
+const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme" }).check(
+  catalogIssues,
+)
+
+// --- sample run ---
 
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
@@ -213,10 +234,6 @@ const report = (source: string, detail: string, ok: boolean) => {
   return `${label}  ${input}\n${body}`
 }
 
-const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme" }).check(
-  Schema.makeFilter(catalogIssues),
-)
-
 const samples = [
   "(+ 1 2)",
   '(define x "hello")',
@@ -234,16 +251,15 @@ const samples = [
   "(define)",
   "( unclosed",
   "",
-] as const
+]
 
-Effect.all(
-  samples.map((source) =>
-    Schema.decodeUnknownEffect(ValidScheme)(source).pipe(
-      Effect.match({
-        onSuccess: (value) => report(source, show(value), true),
-        onFailure: (err) => report(source, formatIssue(err.issue), false),
-      }),
-      Effect.flatMap(Console.log),
-    ),
-  ),
-).pipe(Effect.runFork)
+const check = (source: string) =>
+  Schema.decodeUnknownEffect(ValidScheme)(source).pipe(
+    Effect.match({
+      onSuccess: (value) => report(source, show(value), true),
+      onFailure: (err) => report(source, formatIssue(err.issue), false),
+    }),
+    Effect.flatMap(Console.log),
+  )
+
+Effect.runFork(Effect.forEach(samples, check, { discard: true }))
