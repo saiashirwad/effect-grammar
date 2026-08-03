@@ -379,18 +379,60 @@ const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> => {
   return issues
 }
 
-const ValidGithubQuery = Grammar.toSchema(whole, Schema.Unknown, {
-  identifier: "GithubQuery",
-}).check(
-  Schema.makeFilter((q: unknown) => catalogIssues(q as Query), { identifier: "ValidGithubQuery" }),
+// AST schema: Encoded/Type = Query so Grammar.toSchema is typed (not Schema.Unknown).
+const QualifierValueSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("compare"),
+    op: Schema.Literals([">", ">=", "<", "<="]),
+    value: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("range"),
+    from: Schema.UndefinedOr(Schema.String),
+    to: Schema.UndefinedOr(Schema.String),
+  }),
+])
+
+const QuerySchema: Schema.Codec<Query> = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("term"),
+    quoted: Schema.Boolean,
+    value: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("qualifier"),
+    negate: Schema.Boolean,
+    key: Schema.String,
+    value: QualifierValueSchema,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("not"),
+    inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("and"),
+    parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("or"),
+    parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("group"),
+    inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+  }),
+])
+
+const ValidGithubQuery = Grammar.toSchema(whole, QuerySchema, { identifier: "GithubQuery" }).check(
+  Schema.makeFilter(catalogIssues, { identifier: "ValidGithubQuery" }),
 )
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
 Effect.gen(function* () {
-  yield* Console.log(`grammar:\n${Grammar.render(whole)}\n`)
-
   for (const source of [
     "is:pr author:foo label:bug",
     "(author:foo OR author:bar) is:pr -is:archived",
@@ -406,19 +448,10 @@ Effect.gen(function* () {
     "is:",
   ]) {
     const r = yield* Effect.result(Schema.decodeUnknownEffect(ValidGithubQuery)(source))
-    yield* Console.log(
-      r._tag === "Success"
-        ? `decode ${json(source)}\n  →  ${json(r.success)}`
-        : `decode ${json(source)}\n  →  ${formatIssue(r.failure.issue)}`,
-    )
+    if (r._tag === "Success") {
+      yield* Console.log(`decode ${json(source)}\n  →  ${json(r.success)}`)
+    } else {
+      yield* Console.log(`decode ${json(source)}\n  →  ${formatIssue(r.failure.issue)}`)
+    }
   }
-
-  const value = yield* Schema.decodeUnknownEffect(ValidGithubQuery)(
-    "is:pr (author:foo OR author:bar) -label:wip",
-  )
-  const encoded = yield* Schema.encodeEffect(ValidGithubQuery)(value)
-  const roundTripped = yield* Schema.decodeUnknownEffect(ValidGithubQuery)(encoded)
-  yield* Console.log(
-    `\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`,
-  )
 }).pipe(Effect.runFork)
