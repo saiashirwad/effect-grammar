@@ -66,14 +66,15 @@ const jsonObject: Grammar.Grammar<{ [key: string]: JsonValue }> = Grammar.guard(
   (v) => v !== null && typeof v === "object" && !Array.isArray(v),
 )
 
+const Json = Grammar.toSchema(jsonValue, Schema.Unknown, { identifier: "Json" })
+
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const document = `{ "name": "ada", "age": 36, "tags": ["math", "code"], "address": { "city": "london", "zip": null } }`
 
 Effect.gen(function* () {
-  yield* Console.log(`grammar: ${Grammar.render(jsonValue)}\n`)
-  const parsed = yield* Grammar.parse(document, jsonValue)
-  yield* Console.log(`parse ${document}\n  →  ${json(parsed)}`)
-  const printed = yield* Grammar.print(jsonValue, parsed)
-  yield* Console.log(`print\n  →  ${printed}`)
+  const decoded = yield* Schema.decodeUnknownEffect(Json)(document)
+  yield* Console.log(`decode  →  ${json(decoded)}`)
+  const encoded = yield* Schema.encodeEffect(Json)(decoded)
+  yield* Console.log(`encode  →  ${encoded}`)
 }).pipe(Effect.runSync)
