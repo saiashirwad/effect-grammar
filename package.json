@@ -1,6 +1,6 @@
 {
   "name": "effect-grammar",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Effect Schema, but for text formats: one grammar yields a parser, printer, rendered form, and Schema",
   "keywords": [
     "bidirectional",
