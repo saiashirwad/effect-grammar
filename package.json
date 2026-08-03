@@ -35,6 +35,9 @@
       "import": "./dist/parser.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -48,10 +51,13 @@
     "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
     "@effect/language-service": "^0.87.1",
     "@effect/tsgo": "0.24.3",
     "@types/node": "^26.1.2",
     "oxfmt": "^0.61.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "packageManager": "pnpm@11.17.0+sha512.cca3cea332ad254bb84145f966d19f4879615210346fc92c79a047f23a0d7b3cca3c3792f0076ba1f1831d277efbcf0a9119b31a9a60eca7fb3d6231f331ef72"
 }

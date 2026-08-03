@@ -83,3 +83,14 @@ const ip = Effect.gen(function* () {
 Effect.runSync(parse("192.168.1.1", ip))
 // { _tag: "Success", value: [192, 168, 1, 1] }
 ```
+
+## Releasing
+
+Add a changeset for a user-facing change:
+
+```bash
+pnpm changeset
+```
+
+After the change lands on `main`, the release workflow opens a version pull
+request. Merging that pull request publishes the package to npm.
