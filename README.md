@@ -54,8 +54,6 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 }) // "https://e
 
 ## Parse-only with `Effect.gen`
 
-Write plain Effect programs over the input. Custom errors are yielded failures.
-
 ```ts
 import { Effect, Schema } from "effect"
 import { char, digit, endOfInput, many, parse } from "effect-grammar/parser"
@@ -89,14 +87,3 @@ Effect.runSync(parse("192.168.1.1", ip))
 
 Parsing is strict by default, so `parse` rejects trailing input. Use
 `parsePrefix` when the input may contain content after the parsed value.
-
-## Releasing
-
-Add a changeset for a user-facing change:
-
-```bash
-pnpm changeset
-```
-
-After the change lands on `main`, the release workflow opens a version pull
-request. Merging that pull request publishes the package to npm.
