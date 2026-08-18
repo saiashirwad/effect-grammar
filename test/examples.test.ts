@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 
-import { describe, it } from "vitest"
+import { it } from "@effect/vitest"
+import { Effect } from "effect"
+import { describe } from "vitest"
 
 // Node built-ins via getBuiltinModule — keeps the Effect language-service
 // nodeBuiltinImport diagnostic quiet in tests (subprocess smoke is intentional).
@@ -19,25 +21,27 @@ const examples = readdirSync(examplesDir)
 
 describe("examples smoke", () => {
   for (const file of examples) {
-    it(`${file} exits 0`, () => {
-      const result = spawnSync(process.execPath, [path.join(examplesDir, file)], {
-        cwd: root,
-        encoding: "utf8",
-        env: process.env,
-        timeout: 30_000,
-      })
-      assert.equal(
-        result.status,
-        0,
-        [
-          `${file} exited ${result.status}`,
-          result.stderr ? `stderr:\n${result.stderr}` : "",
-          result.stdout ? `stdout (tail):\n${result.stdout.slice(-500)}` : "",
-          result.error ? `error: ${result.error.message}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      )
-    })
+    it.effect(`${file} exits 0`, () =>
+      Effect.sync(() => {
+        const result = spawnSync(process.execPath, [path.join(examplesDir, file)], {
+          cwd: root,
+          encoding: "utf8",
+          env: process.env,
+          timeout: 30_000,
+        })
+        assert.equal(
+          result.status,
+          0,
+          [
+            `${file} exited ${result.status}`,
+            result.stderr ? `stderr:\n${result.stderr}` : "",
+            result.stdout ? `stdout (tail):\n${result.stdout.slice(-500)}` : "",
+            result.error ? `error: ${result.error.message}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        )
+      }),
+    )
   }
 })

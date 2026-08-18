@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 
-import { it as effectIt } from "@effect/vitest"
+import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
-import { describe, it } from "vitest"
+import { describe } from "vitest"
 
 import * as Grammar from "../src/grammar.ts"
 
@@ -70,30 +70,36 @@ const nestedArbitrary = FastCheck.letrec<{ nested: Nested }>((tie) => ({
 })).nested
 
 describe("round-trip properties", () => {
-  it("holds for deterministic integer boundaries", () => {
-    assertRoundTrips("integer", Grammar.integer, integerValues)
-  })
+  it.effect("holds for deterministic integer boundaries", () =>
+    Effect.sync(() => {
+      assertRoundTrips("integer", Grammar.integer, integerValues)
+    }),
+  )
 
-  it("holds for deterministic separated lists", () => {
-    assertRoundTrips(
-      "integer list",
-      Grammar.sepBy(Grammar.integer, Grammar.literal(",")),
-      listValues,
-    )
-  })
+  it.effect("holds for deterministic separated lists", () =>
+    Effect.sync(() => {
+      assertRoundTrips(
+        "integer list",
+        Grammar.sepBy(Grammar.integer, Grammar.literal(",")),
+        listValues,
+      )
+    }),
+  )
 
-  it("holds for deterministic lazy nested values", () => {
-    assertRoundTrips("nested", nested, nestedValues)
-  })
+  it.effect("holds for deterministic lazy nested values", () =>
+    Effect.sync(() => {
+      assertRoundTrips("nested", nested, nestedValues)
+    }),
+  )
 
-  effectIt.prop(
+  it.prop(
     "holds for arbitrary integer values",
     [FastCheck.integer({ min: -1_000_000, max: 1_000_000 })],
     ([value]) => assertRoundTrips("integer", Grammar.integer, [value]),
     { fastCheck: { numRuns: 64 } },
   )
 
-  effectIt.prop(
+  it.prop(
     "holds for arbitrary separated lists",
     [FastCheck.array(FastCheck.integer({ min: -200, max: 200 }), { maxLength: 6 })],
     ([value]) =>
@@ -103,7 +109,7 @@ describe("round-trip properties", () => {
     { fastCheck: { numRuns: 64 } },
   )
 
-  effectIt.prop(
+  it.prop(
     "holds for arbitrary lazy nested values",
     [nestedArbitrary],
     ([value]) => assertRoundTrips("nested", nested, [value]),
