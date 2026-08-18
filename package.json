@@ -42,7 +42,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test 'test/**/*.test.ts'",
+    "test": "vitest run",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "prepare": "effect-tsgo patch",
@@ -56,9 +56,11 @@
     "@changesets/cli": "^2.31.0",
     "@effect/language-service": "^0.87.1",
     "@effect/tsgo": "0.24.3",
+    "@effect/vitest": "4.0.0-beta.102",
     "@types/node": "^26.1.2",
     "oxfmt": "^0.61.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "4.1.10"
   },
   "engines": {
     "node": ">=24.0.0"
