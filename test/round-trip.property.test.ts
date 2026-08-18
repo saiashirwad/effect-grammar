@@ -32,10 +32,7 @@ const listValues = Array.from({ length: 64 }, (_, seed) =>
 
 const nested: Grammar.Grammar<Nested> = Grammar.lazy(() =>
   Grammar.choice(
-    Grammar.guard(
-      Grammar.map(Grammar.regex(/\d+/, "digits"), { to: Number, from: String }),
-      (value) => typeof value === "number",
-    ),
+    Grammar.guard(Grammar.integer, (value) => typeof value === "number"),
     Grammar.between(
       Grammar.symbol("["),
       Grammar.symbol("]"),
@@ -47,10 +44,12 @@ const nested: Grammar.Grammar<Nested> = Grammar.lazy(() =>
 const nestedValues: Array<Nested> = [
   0,
   1,
+  -1,
   [],
   [1],
   [1, 2, 3],
   [1, [2, [3]]],
+  [-1, [2, [-3]]],
   [[1], [], [2, [3, 4]]],
   ...Array.from({ length: 32 }, (_, seed): Nested => {
     const build = (depth: number, value: number): Nested =>
