@@ -22,7 +22,8 @@
     "url": "git+https://github.com/saiashirwad/effect-grammar.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "type": "module",
   "exports": {
