@@ -25,6 +25,12 @@ import {
   parseStream as parseStreamEffect,
   streamElements as streamElementsEffect,
 } from "./stream.ts"
+import {
+  InvalidCardinalityError,
+  EvaluationError,
+  InvalidIntegerError,
+  validateNonNegativeSafeInteger,
+} from "./validation.ts"
 
 export class PrintError extends Schema.TaggedErrorClass<PrintError>()("PrintError", {
   message: Schema.String,
@@ -188,7 +194,12 @@ export const choice = <Gs extends readonly [Grammar<any>, ...Array<Grammar<any>>
 export const many = <A>(
   inner: Grammar<A>,
   opts?: { readonly atLeast?: number },
-): Grammar<Array<A>> => makeGrammar({ _tag: "Many", inner, atLeast: opts?.atLeast ?? 0 })
+): Grammar<Array<A>> =>
+  makeGrammar({
+    _tag: "Many",
+    inner,
+    atLeast: validateNonNegativeSafeInteger("many", opts?.atLeast ?? 0),
+  })
 
 export const sepBy = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> =>
   makeGrammar({
@@ -296,14 +307,15 @@ export const bind = <A, B>(
 
 /** Run `inner` exactly `n` times, collecting the results. */
 export const count = <A>(inner: Grammar<A>, n: number): Grammar<Array<A>> => {
-  if (!Number.isSafeInteger(n) || n < 0) {
-    throw new RangeError("count requires a non-negative safe integer")
-  }
-  return makeGrammar({ _tag: "Count", inner, n })
+  return makeGrammar({ _tag: "Count", inner, n: validateNonNegativeSafeInteger("count", n) })
 }
 
 export const integer: Grammar<number> = map(label("integer", regex(/-?\d+/, "integer")), {
-  to: Number,
+  to: (value) => {
+    const integer = Number(value)
+    if (!Number.isSafeInteger(integer)) throw new InvalidIntegerError()
+    return integer
+  },
   from: String,
 })
 
@@ -352,7 +364,17 @@ const interpret = (g: Grammar<any>): Effect.Effect<any, ParseError | UpstreamErr
         return m.value
       }
       case "Map": {
-        return g.to(yield* interpret(g.inner))
+        const value = yield* interpret(g.inner)
+        return yield* Effect.try({
+          try: () => g.to(value),
+          catch: (cause) => new EvaluationError({ cause }),
+        }).pipe(
+          Effect.catchTag("EvaluationError", (error) =>
+            error.cause instanceof InvalidIntegerError
+              ? failHere("integer")
+              : Effect.die(error.cause),
+          ),
+        )
       }
       case "Struct": {
         const out: Record<string, any> = {}
@@ -408,7 +430,17 @@ const interpret = (g: Grammar<any>): Effect.Effect<any, ParseError | UpstreamErr
       }
       case "Bind": {
         const a = yield* interpret(g.inner)
-        return yield* interpret(g.to(a))
+        const next = yield* Effect.try({
+          try: () => g.to(a),
+          catch: (cause) => new EvaluationError({ cause }),
+        }).pipe(
+          Effect.catchTag("EvaluationError", (error) =>
+            error.cause instanceof InvalidCardinalityError
+              ? failHere("count")
+              : Effect.die(error.cause),
+          ),
+        )
+        return yield* interpret(next)
       }
       case "Count": {
         const out: Array<any> = []

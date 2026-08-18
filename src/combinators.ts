@@ -2,6 +2,7 @@ import { Effect, Option, Schema } from "effect"
 
 import { ParseError } from "./error.ts"
 import { failHere, getPos, matchRegex, peek, seek } from "./state.ts"
+import { validateNonNegativeSafeInteger } from "./validation.ts"
 
 export const satisfy = (pred: (c: string) => boolean, expected: string) =>
   Effect.gen(function* () {
@@ -75,7 +76,7 @@ export const attempt = <A, E, R>(p: Effect.Effect<A, E, R>) =>
 export const many = <A, E, R>(p: Effect.Effect<A, E, R>, opts?: { atLeast?: number }) =>
   Effect.gen(function* () {
     const out: Array<A> = []
-    const atLeast = opts?.atLeast ?? 0
+    const atLeast = validateNonNegativeSafeInteger("many", opts?.atLeast ?? 0)
     for (let i = 0; i < atLeast; i++) out.push(yield* p)
     while (true) {
       const mark = yield* getPos

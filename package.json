@@ -42,10 +42,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --dir test",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "prepare": "effect-tsgo patch",
+    "prepare": "./scripts/prepare-effect.sh && effect-tsgo patch",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

@@ -231,6 +231,14 @@ describe("many", () => {
     }),
   )
 
+  it.effect("rejects invalid atLeast values", () =>
+    Effect.sync(() => {
+      for (const atLeast of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        assert.throws(() => Grammar.many(Grammar.literal("a"), { atLeast }), RangeError)
+      }
+    }),
+  )
+
   it.effect("prints by concatenating elements", () =>
     Effect.sync(() => {
       assert.equal(printOk(g, ["a", "a"]), "aa")
@@ -536,6 +544,13 @@ describe("integer", () => {
       assertRoundTrip(Grammar.integer, -3)
     }),
   )
+
+  it.effect("rejects unsafe integers", () =>
+    Effect.sync(() => {
+      const e = parseFail("9007199254740992", Grammar.integer)
+      assert.equal(e.expected, "integer")
+    }),
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -674,6 +689,13 @@ describe("bind", () => {
       const e = parseFail("3:ab", netish)
       assert.equal(e.pos, 4)
       assert.equal(e.expected, "char")
+    }),
+  )
+
+  it.effect("turns an invalid dependent count into a parse failure", () =>
+    Effect.sync(() => {
+      const e = parseFail("-1:x", netish)
+      assert.equal(e.expected, "count")
     }),
   )
 
@@ -1047,7 +1069,6 @@ describe("render", () => {
       )
       assert.equal(Grammar.render(Grammar.many(Grammar.literal("x"))), '("x")*')
       assert.equal(Grammar.render(Grammar.many(Grammar.literal("x"), { atLeast: 1 })), '("x")+')
-      assert.equal(Grammar.render(Grammar.many(Grammar.literal("x"), { atLeast: 0.5 })), '("x")+')
       assert.equal(Grammar.render(Grammar.many(Grammar.literal("x"), { atLeast: 2 })), '("x"){2,}')
       assert.equal(Grammar.render(Grammar.optional(Grammar.literal("x"))), '("x")?')
       assert.equal(Grammar.render(Grammar.count(Grammar.literal("x"), 2)), '("x"){2}')

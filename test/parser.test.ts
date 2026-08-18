@@ -62,6 +62,15 @@ describe("parser combinators", () => {
     }),
   )
 
+  it.effect("rejects invalid atLeast values", () =>
+    Effect.sync(() => {
+      assert.throws(
+        () => Effect.runSync(parse("", many(Effect.succeed("x"), { atLeast: Number.NaN }))),
+        RangeError,
+      )
+    }),
+  )
+
   it.effect("regex tolerates a shared /g RegExp", () =>
     Effect.sync(() => {
       const re = /\d/g
