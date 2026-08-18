@@ -11,6 +11,16 @@ pnpm add effect-grammar
 
 Depends on Effect v4.
 
+## Compatibility policy
+
+This package pins `effect` to `4.0.0-beta.102` because the current v4 release
+candidate line is not source-compatible with the package yet. In particular, the
+current RC removes the `Schema.TaggedErrorClass` and
+`Schema.UnknownFromJsonString` APIs used by the implementation. The exact pin
+will be reconsidered when Effect provides compatible replacements or this
+package intentionally migrates to the RC API, with the full test, typecheck,
+format, and build checks run against the new lockfile.
+
 ## Grammar
 
 Define an HTTPS endpoint once, then parse it, print it, or derive a validated
