@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
-import { describe, it } from "node:test"
 
+import { it as effectIt } from "@effect/vitest"
 import { Effect } from "effect"
+import * as FastCheck from "effect/testing/FastCheck"
+import { describe, it } from "vitest"
 
 import * as Grammar from "../src/grammar.ts"
 
@@ -60,12 +62,19 @@ const nestedValues: Array<Nested> = [
   }),
 ]
 
+const nestedArbitrary = FastCheck.letrec<{ nested: Nested }>((tie) => ({
+  nested: FastCheck.oneof(
+    FastCheck.integer({ min: -100, max: 100 }),
+    FastCheck.array(tie("nested"), { maxLength: 3 }),
+  ),
+})).nested
+
 describe("round-trip properties", () => {
-  it("holds for generated integer values", () => {
+  it("holds for deterministic integer boundaries", () => {
     assertRoundTrips("integer", Grammar.integer, integerValues)
   })
 
-  it("holds for generated separated lists", () => {
+  it("holds for deterministic separated lists", () => {
     assertRoundTrips(
       "integer list",
       Grammar.sepBy(Grammar.integer, Grammar.literal(",")),
@@ -73,7 +82,31 @@ describe("round-trip properties", () => {
     )
   })
 
-  it("holds for generated lazy nested values", () => {
+  it("holds for deterministic lazy nested values", () => {
     assertRoundTrips("nested", nested, nestedValues)
   })
+
+  effectIt.prop(
+    "holds for arbitrary integer values",
+    [FastCheck.integer({ min: -1_000_000, max: 1_000_000 })],
+    ([value]) => assertRoundTrips("integer", Grammar.integer, [value]),
+    { fastCheck: { numRuns: 64 } },
+  )
+
+  effectIt.prop(
+    "holds for arbitrary separated lists",
+    [FastCheck.array(FastCheck.integer({ min: -200, max: 200 }), { maxLength: 6 })],
+    ([value]) =>
+      assertRoundTrips("integer list", Grammar.sepBy(Grammar.integer, Grammar.literal(",")), [
+        value,
+      ]),
+    { fastCheck: { numRuns: 64 } },
+  )
+
+  effectIt.prop(
+    "holds for arbitrary lazy nested values",
+    [nestedArbitrary],
+    ([value]) => assertRoundTrips("nested", nested, [value]),
+    { fastCheck: { numRuns: 64 } },
+  )
 })

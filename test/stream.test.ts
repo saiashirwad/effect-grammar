@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
-import { describe, it } from "node:test"
 
-import { Effect, Ref, Schema, Stream } from "effect"
+import { expect, it as effectIt } from "@effect/vitest"
+import { Cause, Effect, Ref, Schema, Stream } from "effect"
+import { describe, it } from "vitest"
 
 import { char, endOfInput, regex as parseRegex } from "../src/combinators.ts"
 import { ParseError, UpstreamError } from "../src/error.ts"
@@ -84,10 +85,10 @@ describe("parseStream", () => {
 })
 
 describe("released parser state", () => {
-  it("drops consumed input while preserving the cursor", () => {
-    const state = Effect.runSync(makeStringState("abc"))
-    const snapshot = Effect.runSync(
-      Effect.gen(function* () {
+  effectIt.effect("drops consumed input while preserving the cursor", () =>
+    Effect.gen(function* () {
+      const state = yield* makeStringState("abc")
+      const snapshot = yield* Effect.gen(function* () {
         yield* seek(2)
         yield* release
         const current = yield* ParseState
@@ -97,20 +98,26 @@ describe("released parser state", () => {
           peek: yield* peek,
           pos: yield* Ref.get(current.pos),
         }
-      }).pipe(Effect.provideService(ParseState, state)),
-    )
+      }).pipe(Effect.provideService(ParseState, state))
 
-    assert.deepEqual(snapshot, { base: 2, buffer: "c", peek: "c", pos: 2 })
-  })
+      expect(snapshot).toStrictEqual({ base: 2, buffer: "c", peek: "c", pos: 2 })
+    }),
+  )
 
-  it("defects when rewinding before released input", () => {
-    const state = Effect.runSync(makeStringState("abc"))
-    const rewind = Effect.gen(function* () {
-      yield* seek(2)
-      yield* release
-      yield* seek(1)
-    }).pipe(Effect.provideService(ParseState, state))
+  effectIt.effect("defects when rewinding before released input", () =>
+    Effect.gen(function* () {
+      const state = yield* makeStringState("abc")
+      const rewind = Effect.gen(function* () {
+        yield* seek(2)
+        yield* release
+        yield* seek(1)
+      }).pipe(Effect.provideService(ParseState, state))
 
-    assert.throws(() => Effect.runSync(rewind), /cannot rewind to position 1/)
-  })
+      const result = yield* Effect.exit(Effect.sandbox(rewind))
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(Cause.pretty(result.cause)).toMatch(/cannot rewind to position 1/)
+      }
+    }),
+  )
 })

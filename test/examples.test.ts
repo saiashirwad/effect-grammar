@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 // Node built-ins via getBuiltinModule — keeps the Effect language-service
 // nodeBuiltinImport diagnostic quiet in tests (subprocess smoke is intentional).

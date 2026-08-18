@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
-import { describe, it } from "node:test"
 
 import { Effect, Schema } from "effect"
+import { describe, it } from "vitest"
 
 import * as Grammar from "../src/grammar.ts"
 import {
