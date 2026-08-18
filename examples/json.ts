@@ -21,8 +21,10 @@ const jsonNumber = Grammar.mapSchema(
   Schema.Finite,
   { to: Number, from: String },
 )
-const jsonString: Grammar.Grammar<string> = Grammar.mapSchema(
-  Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")),
+export const jsonString: Grammar.Grammar<string> = Grammar.mapSchema(
+  Grammar.lexeme(
+    Grammar.regex(/"(?:[^"\\\u0000-\u001F]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
+  ),
   Schema.String,
   {
     to: (s) => JSON.parse(s),
