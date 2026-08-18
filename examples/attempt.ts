@@ -1,6 +1,6 @@
-import { Console, Effect } from "effect"
+import { Console, Effect, Schema } from "effect"
 
-import { attempt, char, or_, parse, regex } from "../src/parser.ts"
+import { ParseError, attempt, char, or_, parse, regex } from "../src/parser.ts"
 
 const trueKeyword = Effect.gen(function* () {
   yield* char("t")
@@ -24,7 +24,9 @@ for (const [label, p] of [
     Console.log(
       r._tag === "Success"
         ? `${label}  →  parsed: ${JSON.stringify(r.success)}`
-        : `${label}  →  expected ${r.failure.expected} at position ${r.failure.pos}, found ${JSON.stringify(r.failure.found)}`,
+        : Schema.is(ParseError)(r.failure)
+          ? `${label}  →  expected ${r.failure.expected} at position ${r.failure.pos}, found ${JSON.stringify(r.failure.found)}`
+          : `${label}  →  upstream failure: ${String(r.failure)}`,
     ),
   )
 }
