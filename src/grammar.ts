@@ -155,73 +155,81 @@ export type Node =
   | Guard
   | Label
 
-export type Grammar<A> = Node & { readonly [typeId]?: A }
+export type Grammar<A> = Node & { readonly [typeId]: A }
+
+const makeGrammar = <A>(node: Node): Grammar<A> => node as Grammar<A>
 
 export type GrammarType<G> = G extends Grammar<infer A> ? A : never
 
-export const literal = <L extends string>(value: L): Grammar<L> => ({ _tag: "Literal", value })
+export const literal = <L extends string>(value: L): Grammar<L> =>
+  makeGrammar({ _tag: "Literal", value })
 
 /** Clone the pattern and drop `g`/`y` so `lastIndex` and sticky start never affect matching. */
-export const regex = (re: RegExp, expected: string): Grammar<string> => ({
-  _tag: "Regex",
-  re: new RegExp(re.source, re.flags.replace(/[gy]/g, "")),
-  expected,
-})
+export const regex = (re: RegExp, expected: string): Grammar<string> =>
+  makeGrammar({
+    _tag: "Regex",
+    re: new RegExp(re.source, re.flags.replace(/[gy]/g, "")),
+    expected,
+  })
 
 export const map = <A, B>(
   inner: Grammar<A>,
   f: { readonly to: (a: A) => B; readonly from?: (b: B) => A },
-): Grammar<B> => ({ _tag: "Map", inner, to: f.to, from: f.from })
+): Grammar<B> => makeGrammar({ _tag: "Map", inner, to: f.to, from: f.from })
 
 export const struct = <F extends Record<string, Grammar<any>>>(
   fields: F,
-): Grammar<{ [K in keyof F]: GrammarType<F[K]> }> => ({ _tag: "Struct", fields })
+): Grammar<{ [K in keyof F]: GrammarType<F[K]> }> => makeGrammar({ _tag: "Struct", fields })
 
 export const choice = <Gs extends readonly [Grammar<any>, ...Array<Grammar<any>>]>(
   ...options: Gs
-): Grammar<GrammarType<Gs[number]>> => ({ _tag: "Choice", options })
+): Grammar<GrammarType<Gs[number]>> => makeGrammar({ _tag: "Choice", options })
 
 export const many = <A>(
   inner: Grammar<A>,
   opts?: { readonly atLeast?: number },
-): Grammar<Array<A>> => ({ _tag: "Many", inner, atLeast: opts?.atLeast ?? 0 })
+): Grammar<Array<A>> => makeGrammar({ _tag: "Many", inner, atLeast: opts?.atLeast ?? 0 })
 
-export const sepBy = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> => ({
-  _tag: "SepBy",
-  inner,
-  sep,
-  atLeast: 0,
-})
+export const sepBy = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> =>
+  makeGrammar({
+    _tag: "SepBy",
+    inner,
+    sep,
+    atLeast: 0,
+  })
 
 /** Like `sepBy`, but requires at least one element — the first failure propagates. */
-export const sepBy1 = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> => ({
-  _tag: "SepBy",
-  inner,
-  sep,
-  atLeast: 1,
-})
+export const sepBy1 = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> =>
+  makeGrammar({
+    _tag: "SepBy",
+    inner,
+    sep,
+    atLeast: 1,
+  })
 
-export const optional = <A>(inner: Grammar<A>): Grammar<A | undefined> => ({
-  _tag: "Optional",
-  inner,
-})
+export const optional = <A>(inner: Grammar<A>): Grammar<A | undefined> =>
+  makeGrammar({
+    _tag: "Optional",
+    inner,
+  })
 
 /**
  * Rewind on failure: if `inner` fails after consuming input, restore the
  * position so an enclosing `choice` tries its next option.
  */
-export const attempt = <A>(inner: Grammar<A>): Grammar<A> => ({ _tag: "Attempt", inner })
+export const attempt = <A>(inner: Grammar<A>): Grammar<A> => makeGrammar({ _tag: "Attempt", inner })
 
 /**
  * Print-time filter: parse runs `inner` unchanged, but printing fails with
  * `PrintError` when `pred(value)` is false — so an enclosing `choice` moves
  * on to its next option.
  */
-export const guard = <A>(inner: Grammar<A>, pred: (value: A) => boolean): Grammar<A> => ({
-  _tag: "Guard",
-  inner,
-  pred,
-})
+export const guard = <A>(inner: Grammar<A>, pred: (value: A) => boolean): Grammar<A> =>
+  makeGrammar({
+    _tag: "Guard",
+    inner,
+    pred,
+  })
 
 /**
  * {@link map} with a Schema as the value contract: the schema types the mapped
@@ -249,33 +257,32 @@ export const mapSchema = <S extends Schema.Top, A>(
  * fails without consuming input. Print is transparent; render shows
  * `<expected>` when `inner` is a raw regex.
  */
-export const label = <A>(expected: string, inner: Grammar<A>): Grammar<A> => ({
-  _tag: "Label",
-  expected,
-  inner,
-})
+export const label = <A>(expected: string, inner: Grammar<A>): Grammar<A> =>
+  makeGrammar({
+    _tag: "Label",
+    expected,
+    inner,
+  })
 
 export const fromEffect = <A>(
   eff: Effect.Effect<A, ParseError, ParseState>,
   expected: string,
-): Grammar<A> => ({ _tag: "FromEffect", eff, expected })
+): Grammar<A> => makeGrammar({ _tag: "FromEffect", eff, expected })
 
 /**
  * Defer grammar construction to first use — the building block for recursive
  * grammars. The thunk result is memoized on the node. `name` is what `render`
  * shows at the recursion point.
  */
-export const lazy = <A>(
-  thunk: () => Grammar<A>,
-  opts?: { readonly name?: string },
-): Grammar<A> => ({
-  _tag: "Lazy",
-  thunk,
-  name: opts?.name,
-})
+export const lazy = <A>(thunk: () => Grammar<A>, opts?: { readonly name?: string }): Grammar<A> =>
+  makeGrammar({
+    _tag: "Lazy",
+    thunk,
+    name: opts?.name,
+  })
 
 /** Zero-width assertion: succeeds only at end of input. Prints as "". */
-export const end: Grammar<void> = { _tag: "End" }
+export const end: Grammar<void> = makeGrammar({ _tag: "End" })
 
 /**
  * Dependent parsing: the grammar that runs next is computed from the value
@@ -285,14 +292,15 @@ export const end: Grammar<void> = { _tag: "End" }
 export const bind = <A, B>(
   inner: Grammar<A>,
   f: { readonly to: (a: A) => Grammar<B>; readonly from?: (b: B) => A },
-): Grammar<B> => ({ _tag: "Bind", inner, to: f.to, from: f.from })
+): Grammar<B> => makeGrammar({ _tag: "Bind", inner, to: f.to, from: f.from })
 
 /** Run `inner` exactly `n` times, collecting the results. */
-export const count = <A>(inner: Grammar<A>, n: number): Grammar<Array<A>> => ({
-  _tag: "Count",
-  inner,
-  n,
-})
+export const count = <A>(inner: Grammar<A>, n: number): Grammar<Array<A>> => {
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new RangeError("count requires a non-negative safe integer")
+  }
+  return makeGrammar({ _tag: "Count", inner, n })
+}
 
 export const integer: Grammar<number> = map(label("integer", regex(/-?\d+/, "integer")), {
   to: Number,
