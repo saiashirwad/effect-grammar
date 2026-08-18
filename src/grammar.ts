@@ -9,6 +9,7 @@ import {
   Stream,
 } from "effect"
 
+import { many as manyEffect, or_, attempt as attemptEffect } from "./combinators.ts"
 import { locateParseError, ParseError, UpstreamError } from "./error.ts"
 import {
   failHere,
@@ -353,39 +354,22 @@ const interpret = (g: Grammar<any>): Effect.Effect<any, ParseError | UpstreamErr
         return out
       }
       case "Choice": {
-        let furthest: ParseError | undefined
-        for (const option of g.options) {
-          const mark = yield* getPos
-          const r = yield* Effect.result(interpret(option))
-          if (r._tag === "Success") return r.success
-          if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-          if ((yield* getPos) > mark) return yield* r.failure
-          yield* seek(mark)
-          if (furthest === undefined || r.failure.pos >= furthest.pos) furthest = r.failure
+        const first = g.options[0]
+        if (first === undefined) {
+          return yield* new ParseError({
+            pos: yield* getPos,
+            expected: "choice",
+            found: undefined,
+          })
         }
-        return yield* (
-          furthest ?? new ParseError({ pos: yield* getPos, expected: "choice", found: undefined })
-        )
+        let parser = interpret(first)
+        for (const option of g.options.slice(1)) {
+          parser = or_(parser, interpret(option))
+        }
+        return yield* parser
       }
       case "Many": {
-        const out: Array<any> = []
-        for (let i = 0; i < g.atLeast; i++) out.push(yield* interpret(g.inner))
-        while (true) {
-          const mark = yield* getPos
-          const r = yield* Effect.result(interpret(g.inner))
-          if (r._tag === "Failure") {
-            if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-            if ((yield* getPos) > mark) return yield* r.failure
-            yield* seek(mark)
-            return out
-          }
-          if ((yield* getPos) === mark) {
-            return yield* Effect.die(
-              new Error("Grammar.many: inner parser succeeded without consuming input"),
-            )
-          }
-          out.push(r.success)
-        }
+        return yield* manyEffect(interpret(g.inner), { atLeast: g.atLeast })
       }
       case "SepBy": {
         const start = yield* getPos
@@ -395,44 +379,14 @@ const interpret = (g: Grammar<any>): Effect.Effect<any, ParseError | UpstreamErr
           if ((yield* getPos) > start || g.atLeast >= 1) return yield* first.failure
           return []
         }
-        const out = [first.success]
-        while (true) {
-          const mark = yield* getPos
-          const r = yield* Effect.result(interpret(g.sep).pipe(Effect.andThen(interpret(g.inner))))
-          if (r._tag === "Failure") {
-            if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-            if ((yield* getPos) > mark) return yield* r.failure
-            yield* seek(mark)
-            return out
-          }
-          if ((yield* getPos) === mark) {
-            return yield* Effect.die(
-              new Error("Grammar.sepBy: separator+element succeeded without consuming input"),
-            )
-          }
-          out.push(r.success)
-        }
+        const rest = yield* manyEffect(interpret(g.sep).pipe(Effect.andThen(interpret(g.inner))))
+        return [first.success, ...rest]
       }
       case "Optional": {
-        const mark = yield* getPos
-        const r = yield* Effect.result(interpret(g.inner))
-        if (r._tag === "Failure") {
-          if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-          if ((yield* getPos) > mark) return yield* r.failure
-          yield* seek(mark)
-          return undefined
-        }
-        return r.success
+        return yield* or_(interpret(g.inner), Effect.succeed(undefined))
       }
       case "Attempt": {
-        const mark = yield* getPos
-        const r = yield* Effect.result(interpret(g.inner))
-        if (r._tag === "Failure") {
-          if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-          yield* seek(mark)
-          return yield* r.failure
-        }
-        return r.success
+        return yield* attemptEffect(interpret(g.inner))
       }
       case "FromEffect": {
         return yield* g.eff
