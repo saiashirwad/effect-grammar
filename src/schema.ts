@@ -14,16 +14,16 @@ export const toSchema = <S extends Schema.Top>(
     Schema.decodeTo(
       target,
       SchemaTransformation.transformOrFail({
-        decode: (s: string) =>
+        decode: (s) =>
           Effect.fromResult(parse(grammar, s)).pipe(
             Effect.mapError(
-              (e) => new SchemaIssue.InvalidValue(Option.some(s), { message: e.message }),
+              ({ message }) => new SchemaIssue.InvalidValue(Option.some(s), { message }),
             ),
           ),
-        encode: (a: S["Type"]) =>
+        encode: (a) =>
           Effect.fromResult(print(grammar, a)).pipe(
             Effect.mapError(
-              (e) => new SchemaIssue.InvalidValue(Option.some(a), { message: e.message }),
+              ({ message }) => new SchemaIssue.InvalidValue(Option.some(a), { message }),
             ),
           ),
       }),
