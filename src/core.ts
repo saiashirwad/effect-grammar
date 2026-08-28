@@ -11,9 +11,9 @@ export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
   | {
       readonly _tag: "Regex"
-      /** Sticky, for matching at a position. */
+      // Sticky, for matching at a position.
       readonly re: RegExp
-      /** Anchored, for checking a whole value on print. */
+      // Anchored, for checking a whole value on print.
       readonly whole: RegExp
       readonly name: string
     }
@@ -51,12 +51,11 @@ export type Node =
     }
 
 export interface Grammar<out A> extends Pipeable.Pipeable {
-  /** Phantom marker for the value type. A function so a union of grammars infers a union of values. */
   readonly _A: Types.Covariant<A>
   readonly node: Node
 }
 
-/** A grammar with no value. Only these (and fields) can be `yield*`-ed inside `gen`. */
+// A grammar with no value. Only these (and fields) can be `yield*`-ed inside `gen`.
 export interface Silent extends Grammar<void> {
   [Symbol.iterator](): Iterator<Silent, void>
 }
@@ -98,7 +97,6 @@ class FieldImpl<K extends string, A> implements Field<K, A> {
 
 export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
 export const silent = (node: Node): Silent => new SilentImpl(node)
-/** Typed via `G` rather than `A` so a conditional `a ? g1 : g2` infers the union of both values. */
 export const field = <const K extends string, G extends Grammar<any>>(
   name: K,
   grammar: G,

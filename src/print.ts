@@ -4,12 +4,6 @@ import { type Fields, type Grammar, isField, type Part, resolve } from "./core.t
 import { preview, PrintError } from "./errors.ts"
 import { describe } from "./render.ts"
 
-const isString = Schema.is(Schema.String)
-
-/**
- * Internal failure. Choice backtracks by catching these, so the message is a thunk:
- * only the failure that escapes `print` pays for rendering its value.
- */
 class Failure {
   readonly reason: () => string
   constructor(reason: () => string) {
@@ -38,7 +32,7 @@ const out = <A>(g: Grammar<A>, value: A): string => {
     case "Literal":
       return n.value
     case "Regex":
-      if (!isString(value)) {
+      if (!Schema.is(Schema.String)(value)) {
         return fail(() => `${n.name}: expected a string, got ${preview(value)}`)
       }
       if (!n.whole.test(value)) {

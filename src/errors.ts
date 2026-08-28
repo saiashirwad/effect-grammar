@@ -19,7 +19,6 @@ export class PrintError extends Schema.TaggedErrorClass<PrintError>()("PrintErro
   message: Schema.String,
 }) {}
 
-/** A short, never-throwing rendering of a value for error messages. */
 export const preview = <T>(value: T): string => {
   try {
     return JSON.stringify(value) ?? String(value)

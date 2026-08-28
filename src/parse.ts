@@ -9,7 +9,6 @@ type ParseValue = string | number | boolean | bigint | symbol | null | undefined
 interface State {
   readonly input: string
   pos: number
-  /** The furthest position any part failed at, and what was expected there. */
   furthest: number
   expected: Set<string>
 }
@@ -135,7 +134,7 @@ const go = (g: Grammar<unknown>, s: State): ParseValue | typeof FAIL => {
   }
 }
 
-const toError = (s: State): ParseError => {
+const toError = (s: State) => {
   const before = s.input.slice(0, s.furthest)
   return new ParseError({
     pos: s.furthest,
