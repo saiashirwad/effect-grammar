@@ -1,4 +1,4 @@
-import { Console, Effect, Schema } from "effect"
+import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
@@ -24,18 +24,10 @@ const jsonValue: Grammar.Grammar<JsonValue> = Grammar.suspend(
   "value",
 )
 
-const jsonArray = Grammar.gen(function* () {
-  yield* Grammar.symbol("[")
-  const elements = yield* Grammar.field("elements", Grammar.sepBy(jsonValue, Grammar.symbol(",")))
-  yield* Grammar.symbol("]")
-  return { elements }
-}).pipe(
-  Grammar.transform({
-    decode: ({ elements }) => elements,
-    encode: (elements) => ({ elements }),
-    is: Array.isArray,
-    name: "array",
-  }),
+const jsonArray = Grammar.wrap(
+  Grammar.symbol("["),
+  Grammar.sepBy(jsonValue, Grammar.symbol(",")),
+  Grammar.symbol("]"),
 )
 
 const member = Grammar.gen(function* () {
@@ -45,17 +37,14 @@ const member = Grammar.gen(function* () {
   return { key, value }
 })
 
-const jsonObject = Grammar.gen(function* () {
-  yield* Grammar.symbol("{")
-  const members = yield* Grammar.field("members", Grammar.sepBy(member, Grammar.symbol(",")))
-  yield* Grammar.symbol("}")
-  return { members }
-}).pipe(
+const jsonObject = Grammar.wrap(
+  Grammar.symbol("{"),
+  Grammar.sepBy(member, Grammar.symbol(",")),
+  Grammar.symbol("}"),
+).pipe(
   Grammar.transform({
-    decode: ({ members }) => Object.fromEntries(members.map((m) => [m.key, m.value])),
-    encode: (object) => ({
-      members: Object.entries(object).map(([key, value]) => ({ key, value })),
-    }),
+    decode: (members) => Object.fromEntries(members.map((m) => [m.key, m.value])),
+    encode: (object) => Object.entries(object).map(([key, value]) => ({ key, value })),
     is: Schema.is(Schema.Record(Schema.String, Schema.Unknown)),
     name: "object",
   }),
@@ -63,18 +52,23 @@ const jsonObject = Grammar.gen(function* () {
 
 const Json = Grammar.toSchema(jsonValue, Schema.Unknown, { identifier: "Json" })
 
+const decode = Schema.decodeEffect(Json)
+const encode = Schema.encodeEffect(Json)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const document = `{ "name": "ada", "age": 36, "tags": ["math", "code"], "address": { "city": "london", "zip": null } }`
 
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(jsonValue)}\n`)
-  const decoded = yield* Schema.decodeEffect(Json)(document)
+  const decoded = yield* decode(document)
   yield* Console.log(`decode  →  ${json(decoded)}`)
-  const encoded = yield* Schema.encodeEffect(Json)(decoded)
-  yield* Console.log(`encode  →  ${encoded}`)
-  const failed = yield* Effect.result(Schema.decodeEffect(Json)(`[1, 2,`))
-  yield* Console.log(
-    `decode "[1, 2,"  →  ${failed._tag === "Failure" ? String(failed.failure) : "?"}`,
+  yield* Console.log(`encode  →  ${yield* encode(decoded)}`)
+  yield* decode(`[1, 2,`).pipe(
+    Effect.match({
+      onSuccess: (value) => `decode "[1, 2,"  →  ${json(value)}`,
+      onFailure: (err) => `decode "[1, 2,"  →  ${formatIssue(err.issue)}`,
+    }),
+    Effect.flatMap(Console.log),
   )
 }).pipe(Effect.runSync)

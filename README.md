@@ -63,6 +63,12 @@ in, so an `if` on a parsed value takes the same path in both directions. The
 generator's return must hold every field under its name — the types enforce it —
 or return nothing and get the object of fields.
 
+`render` cannot read a generator, so it runs it once with no values and shows
+the parts it yields. That is exact when the generator is straight-line, as
+above. If it branches on a parsed value — `if (kind === "a") yield* ...` — the
+rendering shows only the path `undefined` takes, with no warning. Put the branch
+in `choice` instead, which renders every option.
+
 `seq` is the same thing without control flow, and renders exactly:
 
 ```ts

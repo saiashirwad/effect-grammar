@@ -1,30 +1,9 @@
 /**
  * Spec: https://docs.github.com/en/search-github
  */
-import { Console, Effect, Result, Schema, SchemaIssue } from "effect"
+import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
-
-type CompareOp = ">" | ">=" | "<" | "<="
-
-type QualifierValue =
-  | { readonly kind: "word"; readonly value: string }
-  | { readonly kind: "quoted"; readonly value: string }
-  | { readonly kind: "compare"; readonly op: CompareOp; readonly value: string }
-  | { readonly kind: "range"; readonly from: string | undefined; readonly to: string | undefined }
-
-type Term = { readonly kind: "term"; readonly quoted: boolean; readonly value: string }
-type Qualifier = {
-  readonly kind: "qualifier"
-  readonly negate: boolean
-  readonly key: string
-  readonly value: QualifierValue
-}
-type Not = { readonly kind: "not"; readonly inner: Query }
-type And = { readonly kind: "and"; readonly parts: ReadonlyArray<Query> }
-type Or = { readonly kind: "or"; readonly parts: ReadonlyArray<Query> }
-type Group = { readonly kind: "group"; readonly inner: Query }
-type Query = Term | Qualifier | Not | And | Or | Group
 
 const WordValueSchema = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
 const QuotedValueSchema = Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String })
@@ -62,24 +41,36 @@ const QualifierSchema = Schema.Struct({
   key: Schema.String,
   value: QualifierValueSchema,
 })
-const NotSchema: Schema.Codec<Not> = Schema.Struct({
+
+type QualifierValue = typeof QualifierValueSchema.Type
+type Term = typeof TermWordSchema.Type | typeof TermQuotedSchema.Type
+type Qualifier = typeof QualifierSchema.Type
+type Not = { readonly kind: "not"; readonly inner: Query }
+type And = { readonly kind: "and"; readonly parts: ReadonlyArray<Query> }
+type Or = { readonly kind: "or"; readonly parts: ReadonlyArray<Query> }
+type Group = { readonly kind: "group"; readonly inner: Query }
+type Query = Term | Qualifier | Not | And | Or | Group
+
+const QueryRef = Schema.suspend((): Schema.Codec<Query> => QuerySchema)
+
+const NotSchema = Schema.Struct({
   kind: Schema.Literal("not"),
-  inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+  inner: QueryRef,
 })
-const AndSchema: Schema.Codec<And> = Schema.Struct({
+const AndSchema = Schema.Struct({
   kind: Schema.Literal("and"),
-  parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+  parts: Schema.Array(QueryRef),
 })
-const OrSchema: Schema.Codec<Or> = Schema.Struct({
+const OrSchema = Schema.Struct({
   kind: Schema.Literal("or"),
-  parts: Schema.Array(Schema.suspend((): Schema.Codec<Query> => QuerySchema)),
+  parts: Schema.Array(QueryRef),
 })
-const GroupSchema: Schema.Codec<Group> = Schema.Struct({
+const GroupSchema = Schema.Struct({
   kind: Schema.Literal("group"),
-  inner: Schema.suspend((): Schema.Codec<Query> => QuerySchema),
+  inner: QueryRef,
 })
 
-const QuerySchema: Schema.Codec<Query> = Schema.Union([
+const QuerySchema = Schema.Union([
   TermWordSchema,
   TermQuotedSchema,
   QualifierSchema,
@@ -108,19 +99,22 @@ const compareValue = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(CompareValueSchema)({
     decode: ({ op, value }) => ({ kind: "compare", op, value }),
-    encode: (v) => ({ op: v.op, value: v.value }),
+    encode: (v) => v,
   }),
 )
 
-const rangeValue = Grammar.regex(/[^\s():"']*\.\.[^\s():"']*/, "range").pipe(
+const rangeBound = (name: string) =>
+  Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
+
+const rangeValue = Grammar.gen(function* () {
+  const from = yield* Grammar.field("from", rangeBound("range start"))
+  yield* Grammar.literal("..")
+  const to = yield* Grammar.field("to", rangeBound("range end"))
+  return { from, to }
+}).pipe(
   Grammar.decodeTo(RangeValueSchema)({
-    decode: (raw) => {
-      const i = raw.indexOf("..")
-      const from = raw.slice(0, i)
-      const to = raw.slice(i + 2)
-      return { kind: "range", from: from === "" ? undefined : from, to: to === "" ? undefined : to }
-    },
-    encode: (v) => (v.from ?? "") + ".." + (v.to ?? ""),
+    decode: ({ from, to }) => ({ kind: "range", from, to }),
+    encode: (v) => v,
   }),
 )
 
@@ -149,13 +143,13 @@ const qualifier = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(QualifierSchema)({
     decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
-    encode: (q) => ({ negate: q.negate, key: q.key, value: q.value }),
+    encode: (q) => q,
   }),
 )
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group: Grammar.Grammar<Group> = Grammar.wrap(
+const group = Grammar.wrap(
   "(",
   Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace),
   ")",
@@ -166,34 +160,28 @@ const group: Grammar.Grammar<Group> = Grammar.wrap(
   }),
 )
 
-const termWord: Grammar.Grammar<Term> = Grammar.regex(
-  /(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/,
-  "search term",
-).pipe(
+const termWord = Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term").pipe(
   Grammar.decodeTo(TermWordSchema)({
     decode: (value) => ({ kind: "term", quoted: false, value }),
     encode: (t) => t.value,
   }),
 )
 
-const termQuoted: Grammar.Grammar<Term> = doubleQuoted.pipe(
+const termQuoted = doubleQuoted.pipe(
   Grammar.decodeTo(TermQuotedSchema)({
     decode: (value) => ({ kind: "term", quoted: true, value }),
     encode: (t) => t.value,
   }),
 )
 
-const atom: Grammar.Grammar<Query> = Grammar.choice(qualifier, group, termQuoted, termWord)
+const atom = Grammar.choice(qualifier, group, termQuoted, termWord)
 
 const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
   () => Grammar.choice(notBranch, atom),
   "not",
 )
 
-const notBranch: Grammar.Grammar<Not> = Grammar.prefix(
-  Grammar.seq(Grammar.literal("NOT"), ws),
-  notExpr,
-).pipe(
+const notBranch = Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws), notExpr).pipe(
   Grammar.decodeTo(NotSchema)({
     decode: (inner) => ({ kind: "not", inner }),
     encode: (n) => n.inner,
@@ -201,29 +189,19 @@ const notBranch: Grammar.Grammar<Not> = Grammar.prefix(
 )
 
 const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
-  Grammar.gen(function* () {
-    const first = yield* Grammar.field("first", part)
-    const rest = yield* Grammar.field("rest", Grammar.many(Grammar.prefix(sep, part)))
-    return { first, rest }
-  }).pipe(
+  Grammar.sepBy(part, sep, { min: 1 }).pipe(
     Grammar.transform({
-      decode: ({ first, rest }): Query =>
-        rest.length === 0 ? first : { kind, parts: [first, ...rest] },
-      encode: (q) => {
-        if (q.kind === kind) {
-          const [first, ...rest] = q.parts
-          if (first !== undefined) return { first, rest }
-        }
-        return { first: q, rest: [] }
-      },
+      decode: (parts): Query =>
+        parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts },
+      encode: (q) => (q.kind === kind ? [...q.parts] : [q]),
     }),
   )
 
 const andSep = Grammar.seq(ws, Grammar.optional(Grammar.seq(Grammar.literal("AND"), ws)))
-const andExpr: Grammar.Grammar<Query> = nary("and", andSep, notExpr)
+const andExpr = nary("and", andSep, notExpr)
 
 const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
-const orExpr: Grammar.Grammar<Query> = nary("or", orSep, andExpr)
+const orExpr = nary("or", orSep, andExpr)
 
 const whole = Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace)
 
@@ -248,14 +226,15 @@ const GithubRepo = pattern(
 )
 
 interface Spec {
-  readonly atom: Schema.ConstraintDecoder<unknown>
-  readonly kinds?: ReadonlyArray<QualifierValue["kind"]>
+  readonly decode: (atom: string) => Result.Result<unknown, Schema.SchemaError>
+  readonly kinds?: ReadonlyArray<QualifierValue["kind"]> | undefined
 }
 
-const word = (atom: Schema.ConstraintDecoder<unknown>): Spec => ({
-  atom,
-  kinds: ["word"],
-})
+const spec = (
+  atom: Schema.ConstraintDecoder<unknown>,
+  kinds?: ReadonlyArray<QualifierValue["kind"]>,
+): Spec => ({ decode: Schema.decodeResult(atom), kinds })
+const word = (atom: Schema.ConstraintDecoder<unknown>): Spec => spec(atom, ["word"])
 const enumOf = <const L extends ReadonlyArray<string>>(values: L): Spec =>
   word(Schema.Literals(values))
 
@@ -284,48 +263,42 @@ const catalog = {
   archived: word(GithubBool),
   draft: word(GithubBool),
   locked: word(GithubBool),
-  created: { atom: GithubDate },
-  updated: { atom: GithubDate },
-  closed: { atom: GithubDate },
-  merged: { atom: GithubDate },
-  pushed: { atom: GithubDate },
-  stars: { atom: GithubNumber },
-  forks: { atom: GithubNumber },
-  size: { atom: GithubNumber },
-  comments: { atom: GithubNumber },
-  interactions: { atom: GithubNumber },
-  reactions: { atom: GithubNumber },
-  commits: { atom: GithubNumber },
-  author: { atom: GithubUser },
-  assignee: { atom: GithubUser },
-  commenter: { atom: GithubUser },
-  mentions: { atom: GithubUser },
-  involves: { atom: GithubUser },
-  "reviewed-by": { atom: GithubUser },
-  "review-requested": { atom: GithubUser },
-  user: { atom: GithubUser },
-  org: { atom: GithubUser },
-  repo: { atom: GithubRepo },
-  label: { atom: Schema.String },
-  milestone: { atom: Schema.String },
-  project: { atom: Schema.String },
-  language: { atom: Schema.String },
-  license: { atom: Schema.String },
-  team: { atom: Schema.String },
-  head: { atom: Schema.String },
-  base: { atom: Schema.String },
-  filename: { atom: Schema.String },
-  path: { atom: Schema.String },
-  extension: { atom: Schema.String },
+  created: spec(GithubDate),
+  updated: spec(GithubDate),
+  closed: spec(GithubDate),
+  merged: spec(GithubDate),
+  pushed: spec(GithubDate),
+  stars: spec(GithubNumber),
+  forks: spec(GithubNumber),
+  size: spec(GithubNumber),
+  comments: spec(GithubNumber),
+  interactions: spec(GithubNumber),
+  reactions: spec(GithubNumber),
+  commits: spec(GithubNumber),
+  author: spec(GithubUser),
+  assignee: spec(GithubUser),
+  commenter: spec(GithubUser),
+  mentions: spec(GithubUser),
+  involves: spec(GithubUser),
+  "reviewed-by": spec(GithubUser),
+  "review-requested": spec(GithubUser),
+  user: spec(GithubUser),
+  org: spec(GithubUser),
+  repo: spec(GithubRepo),
+  label: spec(Schema.String),
+  milestone: spec(Schema.String),
+  project: spec(Schema.String),
+  language: spec(Schema.String),
+  license: spec(Schema.String),
+  team: spec(Schema.String),
+  head: spec(Schema.String),
+  base: spec(Schema.String),
+  filename: spec(Schema.String),
+  path: spec(Schema.String),
+  extension: spec(Schema.String),
 } satisfies Record<string, Spec>
 
-type Catalog = typeof catalog
-
-const lookupSpec = (key: string): Spec | undefined => {
-  if (!(key in catalog)) return undefined
-  // SAFETY: the `in` check above proves `key` names a catalog entry here.
-  return catalog[key as keyof Catalog]
-}
+const isKnownQualifier = (key: string): key is keyof typeof catalog => Object.hasOwn(catalog, key)
 
 const atoms = (v: QualifierValue): ReadonlyArray<string> => {
   switch (v.kind) {
@@ -356,39 +329,36 @@ const walkQualifiers = function* (q: Query): Generator<Qualifier> {
   }
 }
 
-const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> => {
-  const issues: Array<Schema.FilterIssue> = []
-  for (const node of walkQualifiers(q)) {
-    const spec = lookupSpec(node.key)
-    if (spec === undefined) {
-      issues.push({ path: [node.key], issue: "unknown qualifier" })
-      continue
-    }
-    if (spec.kinds !== undefined && !spec.kinds.includes(node.value.kind)) {
-      issues.push({
-        path: [node.key],
-        issue: `expected ${spec.kinds.join(" | ")}, got ${node.value.kind}`,
-      })
-      continue
-    }
-    for (const a of atoms(node.value)) {
-      const r = Schema.decodeResult(spec.atom)(a)
-      if (Result.isFailure(r)) issues.push({ path: [node.key], issue: r.failure.issue })
-    }
+const qualifierIssues = (node: Qualifier): ReadonlyArray<Schema.FilterIssue> => {
+  const path = [node.key]
+  if (!isKnownQualifier(node.key)) return [{ path, issue: "unknown qualifier" }]
+  const spec = catalog[node.key]
+  if (spec.kinds !== undefined && !spec.kinds.includes(node.value.kind)) {
+    return [{ path, issue: `expected ${spec.kinds.join(" | ")}, got ${node.value.kind}` }]
   }
-  return issues
+  return atoms(node.value).flatMap((a) => {
+    const r = spec.decode(a)
+    return Result.isFailure(r) ? [{ path, issue: r.failure.issue }] : []
+  })
 }
+
+const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> =>
+  Array.from(Iterable.flatMap(walkQualifiers(q), qualifierIssues))
 
 const ValidGithubQuery = Grammar.toSchema(whole, QuerySchema, { identifier: "GithubQuery" }).check(
   Schema.makeFilter(catalogIssues),
 )
 
+const decode = Schema.decodeEffect(ValidGithubQuery)
+const encode = Schema.encodeEffect(ValidGithubQuery)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
+const grouped = "(author:foo OR author:bar) is:pr -is:archived"
+
 const samples = [
   "is:pr author:foo label:bug",
-  "(author:foo OR author:bar) is:pr -is:archived",
+  grouped,
   "NOT draft:true stars:10..1000 language:TypeScript",
   'label:"help wanted" in:title created:>=2024-01-01 pushed:*..2024-06-30',
   "repo:effect-ts/effect path:src extension:ts",
@@ -401,17 +371,18 @@ const samples = [
   "is:",
 ]
 
+const check = (source: string) =>
+  decode(source).pipe(
+    Effect.match({
+      onSuccess: (value) => `decode ${json(source)}\n  →  ${json(value)}`,
+      onFailure: (err) => `decode ${json(source)}\n  →  ${formatIssue(err.issue)}`,
+    }),
+    Effect.flatMap(Console.log),
+  )
+
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(whole)}\n`)
-  for (const source of samples) {
-    yield* Schema.decodeEffect(ValidGithubQuery)(source).pipe(
-      Effect.match({
-        onSuccess: (value) => `decode ${json(source)}\n  →  ${json(value)}`,
-        onFailure: (err) => `decode ${json(source)}\n  →  ${formatIssue(err.issue)}`,
-      }),
-      Effect.flatMap(Console.log),
-    )
-  }
-  const decoded = yield* Schema.decodeEffect(ValidGithubQuery)(samples[1]!)
-  yield* Console.log(`\nencode  →  ${yield* Schema.encodeEffect(ValidGithubQuery)(decoded)}`)
+  yield* Effect.forEach(samples, check, { discard: true })
+  const decoded = yield* decode(grouped)
+  yield* Console.log(`\nencode  →  ${yield* encode(decoded)}`)
 }).pipe(Effect.runSync)

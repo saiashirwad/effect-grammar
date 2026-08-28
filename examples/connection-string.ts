@@ -1,4 +1,4 @@
-import { Console, Effect, Schema } from "effect"
+import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
@@ -9,10 +9,10 @@ const pair = Grammar.gen(function* () {
   return { key, value }
 })
 
-const params = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"))).pipe(
-  Grammar.transform({
+const queryParams = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"))).pipe(
+  Grammar.decodeTo(Schema.Record(Schema.String, Schema.String))({
     decode: (pairs) => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
-    encode: (record: Record<string, string>) => {
+    encode: (record) => {
       const entries = Object.entries(record)
       return entries.length === 0 ? undefined : entries.map(([key, value]) => ({ key, value }))
     },
@@ -31,8 +31,8 @@ const dsn = Grammar.gen(function* () {
   const port = yield* Grammar.field("port", Grammar.optional(Grammar.prefix(":", Grammar.integer)))
   yield* Grammar.literal("/")
   const database = yield* Grammar.field("database", Grammar.regex(/[^/?#]+/, "database"))
-  const query = yield* Grammar.field("params", params)
-  return { user, password, host, port, database, params: query }
+  const params = yield* Grammar.field("params", queryParams)
+  return { user, password, host, port, database, params }
 })
 
 const ConnectionInfo = Schema.Struct({
@@ -48,6 +48,7 @@ const Dsn = Grammar.toSchema(dsn, ConnectionInfo, { identifier: "Dsn" })
 const decode = Schema.decodeUnknownEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const samples = [
   "postgres://alice:s3cret@db.internal:5432/shop?sslmode=require&connect_timeout=10",
@@ -66,17 +67,18 @@ const value = {
   params: { sslmode: "require" },
 }
 
+const check = (source: string) =>
+  decode(source).pipe(
+    Effect.match({
+      onSuccess: (value) => `decode ${source}\n  →  ${json(value)}`,
+      onFailure: (err) => `decode ${source}\n  →  ${formatIssue(err.issue)}`,
+    }),
+    Effect.flatMap(Console.log),
+  )
+
 Effect.gen(function* () {
   yield* Console.log(`grammar: ${Grammar.render(dsn)}\n`)
-
-  for (const source of samples) {
-    const r = yield* Effect.result(decode(source))
-    yield* Console.log(
-      r._tag === "Success"
-        ? `decode ${source}\n  →  ${json(r.success)}`
-        : `decode ${source}\n  →  ${String(r.failure)}`,
-    )
-  }
+  yield* Effect.forEach(samples, check, { discard: true })
 
   const encoded = yield* encode(value)
   const roundTripped = yield* decode(encoded)

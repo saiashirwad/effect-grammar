@@ -18,12 +18,14 @@ const ip = Grammar.sepBy(
 
 const Ip = Grammar.toSchema(ip, IpAddress, { identifier: "IpAddress" })
 
+const decode = Schema.decodeEffect(Ip)
+const encode = Schema.encodeEffect(Ip)
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
-const samples = ["192.168.1.1", "10.0.300.7", "192.168.1", "not-an-ip"] as const
+const samples = ["192.168.1.1", "10.0.300.7", "192.168.1", "not-an-ip"]
 
 const check = (source: string) =>
-  Schema.decodeEffect(Ip)(source).pipe(
+  decode(source).pipe(
     Effect.match({
       onSuccess: (value) => `${source}  →  ${value.join(".")}`,
       onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
@@ -34,6 +36,6 @@ const check = (source: string) =>
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(ip)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
-  const encoded = yield* Schema.encodeEffect(Ip)([10, 0, 0, 1])
+  const encoded = yield* encode([10, 0, 0, 1])
   yield* Console.log(`\nencode [10,0,0,1]  →  ${encoded}`)
 }).pipe(Effect.runSync)

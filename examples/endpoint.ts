@@ -18,13 +18,15 @@ const Endpoint = Grammar.toSchema(
   { identifier: "Endpoint" },
 )
 
+const decode = Schema.decodeEffect(Endpoint)
+const encode = Schema.encodeEffect(Endpoint)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const source = "https://effect.website:443"
 
 Effect.gen(function* () {
-  const decoded = yield* Schema.decodeEffect(Endpoint)(source)
-  const encoded = yield* Schema.encodeEffect(Endpoint)(decoded)
-  const defaultPort = yield* Schema.decodeEffect(Endpoint)("https://effect.website")
+  const decoded = yield* decode(source)
+  const encoded = yield* encode(decoded)
+  const defaultPort = yield* decode("https://effect.website")
 
   yield* Console.log(`grammar ${Grammar.render(endpoint)}`)
   yield* Console.log(`decode ${source}\n  →  ${json(decoded)}`)

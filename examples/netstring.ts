@@ -2,13 +2,12 @@ import { Console, Effect, Result } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
+const char = Grammar.regex(/[\s\S]/, "char")
+
 const netstring = Grammar.gen(function* () {
   const n = yield* Grammar.field("n", Grammar.integer)
   yield* Grammar.literal(":")
-  const payload = yield* Grammar.field(
-    "payload",
-    Grammar.many(Grammar.regex(/[\s\S]/, "char"), { min: n, max: n }),
-  )
+  const payload = yield* Grammar.field("payload", Grammar.many(char, { min: n, max: n }))
   yield* Grammar.literal(",")
   return { n, payload }
 }).pipe(
@@ -18,8 +17,8 @@ const netstring = Grammar.gen(function* () {
   }),
 )
 
-const show = (r: Result.Result<unknown, { readonly message: string }>) =>
-  Result.isSuccess(r) ? JSON.stringify(r.success) : `✗ ${r.failure.message}`
+const show = (r: Result.Result<string, { readonly message: string }>) =>
+  Result.match(r, { onSuccess: JSON.stringify, onFailure: (e) => `✗ ${e.message}` })
 
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)

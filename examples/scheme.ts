@@ -15,14 +15,16 @@ type List = { readonly kind: "list"; readonly elements: ReadonlyArray<Expr> }
 type Quote = { readonly kind: "quote"; readonly inner: Expr }
 type Expr = Atom | List | Quote
 
+const ExprRef = Schema.suspend((): Schema.Codec<Expr> => ExprSchema)
+
 const ListSchema: Schema.Codec<List> = Schema.Struct({
   kind: Schema.Literal("list"),
-  elements: Schema.Array(Schema.suspend((): Schema.Codec<Expr> => ExprSchema)),
+  elements: Schema.Array(ExprRef),
 })
 
 const QuoteSchema: Schema.Codec<Quote> = Schema.Struct({
   kind: Schema.Literal("quote"),
-  inner: Schema.suspend((): Schema.Codec<Expr> => ExprSchema),
+  inner: ExprRef,
 })
 
 const ExprSchema: Schema.Codec<Expr> = Schema.Union([
@@ -64,25 +66,21 @@ const symbolAtom = Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")).pipe
   }),
 )
 
-const atom: Grammar.Grammar<Atom> = Grammar.choice(numberAtom, stringAtom, booleanAtom, symbolAtom)
+const atom = Grammar.choice(numberAtom, stringAtom, booleanAtom, symbolAtom)
 
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () => Grammar.choice(quoteExpr, list, atom),
   "expr",
 )
 
-const list: Grammar.Grammar<List> = Grammar.wrap(
-  Grammar.symbol("("),
-  Grammar.many(expr),
-  Grammar.symbol(")"),
-).pipe(
+const list = Grammar.wrap(Grammar.symbol("("), Grammar.many(expr), Grammar.symbol(")")).pipe(
   Grammar.decodeTo(ListSchema)({
     decode: (elements) => ({ kind: "list", elements }),
     encode: (l) => [...l.elements],
   }),
 )
 
-const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
+const quoteExpr = Grammar.prefix("'", expr).pipe(
   Grammar.decodeTo(QuoteSchema)({
     decode: (inner) => ({ kind: "quote", inner }),
     encode: (q) => q.inner,
@@ -120,7 +118,9 @@ const catalog = {
   ">": form(2),
   "<=": form(2),
   ">=": form(2),
-} satisfies Record<string, { readonly min: number; readonly max: number }>
+} satisfies Record<string, FormSpec>
+
+const isKnownForm = (name: string): name is keyof typeof catalog => Object.hasOwn(catalog, name)
 
 const walkLists = function* (e: Expr): Generator<List> {
   switch (e.kind) {
@@ -144,26 +144,15 @@ const headSymbol = (list: List): string | undefined => {
   return head?.kind === "symbol" ? head.value : undefined
 }
 
-const isCatalogForm = (name: string): name is keyof typeof catalog => Object.hasOwn(catalog, name)
-
 const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
   const name = headSymbol(node)
-  if (name === undefined || !isCatalogForm(name)) return Result.failVoid
+  if (name === undefined || !isKnownForm(name)) return Result.failVoid
   const spec = catalog[name]
   const arity = node.elements.length - 1
-  if (arity < spec.min) {
-    return Result.succeed({
-      path: [name],
-      issue: `expected at least ${spec.min} argument(s), got ${arity}`,
-    })
-  }
-  if (arity > spec.max) {
-    return Result.succeed({
-      path: [name],
-      issue: `expected at most ${spec.max} argument(s), got ${arity}`,
-    })
-  }
-  return Result.failVoid
+  const bound =
+    arity < spec.min ? `at least ${spec.min}` : arity > spec.max ? `at most ${spec.max}` : undefined
+  if (bound === undefined) return Result.failVoid
+  return Result.succeed({ path: [name], issue: `expected ${bound} argument(s), got ${arity}` })
 }
 
 const catalogIssues = Schema.makeFilter((e: Expr) =>
@@ -174,6 +163,9 @@ const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme
   catalogIssues,
 )
 
+const decode = Schema.decodeEffect(ValidScheme)
+const encode = Schema.encodeEffect(ValidScheme)
+const encodeSync = Schema.encodeSync(ValidScheme)
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const samples = [
@@ -196,10 +188,9 @@ const samples = [
 ]
 
 const check = (source: string) =>
-  Schema.decodeEffect(ValidScheme)(source).pipe(
+  decode(source).pipe(
     Effect.match({
-      onSuccess: (value) =>
-        `decode ${source || "(empty)"}\n  →  ${Schema.encodeSync(ValidScheme)(value)}`,
+      onSuccess: (value) => `decode ${source || "(empty)"}\n  →  ${encodeSync(value)}`,
       onFailure: (err) => `decode ${source || "(empty)"}\n  →  ${formatIssue(err.issue)}`,
     }),
     Effect.flatMap(Console.log),
@@ -208,7 +199,7 @@ const check = (source: string) =>
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(document)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
-  const printed = yield* Schema.encodeEffect(ValidScheme)({
+  const printed = yield* encode({
     kind: "list",
     elements: [
       { kind: "symbol", value: "define" },
