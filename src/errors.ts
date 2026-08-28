@@ -19,7 +19,11 @@ export class PrintError extends Schema.TaggedErrorClass<PrintError>()("PrintErro
   message: Schema.String,
 }) {}
 
-export class RoundTripError extends Schema.TaggedErrorClass<RoundTripError>()("RoundTripError", {
-  stage: Schema.Literals(["print", "parse", "equal"]),
-  message: Schema.String,
-}) {}
+/** A short, never-throwing rendering of a value for error messages. */
+export const preview = (u: unknown): string => {
+  try {
+    return JSON.stringify(u) ?? String(u)
+  } catch {
+    return String(u)
+  }
+}

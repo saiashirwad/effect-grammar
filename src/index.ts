@@ -1,5 +1,5 @@
-export { ParseError, PrintError, RoundTripError } from "./errors.ts"
-export type { Field, Fields, GenIterator, Grammar, Node, Part, Silent, Type } from "./core.ts"
+export { ParseError, PrintError } from "./errors.ts"
+export type { Field, Fields, Grammar, Node, Part, Silent, Type } from "./core.ts"
 export {
   as,
   choice,
@@ -32,4 +32,4 @@ export {
 export { parse } from "./parse.ts"
 export { print } from "./print.ts"
 export { render } from "./render.ts"
-export { checkRoundTrip, toSchema } from "./schema.ts"
+export { toSchema } from "./schema.ts"

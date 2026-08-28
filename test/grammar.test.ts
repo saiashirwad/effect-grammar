@@ -504,21 +504,6 @@ describe("render", () => {
   })
 })
 
-describe("checkRoundTrip", () => {
-  it("names the failing stage", () => {
-    const lossy = G.regex(/[a-z]+/, "word").pipe(
-      G.transform({ decode: (s) => s.toUpperCase(), encode: (s) => s.toLowerCase() }),
-    )
-    const r = G.checkRoundTrip(lossy, "Ab")
-    assert.ok(Result.isFailure(r))
-    if (Result.isFailure(r)) assert.equal(r.failure.stage, "equal")
-
-    const p = G.checkRoundTrip(G.integer, 1.5)
-    assert.ok(Result.isFailure(p))
-    if (Result.isFailure(p)) assert.equal(p.failure.stage, "print")
-  })
-})
-
 describe("toSchema", () => {
   const pair = G.seq(
     G.field("name", G.regex(/[a-z]+/, "name")),

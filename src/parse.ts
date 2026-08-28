@@ -7,12 +7,12 @@ import { describe } from "./render.ts"
 interface State {
   readonly input: string
   pos: number
+  /** The furthest position any part failed at, and what was expected there. */
   furthest: number
   expected: Set<string>
 }
 
-const FAIL: unique symbol = Symbol.for("effect-grammar/fail")
-type Res<A> = A | typeof FAIL
+const FAIL = Symbol.for("effect-grammar/fail")
 
 const failAt = (s: State, expected: string): typeof FAIL => {
   if (s.pos > s.furthest) {
@@ -24,9 +24,9 @@ const failAt = (s: State, expected: string): typeof FAIL => {
   return FAIL
 }
 
-const runPart = (p: Part, s: State): Res<unknown> => go(isField(p) ? p.grammar : p, s)
+const runPart = (p: Part, s: State): unknown => go(isField(p) ? p.grammar : p, s)
 
-const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
+const go = (g: Grammar<unknown>, s: State): unknown => {
   const n = g.node
   switch (n._tag) {
     case "Literal": {
@@ -35,23 +35,20 @@ const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
       return undefined
     }
     case "Regex": {
-      const m = n.re.exec(s.input.slice(s.pos))
-      if (m === null || m.index !== 0) return failAt(s, n.name)
+      n.re.lastIndex = s.pos
+      const m = n.re.exec(s.input)
+      if (m === null) return failAt(s, n.name)
       s.pos += m[0].length
       return m[0]
     }
     case "Seq": {
       const out: Record<string, unknown> = {}
-      let hasField = false
       for (const p of n.parts) {
         const v = runPart(p, s)
         if (v === FAIL) return FAIL
-        if (isField(p)) {
-          out[p.name] = v
-          hasField = true
-        }
+        if (isField(p)) out[p.name] = v
       }
-      return hasField ? out : undefined
+      return n.parts.some(isField) ? out : undefined
     }
     case "Gen": {
       const it = n.run()
@@ -61,7 +58,7 @@ const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
         const p = r.value
         const v = runPart(p, s)
         if (v === FAIL) {
-          it.return?.(undefined)
+          it.return(undefined)
           return FAIL
         }
         if (isField(p)) {
@@ -72,14 +69,13 @@ const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
         }
         r = it.next(v)
       }
-      return r.value === undefined ? out : r.value
+      return r.value ?? out
     }
     case "Wrap": {
       if (go(n.open, s) === FAIL) return FAIL
       const v = go(n.inner, s)
       if (v === FAIL) return FAIL
-      if (go(n.close, s) === FAIL) return FAIL
-      return v
+      return go(n.close, s) === FAIL ? FAIL : v
     }
     case "Choice": {
       const start = s.pos
@@ -92,28 +88,14 @@ const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
     }
     case "Many": {
       const out: Array<unknown> = []
-      while (out.length < n.max) {
-        const mark = s.pos
-        const v = go(n.inner, s)
-        if (v === FAIL) {
-          s.pos = mark
-          break
-        }
-        if (s.pos === mark) throw new Error("many: inner grammar matched without consuming input")
-        out.push(v)
-      }
-      return out.length < n.min ? FAIL : out
-    }
-    case "SepBy": {
-      const out: Array<unknown> = []
       let mark = s.pos
-      let v = go(n.inner, s)
-      while (v !== FAIL && out.length < n.max) {
+      while (out.length < n.max) {
+        const v = go(n.inner, s)
+        if (v === FAIL) break
+        if (s.pos === mark) throw new Error("many: element matched without consuming input")
         out.push(v)
         mark = s.pos
         if (go(n.sep, s) === FAIL) break
-        if (s.pos === mark) throw new Error("sepBy: separator matched without consuming input")
-        v = go(n.inner, s)
       }
       s.pos = mark
       return out.length < n.min ? FAIL : out
@@ -130,57 +112,40 @@ const go = (g: Grammar<unknown>, s: State): Res<unknown> => {
       const v = go(n.inner, s)
       if (v === FAIL) return FAIL
       const b = n.decode(v)
-      if (n.is !== undefined && !n.is(b)) {
+      if (n.is?.(b) === false) {
         s.pos = start
         return failAt(s, n.name ?? describe(n.inner))
       }
       return b
     }
-    case "Const":
-      return go(n.inner, s) === FAIL ? FAIL : n.value
     case "Skip":
       return go(n.inner, s) === FAIL ? FAIL : undefined
     case "Label": {
       const start = s.pos
       const v = go(n.inner, s)
-      if (v !== FAIL) return v
-      if (s.furthest === start) s.expected = new Set([n.name])
-      return FAIL
+      if (v === FAIL && s.furthest === start) s.expected = new Set([n.name])
+      return v
     }
     case "Suspend":
       return go(resolve(n), s)
   }
 }
 
-const lineColumn = (input: string, pos: number): { line: number; column: number } => {
-  let line = 1
-  let column = 1
-  for (let i = 0; i < pos; i++) {
-    if (input.charCodeAt(i) === 10) {
-      line++
-      column = 1
-    } else {
-      column++
-    }
-  }
-  return { line, column }
-}
-
-const toError = (s: State): ParseError =>
-  new ParseError({
+const toError = (s: State): ParseError => {
+  const before = s.input.slice(0, s.furthest)
+  return new ParseError({
     pos: s.furthest,
-    ...lineColumn(s.input, s.furthest),
+    line: before.split("\n").length,
+    column: before.length - before.lastIndexOf("\n"),
     expected: [...s.expected],
     found: s.input[s.furthest],
   })
+}
 
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
   const s: State = { input, pos: 0, furthest: 0, expected: new Set() }
   const v = go(grammar, s)
-  if (v === FAIL) return Result.fail(toError(s))
-  if (s.pos < input.length) {
-    failAt(s, "end of input")
-    return Result.fail(toError(s))
-  }
-  return Result.succeed(v as A)
+  if (v !== FAIL && s.pos === input.length) return Result.succeed(v as A)
+  if (v !== FAIL) failAt(s, "end of input")
+  return Result.fail(toError(s))
 }

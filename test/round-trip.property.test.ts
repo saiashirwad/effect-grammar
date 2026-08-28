@@ -1,19 +1,10 @@
-import assert from "node:assert/strict"
-
-import { Result } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
+import { assertRoundTrip } from "./helpers.ts"
 
 type Nested = number | ReadonlyArray<Nested>
-
-const assertRoundTrips = <A>(grammar: Grammar.Grammar<A>, values: ReadonlyArray<A>): void => {
-  for (const [index, value] of values.entries()) {
-    const r = Grammar.checkRoundTrip(grammar, value)
-    if (Result.isFailure(r)) assert.fail(`[${index}] ${r.failure.stage}: ${r.failure.message}`)
-  }
-}
 
 const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
   Grammar.choice(
@@ -63,7 +54,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
       FastCheck.property(
         FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }),
         (n) => {
-          assertRoundTrips(Grammar.integer, [n])
+          assertRoundTrip(Grammar.integer, n)
         },
       ),
     )
@@ -72,7 +63,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
   it("nested integer lists with lexemes", () => {
     FastCheck.assert(
       FastCheck.property(nestedArb, (value) => {
-        assertRoundTrips(nested, [value])
+        assertRoundTrip(nested, value)
       }),
     )
   })
@@ -80,7 +71,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
   it("gen grammar with optional and repeated fields", () => {
     FastCheck.assert(
       FastCheck.property(endpointArb, (value) => {
-        assertRoundTrips(endpoint, [value])
+        assertRoundTrip(endpoint, value)
       }),
     )
   })

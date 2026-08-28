@@ -1,26 +1,13 @@
-import { Equal, Result } from "effect"
+import { Result, Schema } from "effect"
 
 import { type Grammar, isField, type Part, resolve } from "./core.ts"
-import { PrintError } from "./errors.ts"
+import { preview, PrintError } from "./errors.ts"
 import { describe } from "./render.ts"
 
-class PrintFail {
-  readonly message: string
-  constructor(message: string) {
-    this.message = message
-  }
-}
+const isPrintError = Schema.is(PrintError)
 
-const printFail = (message: string): never => {
-  throw new PrintFail(message)
-}
-
-export const preview = (u: unknown): string => {
-  try {
-    return JSON.stringify(u) ?? String(u)
-  } catch {
-    return String(u)
-  }
+const fail = (message: string): never => {
+  throw new PrintError({ message })
 }
 
 const printPart = (p: Part, value: Record<string, unknown>): string =>
@@ -32,13 +19,13 @@ const out = (g: Grammar<unknown>, value: unknown): string => {
     case "Literal":
       return n.value
     case "Regex": {
-      if (typeof value !== "string") {
-        return printFail(`${n.name}: expected a string, got ${preview(value)}`)
+      if (typeof value !== "string")
+        return fail(`${n.name}: expected a string, got ${preview(value)}`)
+      const whole = new RegExp(`^(?:${n.re.source})$`, n.re.flags.replace("y", ""))
+      if (!whole.test(value)) {
+        return fail(`${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
       }
-      const anchored = new RegExp(`^(?:${n.re.source})$`, n.re.flags)
-      return anchored.test(value)
-        ? value
-        : printFail(`${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
+      return value
     }
     case "Seq":
       return n.parts.map((p) => printPart(p, value as Record<string, unknown>)).join("")
@@ -61,34 +48,28 @@ const out = (g: Grammar<unknown>, value: unknown): string => {
         try {
           return out(o, value)
         } catch (e) {
-          if (!(e instanceof PrintFail)) throw e
+          if (!isPrintError(e)) throw e
           reasons.push(e.message)
         }
       }
-      return printFail(`no choice branch accepts ${preview(value)}:\n  ${reasons.join("\n  ")}`)
+      return fail(`no choice branch accepts ${preview(value)}:\n  ${reasons.join("\n  ")}`)
     }
-    case "Many":
-    case "SepBy": {
-      if (!Array.isArray(value)) return printFail(`expected an array, got ${preview(value)}`)
+    case "Many": {
+      if (!Array.isArray(value)) return fail(`expected an array, got ${preview(value)}`)
       if (value.length < n.min || value.length > n.max) {
         const range =
           n.max === Number.POSITIVE_INFINITY ? `at least ${n.min}` : `${n.min}..${n.max}`
-        return printFail(`expected ${range} items, got ${value.length}`)
+        return fail(`expected ${range} items, got ${value.length}`)
       }
-      const sep = n._tag === "SepBy" ? out(n.sep, undefined) : ""
-      return value.map((v) => out(n.inner, v)).join(sep)
+      return value.map((v) => out(n.inner, v)).join(out(n.sep, undefined))
     }
     case "Optional":
       return value === undefined ? "" : out(n.inner, value)
     case "Transform":
-      if (n.is !== undefined && !n.is(value)) {
-        return printFail(`${n.name ?? describe(n.inner)}: rejected ${preview(value)}`)
+      if (n.is?.(value) === false) {
+        return fail(`expected ${n.name ?? describe(n.inner)}, got ${preview(value)}`)
       }
       return out(n.inner, n.encode(value))
-    case "Const":
-      return Equal.equals(value, n.value)
-        ? out(n.inner, undefined)
-        : printFail(`expected ${preview(n.value)}, got ${preview(value)}`)
     case "Skip":
       return out(n.inner, n.printAs)
     case "Label":
@@ -102,7 +83,7 @@ export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, P
   try {
     return Result.succeed(out(grammar, value))
   } catch (e) {
-    if (e instanceof PrintFail) return Result.fail(new PrintError({ message: e.message }))
+    if (isPrintError(e)) return Result.fail(e)
     throw e
   }
 }

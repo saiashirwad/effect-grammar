@@ -32,7 +32,4 @@ Effect.gen(function* () {
   yield* Console.log(
     `print "round trip ✓"     →  ${show(Grammar.print(netstring, "round trip ✓"))}`,
   )
-  yield* Console.log(
-    `roundTrip "a,b:c"        →  ${show(Grammar.checkRoundTrip(netstring, "a,b:c"))}`,
-  )
 }).pipe(Effect.runSync)

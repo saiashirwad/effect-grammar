@@ -11,9 +11,7 @@ and derive everything else from it:
 - a printer that emits the canonical text for a value,
 - a `Schema.Codec<A, string>` wiring both into `decode` and `encode`, so Schema
   refinements compose with the grammar,
-- `render`, the grammar as text, used as the Schema's description,
-- one law, `parse(print(a)) == a`, exposed as `checkRoundTrip` so every grammar
-  is a one-line property test.
+- `render`, the grammar as text, used as the Schema's description.
 
 Effect's `Schema.transformOrFail` gives you the frame and leaves both functions
 to you; `Schema.TemplateLiteralParser` handles flat `${a}-${b}` patterns only.
@@ -151,10 +149,3 @@ line 1, column 7: expected one of "null", "true", "false", number, string, "[", 
 ```
 
 `label(name)` names a grammar for these messages.
-
-## The law
-
-```ts
-Grammar.checkRoundTrip(endpoint, { host: "a", port: 1 })
-// Result.void, or RoundTripError naming the stage: "print" | "parse" | "equal"
-```

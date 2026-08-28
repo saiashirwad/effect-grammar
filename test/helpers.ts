@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 
-import { Result } from "effect"
+import { Equal, Result } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
@@ -34,6 +34,11 @@ export const printFail = <A>(grammar: Grammar.Grammar<A>, value: A): Grammar.Pri
 
 /** Round-trip law: print then re-parse must yield an `Equal` value. */
 export const assertRoundTrip = <A>(grammar: Grammar.Grammar<A>, value: A): void => {
-  const r = Grammar.checkRoundTrip(grammar, value)
-  if (Result.isFailure(r)) assert.fail(`${r.failure.stage}: ${r.failure.message}`)
+  const printed = printOk(grammar, value)
+  const reparsed = parseOk(grammar, printed)
+  if (!Equal.equals(reparsed, value)) {
+    assert.fail(
+      `round trip changed the value\n  original: ${JSON.stringify(value)}\n  printed:  ${JSON.stringify(printed)}\n  reparsed: ${JSON.stringify(reparsed)}`,
+    )
+  }
 }
