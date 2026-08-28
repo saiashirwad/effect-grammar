@@ -155,17 +155,14 @@ const qualifier = Grammar.gen(function* () {
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group: Grammar.Grammar<Group> = Grammar.gen(function* () {
-  yield* Grammar.literal("(")
-  yield* Grammar.whitespace
-  const inner = yield* Grammar.field("inner", query)
-  yield* Grammar.whitespace
-  yield* Grammar.literal(")")
-  return { inner }
-}).pipe(
+const group: Grammar.Grammar<Group> = Grammar.wrap(
+  "(",
+  Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace),
+  ")",
+).pipe(
   Grammar.decodeTo(GroupSchema)({
-    decode: ({ inner }) => ({ kind: "group", inner }),
-    encode: (g) => ({ inner: g.inner }),
+    decode: (inner) => ({ kind: "group", inner }),
+    encode: (g) => g.inner,
   }),
 )
 
@@ -193,15 +190,13 @@ const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
   "not",
 )
 
-const notBranch: Grammar.Grammar<Not> = Grammar.gen(function* () {
-  yield* Grammar.literal("NOT")
-  yield* ws
-  const inner = yield* Grammar.field("inner", notExpr)
-  return { inner }
-}).pipe(
+const notBranch: Grammar.Grammar<Not> = Grammar.prefix(
+  Grammar.seq(Grammar.literal("NOT"), ws),
+  notExpr,
+).pipe(
   Grammar.decodeTo(NotSchema)({
-    decode: ({ inner }) => ({ kind: "not", inner }),
-    encode: (n) => ({ inner: n.inner }),
+    decode: (inner) => ({ kind: "not", inner }),
+    encode: (n) => n.inner,
   }),
 )
 

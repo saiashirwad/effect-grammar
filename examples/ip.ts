@@ -5,23 +5,14 @@ import * as Grammar from "../src/index.ts"
 const Octet = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
 const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
 
-const octet = Grammar.regex(/\d{1,3}/, "octet").pipe(
-  Grammar.decodeTo(Octet)({ decode: Number, encode: String }),
-)
-
-const ip = Grammar.gen(function* () {
-  const a = yield* Grammar.field("a", octet)
-  yield* Grammar.literal(".")
-  const b = yield* Grammar.field("b", octet)
-  yield* Grammar.literal(".")
-  const c = yield* Grammar.field("c", octet)
-  yield* Grammar.literal(".")
-  const d = yield* Grammar.field("d", octet)
-  return { a, b, c, d }
-}).pipe(
-  Grammar.decodeTo(IpAddress)({
-    decode: ({ a, b, c, d }) => [a, b, c, d] as const,
-    encode: ([a, b, c, d]) => ({ a, b, c, d }),
+const ip = Grammar.sepBy(
+  Grammar.regex(/\d{1,3}/, "octet").pipe(Grammar.transform({ decode: Number, encode: String })),
+  ".",
+  { min: 4, max: 4 },
+).pipe(
+  Grammar.transform({
+    decode: ([a, b, c, d]) => [a!, b!, c!, d!] as const,
+    encode: (tuple) => [...tuple],
   }),
 )
 
