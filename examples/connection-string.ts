@@ -9,7 +9,6 @@ const pair = Grammar.gen(function* () {
   return { key, value }
 })
 
-/** `?k=v&k=v` as a record; absent when the record is empty. */
 const params = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"))).pipe(
   Grammar.transform({
     decode: (pairs) => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),

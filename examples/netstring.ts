@@ -21,20 +21,18 @@ const netstring = Grammar.gen(function* () {
 const show = (r: Result.Result<unknown, { readonly message: string }>) =>
   Result.isSuccess(r) ? JSON.stringify(r.success) : `✗ ${r.failure.message}`
 
-Effect.runSync(
-  Effect.gen(function* () {
-    yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)
-    yield* Console.log(
-      `parse "12:hello world!,"  →  ${show(Grammar.parse(netstring, "12:hello world!,"))}`,
-    )
-    yield* Console.log(
-      `parse "5:hello world!,"   →  ${show(Grammar.parse(netstring, "5:hello world!,"))}`,
-    )
-    yield* Console.log(
-      `print "round trip ✓"     →  ${show(Grammar.print(netstring, "round trip ✓"))}`,
-    )
-    yield* Console.log(
-      `roundTrip "a,b:c"        →  ${show(Grammar.checkRoundTrip(netstring, "a,b:c"))}`,
-    )
-  }),
-)
+Effect.gen(function* () {
+  yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)
+  yield* Console.log(
+    `parse "12:hello world!,"  →  ${show(Grammar.parse(netstring, "12:hello world!,"))}`,
+  )
+  yield* Console.log(
+    `parse "5:hello world!,"   →  ${show(Grammar.parse(netstring, "5:hello world!,"))}`,
+  )
+  yield* Console.log(
+    `print "round trip ✓"     →  ${show(Grammar.print(netstring, "round trip ✓"))}`,
+  )
+  yield* Console.log(
+    `roundTrip "a,b:c"        →  ${show(Grammar.checkRoundTrip(netstring, "a,b:c"))}`,
+  )
+}).pipe(Effect.runSync)

@@ -14,7 +14,8 @@ const jsonBool = Grammar.choice(
 const jsonNumber = Grammar.lexeme(
   Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number"),
 ).pipe(Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }))
-const jsonString: Grammar.Grammar<string> = Grammar.lexeme(
+
+const jsonString = Grammar.lexeme(
   Grammar.regex(/"(?:[^"\\-]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
 ).pipe(Grammar.decodeTo(Schema.String)({ decode: JSON.parse, encode: JSON.stringify }))
 
@@ -44,7 +45,7 @@ const member = Grammar.gen(function* () {
   return { key, value }
 })
 
-const jsonObject: Grammar.Grammar<{ [key: string]: JsonValue }> = Grammar.gen(function* () {
+const jsonObject = Grammar.gen(function* () {
   yield* Grammar.symbol("{")
   const members = yield* Grammar.field("members", Grammar.sepBy(member, Grammar.symbol(",")))
   yield* Grammar.symbol("}")

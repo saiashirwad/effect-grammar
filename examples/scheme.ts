@@ -1,16 +1,6 @@
-/**
- * Scheme S-expressions: grammar owns shape; Schema catalog owns special-form arity.
- * Minimal subset: numbers, strings, booleans, symbols, lists, and quote.
- *
- * The schemas are the single source of truth for the AST: atom types are
- * derived from them, and `Grammar.decodeTo` reuses them as guards in both
- * directions, so `choice` picks the right branch when printing.
- */
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
-
-// --- AST schemas ---
 
 const NumberAtom = Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite })
 const StringAtom = Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String })
@@ -21,7 +11,6 @@ const AtomSchema = Schema.Union([NumberAtom, StringAtom, BooleanAtom, SymbolAtom
 
 type Atom = typeof AtomSchema.Type
 
-// The recursive variants can't be derived from their own schemas — declared once, by hand.
 type List = { readonly kind: "list"; readonly elements: ReadonlyArray<Expr> }
 type Quote = { readonly kind: "quote"; readonly inner: Expr }
 type Expr = Atom | List | Quote
@@ -44,8 +33,6 @@ const ExprSchema: Schema.Codec<Expr> = Schema.Union([
   ListSchema,
   QuoteSchema,
 ])
-
-// --- grammar ---
 
 const numberAtom = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")).pipe(
   Grammar.decodeTo(NumberAtom)({
@@ -70,7 +57,6 @@ const booleanAtom = Grammar.lexeme(
   }),
 )
 
-// After numbers/booleans; excludes whitespace, delimiters, and string quotes.
 const symbolAtom = Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")).pipe(
   Grammar.decodeTo(SymbolAtom)({
     decode: (value) => ({ kind: "symbol", value }),
@@ -104,8 +90,6 @@ const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
 )
 
 const document = Grammar.wrap(Grammar.whitespace, expr, Grammar.whitespace)
-
-// --- special-form catalog (arity only; unknown heads are free) ---
 
 const form = (min: number, max = Number.POSITIVE_INFINITY) => ({ min, max })
 
@@ -184,36 +168,7 @@ const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme
   catalogIssues,
 )
 
-// --- sample run ---
-
 const formatIssue = SchemaIssue.makeFormatterDefault()
-
-const show = (e: Expr): string => {
-  switch (e.kind) {
-    case "number":
-      return String(e.value)
-    case "string":
-      return JSON.stringify(e.value)
-    case "boolean":
-      return e.value ? "#t" : "#f"
-    case "symbol":
-      return e.value
-    case "quote":
-      return "'" + show(e.inner)
-    case "list":
-      return "(" + e.elements.map(show).join(" ") + ")"
-  }
-}
-
-const report = (source: string, detail: string, ok: boolean) => {
-  const label = ok ? "ok  " : "fail"
-  const input = source === "" ? "(empty)" : source
-  const body = detail
-    .split("\n")
-    .map((line) => `      ${line}`)
-    .join("\n")
-  return `${label}  ${input}\n${body}`
-}
 
 const samples = [
   "(+ 1 2)",
@@ -237,8 +192,9 @@ const samples = [
 const check = (source: string) =>
   Schema.decodeUnknownEffect(ValidScheme)(source).pipe(
     Effect.match({
-      onSuccess: (value) => report(source, show(value), true),
-      onFailure: (err) => report(source, formatIssue(err.issue), false),
+      onSuccess: (value) =>
+        `decode ${source || "(empty)"}\n  →  ${Schema.encodeSync(ValidScheme)(value)}`,
+      onFailure: (err) => `decode ${source || "(empty)"}\n  →  ${formatIssue(err.issue)}`,
     }),
     Effect.flatMap(Console.log),
   )

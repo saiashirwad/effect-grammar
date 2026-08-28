@@ -1,4 +1,3 @@
-/** The grammar owns shape; the target Schema owns refinements. Both report through SchemaIssue. */
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
@@ -22,14 +21,12 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const samples = ["ab:200", "alice:x"]
 
-Effect.asVoid(
-  Effect.forEach(samples, (source) =>
-    Schema.decodeUnknownEffect(Person, { errors: "all" })(source).pipe(
-      Effect.match({
-        onSuccess: (v) => `${source}  →  ${JSON.stringify(v)}`,
-        onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
-      }),
-      Effect.flatMap(Console.log),
-    ),
+Effect.forEach(samples, (source) =>
+  Schema.decodeUnknownEffect(Person, { errors: "all" })(source).pipe(
+    Effect.match({
+      onSuccess: (v) => `${source}  →  ${JSON.stringify(v)}`,
+      onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
+    }),
+    Effect.flatMap(Console.log),
   ),
 ).pipe(Effect.runSync)
