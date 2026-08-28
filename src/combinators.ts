@@ -27,46 +27,58 @@ export const empty: Silent = literal("")
 export const regex = (re: RegExp, name: string): Grammar<string> =>
   make({ _tag: "Regex", re: new RegExp(re.source, `${re.flags.replace(/[gy]/g, "")}y`), name })
 
-const toSilent = (s: Silent | string): Silent => (typeof s === "string" ? literal(s) : s)
+const toSilent = (s: Silent | string): Silent => (isGrammar(s) ? s : literal(s))
 
 /** Silent when every part is silent, so the result can itself be `yield*`-ed. */
 const silentIf = (cond: boolean, node: Node): any => (cond ? silent(node) : make(node))
 
-export const seq: {
-  (...parts: ReadonlyArray<Silent>): Silent
-  <const Parts extends ReadonlyArray<Silent | Field<string, any>>>(
-    ...parts: Parts
-  ): Grammar<Fields<Parts[number]>>
-} = (...parts: ReadonlyArray<Part>) => silentIf(!parts.some(isField), { _tag: "Seq", parts })
+export function seq(...parts: ReadonlyArray<Silent>): Silent
+export function seq<const Parts extends ReadonlyArray<Silent | Field<string, any>>>(
+  ...parts: Parts
+): Grammar<Fields<Parts[number]>>
+export function seq(...parts: ReadonlyArray<Part>) {
+  const node = { _tag: "Seq", parts } satisfies Extract<Node, { _tag: "Seq" }>
+  return silentIf(!parts.some(isField), node)
+}
 
 export const gen = <Y extends Silent | Field<string, any>, R extends Fields<Y> | void = void>(
   run: () => Generator<Y, R, any>,
 ): Grammar<[R] extends [void] ? Fields<Y> : R> => make({ _tag: "Gen", run })
 
-export const wrap: {
-  (open: Silent | string, inner: Silent, close: Silent | string): Silent
-  <A>(open: Silent | string, inner: Grammar<A>, close: Silent | string): Grammar<A>
-} = (open: Silent | string, inner: Grammar<any>, close: Silent | string) =>
-  silentIf(isSilent(inner), { _tag: "Wrap", open: toSilent(open), inner, close: toSilent(close) })
+export function wrap(open: Silent | string, inner: Silent, close: Silent | string): Silent
+export function wrap<A>(open: Silent | string, inner: Grammar<A>, close: Silent | string): Grammar<A>
+export function wrap(open: Silent | string, inner: Grammar<any>, close: Silent | string) {
+  const node = {
+    _tag: "Wrap",
+    open: toSilent(open),
+    inner,
+    close: toSilent(close),
+  } satisfies Extract<Node, { _tag: "Wrap" }>
+  return silentIf(isSilent(inner), node)
+}
 
-export const prefix: {
-  (open: Silent | string, inner: Silent): Silent
-  <A>(open: Silent | string, inner: Grammar<A>): Grammar<A>
-} = (open: Silent | string, inner: Grammar<any>): any => wrap(open, inner, empty)
+export function prefix(open: Silent | string, inner: Silent): Silent
+export function prefix<A>(open: Silent | string, inner: Grammar<A>): Grammar<A>
+export function prefix(open: Silent | string, inner: Grammar<any>) {
+  return wrap(open, inner, empty)
+}
 
-export const suffix: {
-  (inner: Silent, close: Silent | string): Silent
-  <A>(inner: Grammar<A>, close: Silent | string): Grammar<A>
-} = (inner: Grammar<any>, close: Silent | string): any => wrap(empty, inner, close)
+export function suffix(inner: Silent, close: Silent | string): Silent
+export function suffix<A>(inner: Grammar<A>, close: Silent | string): Grammar<A>
+export function suffix(inner: Grammar<any>, close: Silent | string) {
+  return wrap(empty, inner, close)
+}
 
 export const choice = <const Gs extends readonly [Grammar<any>, ...Array<Grammar<any>>]>(
   ...options: Gs
 ): Grammar<Type<Gs[number]>> => make({ _tag: "Choice", options })
 
-export const optional: {
-  (inner: Silent): Silent
-  <A>(inner: Grammar<A>): Grammar<A | undefined>
-} = (inner: Grammar<any>) => silentIf(isSilent(inner), { _tag: "Optional", inner })
+export function optional(inner: Silent): Silent
+export function optional<A>(inner: Grammar<A>): Grammar<A | undefined>
+export function optional(inner: Grammar<any>) {
+  const node = { _tag: "Optional", inner } satisfies Extract<Node, { _tag: "Optional" }>
+  return silentIf(isSilent(inner), node)
+}
 
 export interface RepeatOptions {
   readonly min?: number
@@ -85,26 +97,32 @@ const bounds = (name: string, opts: RepeatOptions | undefined): Bounds => {
   return { min, max }
 }
 
+/** For `dual` with optional trailing options: data-first when the first argument is a grammar. */
+const dataFirst = (args: IArguments) => isGrammar(args[0])
+
 export const many: {
   <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>>
   (opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<Array<A>>
 } = F.dual(
-  (args) => isGrammar(args[0]),
+  dataFirst,
   <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>> =>
     make({ _tag: "Many", inner, sep: empty, ...bounds("many", opts) }),
 )
 
-export const sepBy = <A>(
-  inner: Grammar<A>,
-  sep: Silent | string,
-  opts?: RepeatOptions,
-): Grammar<Array<A>> => make({ _tag: "Many", inner, sep: toSilent(sep), ...bounds("sepBy", opts) })
+export const sepBy: {
+  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<Array<A>>
+  (sep: Silent | string, opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<Array<A>>
+} = F.dual(
+  dataFirst,
+  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<Array<A>> =>
+    make({ _tag: "Many", inner, sep: toSilent(sep), ...bounds("sepBy", opts) }),
+)
 
 export interface TransformOptions<A, B> {
   readonly decode: (a: A) => B
   readonly encode: (b: B) => A
   /** Guards `decode`'s output on parse and the input on print. */
-  readonly is?: (u: unknown) => boolean
+  readonly is?: (value: B) => boolean
   readonly name?: string
 }
 
@@ -117,11 +135,7 @@ export const transform: {
     make({ _tag: "Transform", inner, ...f }),
 )
 
-export interface DecodeToOptions<A, T> {
-  readonly decode: (a: A) => T
-  readonly encode: (b: T) => A
-  readonly name?: string
-}
+export type DecodeToOptions<A, T> = Omit<TransformOptions<A, T>, "is">
 
 /**
  * Curried on purpose: with the schema and options in one call TS widens literal
@@ -131,8 +145,8 @@ export const decodeTo =
   <T>(schema: Schema.Codec<T, unknown, unknown, unknown>) =>
   <A>(f: DecodeToOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> => {
-    let is: ((u: unknown) => boolean) | undefined
-    return transform(inner, { ...f, is: (u) => (is ??= Schema.is(schema))(u) })
+    let is: ((value: T) => boolean) | undefined
+    return transform(inner, { ...f, is: (value) => (is ??= Schema.is(schema))(value) })
   }
 
 export const as: {
@@ -170,17 +184,18 @@ export const label: {
 )
 
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
-  make(name === undefined ? { _tag: "Suspend", thunk } : { _tag: "Suspend", thunk, name })
+  make({ _tag: "Suspend", thunk, name })
 
 const hiddenWhitespace = (printAs: string): Silent =>
   silent({ _tag: "Skip", inner: regex(/\s*/, "whitespace"), printAs, show: false })
 
 export const whitespace: Silent = hiddenWhitespace("")
 
-export const lexeme: {
-  (inner: Silent): Silent
-  <A>(inner: Grammar<A>): Grammar<A>
-} = (inner: Grammar<any>): any => suffix(inner, hiddenWhitespace(" "))
+export function lexeme(inner: Silent): Silent
+export function lexeme<A>(inner: Grammar<A>): Grammar<A>
+export function lexeme(inner: Grammar<any>) {
+  return suffix(inner, hiddenWhitespace(" "))
+}
 
 export const symbol = (s: string): Silent => lexeme(literal(s))
 

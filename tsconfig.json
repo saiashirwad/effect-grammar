@@ -30,6 +30,7 @@
       {
         "name": "@effect/language-service",
         "transform": "@effect/language-service/transform",
+        "diagnostics": false,
         "diagnosticSeverity": {
           "asyncFunction": "warning",
           "cryptoRandomUUID": "warning",

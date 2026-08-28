@@ -22,7 +22,7 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 const samples = ["ab:200", "alice:x"]
 
 Effect.forEach(samples, (source) =>
-  Schema.decodeUnknownEffect(Person, { errors: "all" })(source).pipe(
+  Schema.decodeEffect(Person, { errors: "all" })(source).pipe(
     Effect.match({
       onSuccess: (v) => `${source}  →  ${JSON.stringify(v)}`,
       onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,

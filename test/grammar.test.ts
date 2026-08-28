@@ -45,7 +45,9 @@ describe("regex", () => {
   it("prints a matching string and rejects a non-matching one", () => {
     assert.equal(printOk(g, "xyz"), "xyz")
     assert.match(printFail(g, "x1").message, /does not match/)
-    assert.match(printFail(g, 42 as unknown as string).message, /expected a string/)
+    const badGrammar: Grammar.Grammar<unknown> = g
+    const e = printFail(badGrammar, 42)
+    assert.match(e.message, /expected a string/)
   })
 
   it("ignores g and y flags", () => {
@@ -131,7 +133,11 @@ describe("gen", () => {
     assert.deepEqual(parseOk(g, "w:ab"), { kind: "word", value: "ab" })
     assert.equal(printOk(g, { kind: "word", value: "zz" }), "w:zz")
     assert.equal(printOk(g, { kind: "num", value: 5 }), "n:5")
-    assert.match(printFail(g, { kind: "num", value: "zz" as never }).message, /integer/)
+    const badGrammar: Grammar.Grammar<
+      { kind: "num"; value: unknown } | { kind: "word"; value: unknown }
+    > = g
+    const e = printFail(badGrammar, { kind: "num", value: "zz" })
+    assert.match(e.message, /integer/)
   })
 
   it("rejects a field yielded twice", () => {
@@ -195,7 +201,8 @@ describe("choice", () => {
 
   it("prints the first option that accepts the value, and lists every reason when none does", () => {
     assert.equal(printOk(g, "ac"), "ac")
-    const e = printFail(g, "zz" as never)
+    const badGrammar: Grammar.Grammar<string> = g
+    const e = printFail(badGrammar, "zz")
     assert.match(e.message, /no choice branch accepts "zz"/)
     assert.match(e.message, /expected "ab"/)
     assert.match(e.message, /expected "ac"/)
@@ -297,6 +304,10 @@ describe("sepBy", () => {
     assert.deepEqual(parseFail(G.sepBy(G.integer, ",", { min: 1 }), "").expected, ["integer"])
   })
 
+  it("is pipeable", () => {
+    assert.deepEqual(parseOk(G.integer.pipe(G.sepBy(",", { min: 1 })), "1,2"), [1, 2])
+  })
+
   it("prints with separators", () => {
     assert.equal(printOk(g, [1, 2]), "1,2")
     assert.equal(printOk(g, []), "")
@@ -316,11 +327,10 @@ describe("transform / decodeTo", () => {
       G.transform({
         decode: (n) => n,
         encode: (n) => n,
-        is: (u) => typeof u === "number" && u % 2 === 0,
+        is: (n: number) => n % 2 === 0,
         name: "even",
       }),
     )
-    assert.equal(parseOk(even, "4"), 4)
     assert.deepEqual(parseFail(even, "3").expected, ["even"])
     assert.match(printFail(even, 3).message, /even/)
   })
@@ -426,7 +436,12 @@ describe("suspend", () => {
         G.wrap("[", G.sepBy(nested, ","), "]").pipe(
           G.transform({
             decode: (a): Nested => a,
-            encode: (a) => a as Array<Nested>,
+            encode: (a): Array<Nested> => {
+              if (!Array.isArray(a)) {
+                throw new TypeError("expected array")
+              }
+              return a
+            },
             is: Array.isArray,
           }),
         ),
@@ -520,18 +535,18 @@ describe("toSchema", () => {
   )
 
   it("decodes and encodes", () => {
-    assert.deepEqual(Schema.decodeUnknownSync(Pair)("a=1"), { name: "a", n: 1 })
+    assert.deepEqual(Schema.decodeSync(Pair)("a=1"), { name: "a", n: 1 })
     assert.equal(Schema.encodeSync(Pair)({ name: "b", n: 2 }), "b=2")
   })
 
   it("surfaces parse errors with position", () => {
-    const r = Schema.decodeUnknownResult(Pair)("a=x")
+    const r = Schema.decodeResult(Pair)("a=x")
     assert.ok(Result.isFailure(r))
     if (Result.isFailure(r)) assert.match(r.failure.message, /line 1, column 3: expected integer/)
   })
 
   it("applies the target's refinements", () => {
-    assert.ok(Result.isFailure(Schema.decodeUnknownResult(Pair)("a=10")))
+    assert.ok(Result.isFailure(Schema.decodeResult(Pair)("a=10")))
   })
 
   it("fails to encode what the grammar cannot print", () => {

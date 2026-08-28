@@ -26,21 +26,21 @@ export type Node =
       readonly inner: Grammar<any>
       readonly decode: (a: any) => any
       readonly encode: (b: any) => any
-      readonly is?: (u: unknown) => boolean
-      readonly name?: string
+      readonly is?: ((value: any) => boolean) | undefined
+      readonly name?: string | undefined
     }
   | {
       readonly _tag: "Skip"
       readonly inner: Grammar<any>
-      readonly printAs: unknown
+      readonly printAs: any
       readonly show: boolean
     }
   | { readonly _tag: "Label"; readonly inner: Grammar<any>; readonly name: string }
   | {
       readonly _tag: "Suspend"
       readonly thunk: () => Grammar<any>
-      readonly name?: string
-      resolved?: Grammar<any>
+      readonly name?: string | undefined
+      resolved?: Grammar<any> | undefined
     }
 
 export interface Grammar<out A> extends Pipeable.Pipeable {
@@ -97,7 +97,7 @@ export const field = <const K extends string, G extends Grammar<any>>(
   grammar: G,
 ): Field<K, Type<G>> => new FieldImpl(name, grammar)
 
-export const isGrammar = (u: unknown): u is Grammar<any> => u instanceof GrammarImpl
+export const isGrammar = (value: any): value is Grammar<any> => value instanceof GrammarImpl
 export const isSilent = (g: Grammar<any>): g is Silent => g instanceof SilentImpl
 export const isField = (p: Part): p is Field<string, any> => p instanceof FieldImpl
 

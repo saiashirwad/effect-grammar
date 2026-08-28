@@ -4,6 +4,9 @@ import { type Grammar, isField, type Part, resolve } from "./core.ts"
 import { ParseError } from "./errors.ts"
 import { describe } from "./render.ts"
 
+type ParseValue = string | number | boolean | bigint | symbol | null | undefined | object
+
+
 interface State {
   readonly input: string
   pos: number
@@ -24,9 +27,9 @@ const failAt = (s: State, expected: string): typeof FAIL => {
   return FAIL
 }
 
-const runPart = (p: Part, s: State): unknown => go(isField(p) ? p.grammar : p, s)
+const runPart = (p: Part, s: State): ParseValue | typeof FAIL => go(isField(p) ? p.grammar : p, s)
 
-const go = (g: Grammar<unknown>, s: State): unknown => {
+const go = (g: Grammar<unknown>, s: State): ParseValue | typeof FAIL => {
   const n = g.node
   switch (n._tag) {
     case "Literal": {
@@ -42,17 +45,17 @@ const go = (g: Grammar<unknown>, s: State): unknown => {
       return m[0]
     }
     case "Seq": {
-      const out: Record<string, unknown> = {}
+      const out = new Map<string, ParseValue>()
       for (const p of n.parts) {
         const v = runPart(p, s)
         if (v === FAIL) return FAIL
-        if (isField(p)) out[p.name] = v
+        if (isField(p)) out.set(p.name, v)
       }
-      return n.parts.some(isField) ? out : undefined
+      return n.parts.some(isField) ? Object.fromEntries(out) : undefined
     }
     case "Gen": {
       const it = n.run()
-      const out: Record<string, unknown> = {}
+      const out = new Map<string, ParseValue>()
       let r = it.next()
       while (!r.done) {
         const p = r.value
@@ -62,14 +65,14 @@ const go = (g: Grammar<unknown>, s: State): unknown => {
           return FAIL
         }
         if (isField(p)) {
-          if (p.name in out) {
+          if (out.has(p.name)) {
             throw new Error(`gen: field "${p.name}" yielded twice — use many() to repeat`)
           }
-          out[p.name] = v
+          out.set(p.name, v)
         }
         r = it.next(v)
       }
-      return r.value ?? out
+      return r.value ?? Object.fromEntries(out)
     }
     case "Wrap": {
       if (go(n.open, s) === FAIL) return FAIL
@@ -87,7 +90,7 @@ const go = (g: Grammar<unknown>, s: State): unknown => {
       return FAIL
     }
     case "Many": {
-      const out: Array<unknown> = []
+      const out: Array<ParseValue> = []
       let mark = s.pos
       while (out.length < n.max) {
         const v = go(n.inner, s)
@@ -145,7 +148,10 @@ const toError = (s: State): ParseError => {
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
   const s: State = { input, pos: 0, furthest: 0, expected: new Set() }
   const v = go(grammar, s)
-  if (v !== FAIL && s.pos === input.length) return Result.succeed(v as A)
+  if (v !== FAIL && s.pos === input.length) {
+    // SAFETY: go only returns the grammar's parsed value when it reaches the end successfully.
+    return Result.succeed(v as A)
+  }
   if (v !== FAIL) failAt(s, "end of input")
   return Result.fail(toError(s))
 }

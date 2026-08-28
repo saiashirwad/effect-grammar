@@ -32,7 +32,7 @@ describe("correctness regressions", () => {
       Grammar.transform({
         decode: (n) => n,
         encode: (n) => n,
-        is: (u) => typeof u === "number" && u < 10,
+        is: (u) => Number.isSafeInteger(u) && u < 10,
         name: "small",
       }),
     )

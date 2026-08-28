@@ -1,42 +1,54 @@
 import { Result, Schema } from "effect"
 
-import { type Grammar, isField, type Part, resolve } from "./core.ts"
+import { type Fields, type Grammar, isField, type Part, resolve } from "./core.ts"
 import { preview, PrintError } from "./errors.ts"
 import { describe } from "./render.ts"
 
 const isPrintError = Schema.is(PrintError)
+const isString = Schema.is(Schema.String)
 
 const fail = (message: string): never => {
   throw new PrintError({ message })
 }
 
-const printPart = (p: Part, value: Record<string, unknown>): string =>
-  isField(p) ? out(p.grammar, value[p.name]) : out(p, undefined)
+type PrintFields = Fields<Part>
 
-const out = (g: Grammar<unknown>, value: unknown): string => {
+const printPart = <A>(p: Part, value: A): string => {
+  if (isField(p)) {
+    // SAFETY: Seq and Gen only pass field bags shaped by the grammar's parts.
+    const fields = value as PrintFields
+    return out(p.grammar, fields[p.name])
+  }
+  return out(p, undefined)
+}
+
+const out = <A>(g: Grammar<A>, value: A): string => {
   const n = g.node
   switch (n._tag) {
     case "Literal":
       return n.value
-    case "Regex": {
-      if (typeof value !== "string")
+    case "Regex":
+      if (!isString(value))
         return fail(`${n.name}: expected a string, got ${preview(value)}`)
-      const whole = new RegExp(`^(?:${n.re.source})$`, n.re.flags.replace("y", ""))
-      if (!whole.test(value)) {
-        return fail(`${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
+      {
+        const whole = new RegExp(`^(?:${n.re.source})$`, n.re.flags.replace("y", ""))
+        if (!whole.test(value)) {
+          return fail(`${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
+        }
+        return value
       }
-      return value
-    }
     case "Seq":
-      return n.parts.map((p) => printPart(p, value as Record<string, unknown>)).join("")
+      return n.parts.map((p) => printPart(p, value)).join("")
     case "Gen": {
+      // SAFETY: gen values are the field bag produced by the surrounding grammar.
+      const fields = value as PrintFields
       const it = n.run()
       let acc = ""
       let r = it.next()
       while (!r.done) {
         const p = r.value
-        acc += printPart(p, value as Record<string, unknown>)
-        r = it.next(isField(p) ? (value as Record<string, unknown>)[p.name] : undefined)
+        acc += printPart(p, fields)
+        r = it.next(isField(p) ? fields[p.name] : undefined)
       }
       return acc
     }

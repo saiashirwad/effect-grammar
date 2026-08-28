@@ -249,17 +249,17 @@ const GithubRepo = pattern(
 
 interface Spec {
   readonly atom: Schema.ConstraintDecoder<unknown>
-  readonly shapes?: ReadonlyArray<QualifierValue["kind"]>
+  readonly kinds?: ReadonlyArray<QualifierValue["kind"]>
 }
 
 const word = (atom: Schema.ConstraintDecoder<unknown>): Spec => ({
   atom,
-  shapes: ["word"],
+  kinds: ["word"],
 })
 const enumOf = <const L extends ReadonlyArray<string>>(values: L): Spec =>
   word(Schema.Literals(values))
 
-const catalog: Record<string, Spec> = {
+const catalog = {
   is: enumOf([
     "open",
     "closed",
@@ -317,6 +317,14 @@ const catalog: Record<string, Spec> = {
   filename: { atom: Schema.String },
   path: { atom: Schema.String },
   extension: { atom: Schema.String },
+} satisfies Record<string, Spec>
+
+type Catalog = typeof catalog
+
+const lookupSpec = (key: string): Spec | undefined => {
+  if (!(key in catalog)) return undefined
+  // SAFETY: the `in` check above proves `key` names a catalog entry here.
+  return catalog[key as keyof Catalog]
 }
 
 const atoms = (v: QualifierValue): ReadonlyArray<string> => {
@@ -351,20 +359,20 @@ const walkQualifiers = function* (q: Query): Generator<Qualifier> {
 const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> => {
   const issues: Array<Schema.FilterIssue> = []
   for (const node of walkQualifiers(q)) {
-    const spec = catalog[node.key]
+    const spec = lookupSpec(node.key)
     if (spec === undefined) {
       issues.push({ path: [node.key], issue: "unknown qualifier" })
       continue
     }
-    if (spec.shapes !== undefined && !spec.shapes.includes(node.value.kind)) {
+    if (spec.kinds !== undefined && !spec.kinds.includes(node.value.kind)) {
       issues.push({
         path: [node.key],
-        issue: `expected ${spec.shapes.join(" | ")}, got ${node.value.kind}`,
+        issue: `expected ${spec.kinds.join(" | ")}, got ${node.value.kind}`,
       })
       continue
     }
     for (const a of atoms(node.value)) {
-      const r = Schema.decodeUnknownResult(spec.atom)(a)
+      const r = Schema.decodeResult(spec.atom)(a)
       if (Result.isFailure(r)) issues.push({ path: [node.key], issue: r.failure.issue })
     }
   }
@@ -396,7 +404,7 @@ const samples = [
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(whole)}\n`)
   for (const source of samples) {
-    yield* Schema.decodeUnknownEffect(ValidGithubQuery)(source).pipe(
+    yield* Schema.decodeEffect(ValidGithubQuery)(source).pipe(
       Effect.match({
         onSuccess: (value) => `decode ${json(source)}\n  →  ${json(value)}`,
         onFailure: (err) => `decode ${json(source)}\n  →  ${formatIssue(err.issue)}`,
@@ -404,6 +412,6 @@ Effect.gen(function* () {
       Effect.flatMap(Console.log),
     )
   }
-  const decoded = yield* Schema.decodeUnknownEffect(ValidGithubQuery)(samples[1]!)
+  const decoded = yield* Schema.decodeEffect(ValidGithubQuery)(samples[1]!)
   yield* Console.log(`\nencode  →  ${yield* Schema.encodeEffect(ValidGithubQuery)(decoded)}`)
 }).pipe(Effect.runSync)

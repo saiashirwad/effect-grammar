@@ -5,9 +5,6 @@ import { parse } from "./parse.ts"
 import { print } from "./print.ts"
 import { render } from "./render.ts"
 
-const issue = (input: unknown, message: string) =>
-  new SchemaIssue.InvalidValue(Option.some(input), { message })
-
 export const toSchema = <S extends Schema.Top>(
   grammar: Grammar<S["Type"]>,
   target: S,
@@ -18,9 +15,13 @@ export const toSchema = <S extends Schema.Top>(
       target,
       SchemaTransformation.transformOrFail({
         decode: (s: string) =>
-          Effect.fromResult(parse(grammar, s)).pipe(Effect.mapError((e) => issue(s, e.message))),
+          Effect.fromResult(parse(grammar, s)).pipe(
+            Effect.mapError((e) => new SchemaIssue.InvalidValue(Option.some(s), { message: e.message })),
+          ),
         encode: (a: S["Type"]) =>
-          Effect.fromResult(print(grammar, a)).pipe(Effect.mapError((e) => issue(a, e.message))),
+          Effect.fromResult(print(grammar, a)).pipe(
+            Effect.mapError((e) => new SchemaIssue.InvalidValue(Option.some(a), { message: e.message })),
+          ),
       }),
     ),
     Schema.annotate({ ...options, description: render(grammar) }),

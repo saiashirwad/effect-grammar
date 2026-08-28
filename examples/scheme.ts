@@ -91,9 +91,13 @@ const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
 
 const document = Grammar.wrap(Grammar.whitespace, expr, Grammar.whitespace)
 
-const form = (min: number, max = Number.POSITIVE_INFINITY) => ({ min, max })
+interface FormSpec {
+  readonly min: number
+  readonly max: number
+}
 
-const catalog: Record<string, { readonly min: number; readonly max: number }> = {
+const form = (min: number, max = Number.POSITIVE_INFINITY): FormSpec => ({ min, max })
+const catalog = {
   if: form(2, 3),
   quote: form(1, 1),
   lambda: form(2),
@@ -116,7 +120,7 @@ const catalog: Record<string, { readonly min: number; readonly max: number }> = 
   ">": form(2),
   "<=": form(2),
   ">=": form(2),
-}
+} satisfies Record<string, { readonly min: number; readonly max: number }>
 
 const walkLists = function* (e: Expr): Generator<List> {
   switch (e.kind) {
@@ -140,10 +144,12 @@ const headSymbol = (list: List): string | undefined => {
   return head?.kind === "symbol" ? head.value : undefined
 }
 
+const isCatalogForm = (name: string): name is keyof typeof catalog => Object.hasOwn(catalog, name)
+
 const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
   const name = headSymbol(node)
-  const spec = name === undefined ? undefined : catalog[name]
-  if (name === undefined || spec === undefined) return Result.failVoid
+  if (name === undefined || !isCatalogForm(name)) return Result.failVoid
+  const spec = catalog[name]
   const arity = node.elements.length - 1
   if (arity < spec.min) {
     return Result.succeed({
@@ -190,7 +196,7 @@ const samples = [
 ]
 
 const check = (source: string) =>
-  Schema.decodeUnknownEffect(ValidScheme)(source).pipe(
+  Schema.decodeEffect(ValidScheme)(source).pipe(
     Effect.match({
       onSuccess: (value) =>
         `decode ${source || "(empty)"}\n  →  ${Schema.encodeSync(ValidScheme)(value)}`,

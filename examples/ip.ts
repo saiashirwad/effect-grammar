@@ -23,7 +23,7 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 const samples = ["192.168.1.1", "10.0.300.7", "192.168.1", "not-an-ip"] as const
 
 const check = (source: string) =>
-  Schema.decodeUnknownEffect(Ip)(source).pipe(
+  Schema.decodeEffect(Ip)(source).pipe(
     Effect.match({
       onSuccess: (value) => `${source}  →  ${value.join(".")}`,
       onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,

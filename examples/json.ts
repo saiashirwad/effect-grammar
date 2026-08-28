@@ -16,7 +16,7 @@ const jsonNumber = Grammar.lexeme(
 ).pipe(Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }))
 
 const jsonString = Grammar.lexeme(
-  Grammar.regex(/"(?:[^"\\-]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
+  Grammar.regex(/"(?:[^"\\-]|\\(?:["\\\x2fbfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
 ).pipe(Grammar.decodeTo(Schema.String)({ decode: JSON.parse, encode: JSON.stringify }))
 
 const jsonValue: Grammar.Grammar<JsonValue> = Grammar.suspend(
@@ -56,7 +56,7 @@ const jsonObject = Grammar.gen(function* () {
     encode: (object) => ({
       members: Object.entries(object).map(([key, value]) => ({ key, value })),
     }),
-    is: (u) => typeof u === "object" && u !== null && !Array.isArray(u),
+    is: Schema.is(Schema.Record(Schema.String, Schema.Unknown)),
     name: "object",
   }),
 )
@@ -69,11 +69,11 @@ const document = `{ "name": "ada", "age": 36, "tags": ["math", "code"], "address
 
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(jsonValue)}\n`)
-  const decoded = yield* Schema.decodeUnknownEffect(Json)(document)
+  const decoded = yield* Schema.decodeEffect(Json)(document)
   yield* Console.log(`decode  →  ${json(decoded)}`)
   const encoded = yield* Schema.encodeEffect(Json)(decoded)
   yield* Console.log(`encode  →  ${encoded}`)
-  const failed = yield* Effect.result(Schema.decodeUnknownEffect(Json)(`[1, 2,`))
+  const failed = yield* Effect.result(Schema.decodeEffect(Json)(`[1, 2,`))
   yield* Console.log(
     `decode "[1, 2,"  →  ${failed._tag === "Failure" ? String(failed.failure) : "?"}`,
   )

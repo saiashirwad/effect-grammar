@@ -7,7 +7,7 @@ import * as Grammar from "../src/index.ts"
 import { parseFail, parseOk } from "./helpers.ts"
 
 const jsonString: Grammar.Grammar<string> = Grammar.lexeme(
-  Grammar.regex(/"(?:[^"\\-]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
+  Grammar.regex(/"(?:[^"\\-]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
 ).pipe(Grammar.decodeTo(Schema.String)({ decode: JSON.parse, encode: JSON.stringify }))
 
 describe("JSON strings", () => {
