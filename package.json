@@ -1,7 +1,7 @@
 {
   "name": "effect-grammar",
-  "version": "0.1.0",
-  "description": "Effect Schema, but for text formats: one grammar yields a parser, printer, rendered form, and Schema",
+  "version": "0.2.0",
+  "description": "Invertible grammar combinators and parser-printers for Effect.",
   "keywords": [
     "bidirectional",
     "effect",

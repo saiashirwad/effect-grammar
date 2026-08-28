@@ -2,22 +2,31 @@
 
 Invertible grammar combinators and parser-printers for Effect.
 
-Schema models your structured data. `effect-grammar` models the text formats inside your strings: connection strings, duration strings (`1h30m`), cron expressions, search queries, or DSLs.
+Schema models your structured data. `effect-grammar` models the text formats
+inside your strings: connection strings, duration strings (`1h30m`), cron
+expressions, search queries, or DSLs.
 
 You write the grammar definition once. You get four outputs:
 
-- **A Parser**: Reads text and outputs structured data with line and column error messages.
+- **A Parser**: Reads text and outputs structured data with line and column
+  error messages.
 - **A Printer**: Converts structured data back to canonical text.
-- **A `Schema.Codec<A, string>`**: Integrates directly with Effect Schema (`decode` parses, `encode` prints, and Schema refinements compose).
-- **A Text Renderer**: Formats the grammar as readable text for documentation and schema descriptions.
+- **A `Schema.Codec<A, string>`**: Integrates directly with Effect Schema
+  (`decode` parses, `encode` prints, and Schema refinements compose).
+- **A Text Renderer**: Formats the grammar as readable text for documentation
+  and schema descriptions.
 
 ## Why effect-grammar?
 
-- **`Schema.transformOrFail`**: Requires you to write and maintain both `decode` and `encode` functions manually.
-- **`Schema.TemplateLiteralParser`**: Supports only flat `${a}-${b}` string patterns.
-- **`effect-grammar`**: Automatically derives the parser and printer for formats with optional parts, repetition, alternation, and recursion.
+- **`Schema.transformOrFail`**: Requires you to write and maintain both `decode`
+  and `encode` functions manually.
+- **`Schema.TemplateLiteralParser`**: Supports only flat `${a}-${b}` string
+  patterns.
+- **`effect-grammar`**: Automatically derives the parser and printer for formats
+  with optional parts, repetition, alternation, and recursion.
 
-This is for format strings, not documents. The parser backtracks with no memoization and no left recursion. Printing is canonical, not pretty.
+This is for format strings, not documents. The parser backtracks with no
+memoization and no left recursion. Printing is canonical, not pretty.
 
 ## Install
 
@@ -57,10 +66,10 @@ A silent grammar (`literal`, `symbol`, `whitespace`, anything under `skip`)
 carries no value and can be `yield*`-ed bare. A value grammar goes through
 `field(name, g)`.
 
-`print` replays the generator. It reads each field from `value[name]` and
-passes that back as the `yield*` result. An `if` on a parsed value takes the
-same path both ways. The generator's return must hold every field under its
-name, and the types enforce it. Return nothing and you get the object of fields.
+`print` replays the generator. It reads each field from `value[name]` and passes
+that back as the `yield*` result. An `if` on a parsed value takes the same path
+both ways. The generator's return must hold every field under its name, and the
+types enforce it. Return nothing and you get the object of fields.
 
 `render` cannot read a generator. It runs the generator once with no values and
 shows the parts it yields. The rendering is exact when the generator is
@@ -105,8 +114,8 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 ## Values and alternatives
 
 `transform` maps a value both ways. `decodeTo` takes a Schema that types
-`decode` and `encode` and checks the value on parse and on print. A `choice`
-of Schema-typed branches picks the matching Schema when printing.
+`decode` and `encode` and checks the value on parse and on print. A `choice` of
+Schema-typed branches picks the matching Schema when printing.
 
 ```ts
 const Num = Schema.Struct({ kind: Schema.Literal("num"), value: Schema.Finite })
