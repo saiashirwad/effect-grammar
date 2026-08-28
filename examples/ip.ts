@@ -1,40 +1,27 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
 const Octet = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
 const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
 
-const octet = Grammar.mapSchema(Grammar.regex(/\d{1,3}/, "octet"), Octet, {
-  to: Number,
-  from: String,
-})
+const octet = Grammar.regex(/\d{1,3}/, "octet").pipe(
+  Grammar.decodeTo(Octet)({ decode: Number, encode: String }),
+)
 
-const dot = Grammar.literal(".")
-
-const ip = Grammar.mapSchema(
-  Grammar.struct({
-    a: octet,
-    dot1: dot,
-    b: octet,
-    dot2: dot,
-    c: octet,
-    dot3: dot,
-    d: octet,
+const ip = Grammar.seq(
+  Grammar.field("a", octet),
+  Grammar.literal("."),
+  Grammar.field("b", octet),
+  Grammar.literal("."),
+  Grammar.field("c", octet),
+  Grammar.literal("."),
+  Grammar.field("d", octet),
+).pipe(
+  Grammar.decodeTo(IpAddress)({
+    decode: ({ a, b, c, d }) => [a, b, c, d] as const,
+    encode: ([a, b, c, d]) => ({ a, b, c, d }),
   }),
-  IpAddress,
-  {
-    to: ({ a, b, c, d }) => [a, b, c, d] as const,
-    from: ([a, b, c, d]) => ({
-      a,
-      b,
-      c,
-      d,
-      dot1: "." as const,
-      dot2: "." as const,
-      dot3: "." as const,
-    }),
-  },
 )
 
 const Ip = Grammar.toSchema(ip, IpAddress, { identifier: "IpAddress" })
@@ -52,4 +39,11 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.runFork(Effect.forEach(samples, check, { discard: true }))
+Effect.runFork(
+  Effect.gen(function* () {
+    yield* Console.log(`grammar ${Grammar.render(ip)}\n`)
+    yield* Effect.forEach(samples, check, { discard: true })
+    const encoded = yield* Schema.encodeEffect(Ip)([10, 0, 0, 1])
+    yield* Console.log(`\nencode [10,0,0,1]  →  ${encoded}`)
+  }),
+)

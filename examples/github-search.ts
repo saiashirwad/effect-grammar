@@ -4,7 +4,7 @@
  */
 import { Console, Effect, Result, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
 type CompareOp = ">" | ">=" | "<" | "<="
 
@@ -27,7 +27,7 @@ type Or = { readonly kind: "or"; readonly parts: ReadonlyArray<Query> }
 type Group = { readonly kind: "group"; readonly inner: Query }
 type Query = Term | Qualifier | Not | And | Or | Group
 
-// --- AST schemas (Encoded/Type = Query so Grammar.toSchema is typed, not Schema.Unknown) ---
+// --- AST schemas ---
 
 const WordValueSchema = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
 const QuotedValueSchema = Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String })
@@ -94,199 +94,146 @@ const QuerySchema: Schema.Codec<Query> = Schema.Union([
 
 // --- grammar ---
 
-const skipWs = Grammar.map(Grammar.regex(/\s*/, "whitespace"), {
-  to: () => "",
-  from: () => "",
-})
-const ws = Grammar.regex(/\s+/, "whitespace")
+/** Required whitespace; prints one space. */
+const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
-const doubleQuoted = Grammar.between(
-  Grammar.literal('"'),
-  Grammar.literal('"'),
-  Grammar.regex(/[^"]*/, "string content"),
-)
+const doubleQuoted = Grammar.wrap('"', Grammar.regex(/[^"]*/, "string content"), '"')
 
-type WordValue = Extract<QualifierValue, { readonly kind: "word" }>
-type QuotedValue = Extract<QualifierValue, { readonly kind: "quoted" }>
-type CompareValue = Extract<QualifierValue, { readonly kind: "compare" }>
-type RangeValue = Extract<QualifierValue, { readonly kind: "range" }>
-
-const compareValue = Grammar.mapSchema(
-  Grammar.attempt(
-    Grammar.struct({
-      op: Grammar.choice(
-        Grammar.literal(">="),
-        Grammar.literal("<="),
-        Grammar.literal(">"),
-        Grammar.literal("<"),
-      ),
-      value: token("compare value"),
-    }),
+const compareValue = Grammar.seq(
+  Grammar.field(
+    "op",
+    Grammar.choice(
+      Grammar.literal(">=").pipe(Grammar.as(">=")),
+      Grammar.literal("<=").pipe(Grammar.as("<=")),
+      Grammar.literal(">").pipe(Grammar.as(">")),
+      Grammar.literal("<").pipe(Grammar.as("<")),
+    ),
   ),
-  CompareValueSchema,
-  {
-    to: ({ op, value }): CompareValue => ({ kind: "compare", op, value }),
-    from: (v) => ({ op: v.op, value: v.value }),
-  },
+  Grammar.field("value", token("compare value")),
+).pipe(
+  Grammar.decodeTo(CompareValueSchema)({
+    decode: ({ op, value }) => ({ kind: "compare", op, value }),
+    encode: (v) => ({ op: v.op, value: v.value }),
+  }),
 )
 
-const rangeValue = Grammar.mapSchema(
-  Grammar.regex(/[^\s():"']*\.\.[^\s():"']*/, "range"),
-  RangeValueSchema,
-  {
-    to: (raw): RangeValue => {
+const rangeValue = Grammar.regex(/[^\s():"']*\.\.[^\s():"']*/, "range").pipe(
+  Grammar.decodeTo(RangeValueSchema)({
+    decode: (raw) => {
       const i = raw.indexOf("..")
       const from = raw.slice(0, i)
       const to = raw.slice(i + 2)
-      return {
-        kind: "range",
-        from: from === "" ? undefined : from,
-        to: to === "" ? undefined : to,
-      }
+      return { kind: "range", from: from === "" ? undefined : from, to: to === "" ? undefined : to }
     },
-    from: (v) => (v.from ?? "") + ".." + (v.to ?? ""),
-  },
+    encode: (v) => (v.from ?? "") + ".." + (v.to ?? ""),
+  }),
 )
 
-const wordValue = Grammar.mapSchema(token("qualifier value"), WordValueSchema, {
-  to: (value): WordValue => ({ kind: "word", value }),
-  from: (v) => v.value,
-})
+const wordValue = token("qualifier value").pipe(
+  Grammar.decodeTo(WordValueSchema)({
+    decode: (value) => ({ kind: "word", value }),
+    encode: (v) => v.value,
+  }),
+)
 
-const quotedValue = Grammar.mapSchema(doubleQuoted, QuotedValueSchema, {
-  to: (value): QuotedValue => ({ kind: "quoted", value }),
-  from: (v) => v.value,
-})
+const quotedValue = doubleQuoted.pipe(
+  Grammar.decodeTo(QuotedValueSchema)({
+    decode: (value) => ({ kind: "quoted", value }),
+    encode: (v) => v.value,
+  }),
+)
 
 const qualifierValue = Grammar.choice(quotedValue, compareValue, rangeValue, wordValue)
 
-const qualifier = Grammar.attempt(
-  Grammar.mapSchema(
-    Grammar.struct({
-      neg: Grammar.optional(Grammar.literal("-")),
-      key: Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name"),
-      colon: Grammar.literal(":"),
-      value: qualifierValue,
-    }),
-    QualifierSchema,
-    {
-      to: ({ neg, key, value }): Qualifier => ({
-        kind: "qualifier",
-        negate: neg !== undefined,
-        key,
-        value,
-      }),
-      from: (q) => ({
-        neg: q.negate ? ("-" as const) : undefined,
-        key: q.key,
-        colon: ":" as const,
-        value: q.value,
-      }),
-    },
-  ),
+const qualifier = Grammar.seq(
+  Grammar.field("negate", Grammar.flag("-")),
+  Grammar.field("key", Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name")),
+  Grammar.literal(":"),
+  Grammar.field("value", qualifierValue),
+).pipe(
+  Grammar.decodeTo(QualifierSchema)({
+    decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
+    encode: (q) => ({ negate: q.negate, key: q.key, value: q.value }),
+  }),
 )
 
-const query: Grammar.Grammar<Query> = Grammar.lazy(() => orExpr, { name: "query" })
+const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group: Grammar.Grammar<Group> = Grammar.mapSchema(
-  Grammar.between(
-    Grammar.literal("("),
-    Grammar.literal(")"),
-    Grammar.map(Grammar.struct({ ws1: skipWs, inner: query, ws2: skipWs }), {
-      to: ({ inner }) => inner,
-      from: (inner) => ({ ws1: "", inner, ws2: "" }),
-    }),
-  ),
-  GroupSchema,
-  {
-    to: (inner): Group => ({ kind: "group", inner }),
-    from: (g) => g.inner,
-  },
+const group: Grammar.Grammar<Group> = Grammar.wrap(
+  "(",
+  Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace),
+  ")",
+).pipe(
+  Grammar.decodeTo(GroupSchema)({
+    decode: (inner) => ({ kind: "group", inner }),
+    encode: (g) => g.inner,
+  }),
 )
 
-const termWord: Grammar.Grammar<Term> = Grammar.mapSchema(
-  Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term"),
-  TermWordSchema,
-  {
-    to: (value): typeof TermWordSchema.Type => ({ kind: "term", quoted: false, value }),
-    from: (t) => t.value,
-  },
+const termWord: Grammar.Grammar<Term> = Grammar.regex(
+  /(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/,
+  "search term",
+).pipe(
+  Grammar.decodeTo(TermWordSchema)({
+    decode: (value) => ({ kind: "term", quoted: false, value }),
+    encode: (t) => t.value,
+  }),
 )
 
-const termQuoted: Grammar.Grammar<Term> = Grammar.mapSchema(doubleQuoted, TermQuotedSchema, {
-  to: (value): typeof TermQuotedSchema.Type => ({ kind: "term", quoted: true, value }),
-  from: (t) => t.value,
-})
+const termQuoted: Grammar.Grammar<Term> = doubleQuoted.pipe(
+  Grammar.decodeTo(TermQuotedSchema)({
+    decode: (value) => ({ kind: "term", quoted: true, value }),
+    encode: (t) => t.value,
+  }),
+)
 
 const atom: Grammar.Grammar<Query> = Grammar.choice(qualifier, group, termQuoted, termWord)
 
-// Precedence: NOT > AND > OR. `attempt` rewinds a trailing op for the outer level.
-const notExpr: Grammar.Grammar<Query> = Grammar.lazy(() => Grammar.choice(notBranch, atom), {
-  name: "not",
-})
-
-const notBranch: Grammar.Grammar<Not> = Grammar.mapSchema(
-  Grammar.attempt(Grammar.struct({ kw: Grammar.literal("NOT"), ws, inner: notExpr })),
-  NotSchema,
-  {
-    to: ({ inner }): Not => ({ kind: "not", inner }),
-    from: (n) => ({ kw: "NOT" as const, ws: " ", inner: n.inner }),
-  },
+// Precedence: NOT > AND > OR. Choice backtracks, so a trailing operator that
+// doesn't complete is simply left for the outer level.
+const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
+  () => Grammar.choice(notBranch, atom),
+  "not",
 )
 
-const restAfter = <A>(
-  sep: Grammar.Grammar<undefined>,
-  atom: Grammar.Grammar<A>,
-): Grammar.Grammar<A> =>
-  Grammar.attempt(
-    Grammar.map(Grammar.struct({ sep, atom }), {
-      to: ({ atom }) => atom,
-      from: (atom) => ({ sep: undefined, atom }),
+const notBranch: Grammar.Grammar<Not> = Grammar.prefix(
+  Grammar.seq(Grammar.literal("NOT"), ws),
+  notExpr,
+).pipe(
+  Grammar.decodeTo(NotSchema)({
+    decode: (inner) => ({ kind: "not", inner }),
+    encode: (n) => n.inner,
+  }),
+)
+
+/** `first (sep next)*` flattened into an n-ary node when there is more than one part. */
+const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
+  Grammar.seq(
+    Grammar.field("first", part),
+    Grammar.field("rest", Grammar.many(Grammar.prefix(sep, part))),
+  ).pipe(
+    Grammar.transform({
+      decode: ({ first, rest }): Query =>
+        rest.length === 0 ? first : { kind, parts: [first, ...rest] },
+      encode: (q) => {
+        if (q.kind === kind) {
+          const [first, ...rest] = q.parts
+          if (first !== undefined) return { first, rest }
+        }
+        return { first: q, rest: [] }
+      },
     }),
   )
 
-const nary = (kind: "and" | "or") => ({
-  to: ({ first, rest }: { first: Query; rest: ReadonlyArray<Query> }): Query =>
-    rest.length === 0 ? first : { kind, parts: [first, ...rest] },
-  from: (q: Query) => {
-    if (q.kind === kind) {
-      const [first, ...rest] = q.parts
-      if (first !== undefined) return { first, rest }
-    }
-    return { first: q, rest: [] as Array<Query> }
-  },
-})
+const andSep = Grammar.seq(ws, Grammar.optional(Grammar.seq(Grammar.literal("AND"), ws)))
+const andExpr: Grammar.Grammar<Query> = nary("and", andSep, notExpr)
 
-const andSep = Grammar.map(
-  Grammar.struct({
-    ws,
-    op: Grammar.optional(Grammar.struct({ kw: Grammar.literal("AND"), ws })),
-  }),
-  { to: () => undefined, from: () => ({ ws: " ", op: undefined }) },
-)
+const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
+const orExpr: Grammar.Grammar<Query> = nary("or", orSep, andExpr)
 
-const andExpr: Grammar.Grammar<Query> = Grammar.map(
-  Grammar.struct({ first: notExpr, rest: Grammar.many(restAfter(andSep, notExpr)) }),
-  nary("and"),
-)
+const whole = Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace)
 
-const orSep = Grammar.map(Grammar.struct({ ws1: ws, kw: Grammar.literal("OR"), ws2: ws }), {
-  to: () => undefined,
-  from: () => ({ ws1: " ", kw: "OR" as const, ws2: " " }),
-})
-
-const orExpr: Grammar.Grammar<Query> = Grammar.map(
-  Grammar.struct({ first: andExpr, rest: Grammar.many(restAfter(orSep, andExpr)) }),
-  nary("or"),
-)
-
-const whole = Grammar.map(
-  Grammar.struct({ ws1: skipWs, q: query, ws2: skipWs, end: Grammar.end }),
-  {
-    to: ({ q }) => q,
-    from: (q) => ({ ws1: "", ws2: "", q, end: undefined }),
-  },
-)
+// --- qualifier catalog ---
 
 const pattern = (re: RegExp, identifier: string, message: string) =>
   Schema.String.check(Schema.isPattern(re, { identifier, message }))
@@ -454,14 +401,17 @@ const samples = [
   "is:",
 ]
 
-Effect.all(
-  samples.map((source) =>
-    Schema.decodeUnknownEffect(ValidGithubQuery)(source).pipe(
+Effect.gen(function* () {
+  yield* Console.log(`grammar ${Grammar.render(whole)}\n`)
+  for (const source of samples) {
+    yield* Schema.decodeUnknownEffect(ValidGithubQuery)(source).pipe(
       Effect.match({
         onSuccess: (value) => `decode ${json(source)}\n  →  ${json(value)}`,
         onFailure: (err) => `decode ${json(source)}\n  →  ${formatIssue(err.issue)}`,
       }),
       Effect.flatMap(Console.log),
-    ),
-  ),
-).pipe(Effect.runFork)
+    )
+  }
+  const decoded = yield* Schema.decodeUnknownEffect(ValidGithubQuery)(samples[1]!)
+  yield* Console.log(`\nencode  →  ${yield* Schema.encodeEffect(ValidGithubQuery)(decoded)}`)
+}).pipe(Effect.runFork)

@@ -4,10 +4,8 @@
   "description": "Effect Schema, but for text formats: one grammar yields a parser, printer, rendered form, and Schema",
   "keywords": [
     "bidirectional",
-    "combinators",
     "effect",
     "grammar",
-    "parser",
     "printer",
     "round-trip",
     "schema"
@@ -30,10 +28,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./parser": {
-      "types": "./dist/parser.d.ts",
-      "import": "./dist/parser.js"
     }
   },
   "publishConfig": {

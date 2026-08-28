@@ -1,51 +1,39 @@
 import assert from "node:assert/strict"
 
-import { Effect, Schema } from "effect"
+import { Result } from "effect"
 
-import { ParseError } from "../src/error.ts"
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
-/** Run a parse Effect and return the success value, or fail the test. */
-export const parseOk = <A>(input: string, grammar: Grammar.Grammar<A>): A => {
-  const r = Effect.runSync(Effect.result(Grammar.parse(input, grammar)))
-  if (r._tag !== "Success") assert.fail(`expected parse success, got Failure(${String(r.failure)})`)
+export const parseOk = <A>(grammar: Grammar.Grammar<A>, input: string): A => {
+  const r = Grammar.parse(grammar, input)
+  if (Result.isFailure(r)) assert.fail(`expected parse success, got ${r.failure.message}`)
   return r.success
 }
 
-/** Run a parse Effect and return the ParseError, or fail the test. */
-export const parseFail = <A>(input: string, grammar: Grammar.Grammar<A>): ParseError => {
-  const r = Effect.runSync(Effect.result(Grammar.parse(input, grammar)))
-  if (r._tag !== "Failure")
-    assert.fail(`expected parse failure, got Success(${JSON.stringify(r.success)})`)
-  assert.ok(Schema.is(ParseError)(r.failure), `expected ParseError, got ${r.failure}`)
+export const parseFail = <A>(grammar: Grammar.Grammar<A>, input: string): Grammar.ParseError => {
+  const r = Grammar.parse(grammar, input)
+  if (Result.isSuccess(r)) {
+    assert.fail(`expected parse failure, got ${JSON.stringify(r.success)}`)
+  }
   return r.failure
 }
 
-export const parsePrefixOk = <A>(input: string, grammar: Grammar.Grammar<A>): A => {
-  const r = Effect.runSync(Effect.result(Grammar.parsePrefix(input, grammar)))
-  if (r._tag !== "Success")
-    assert.fail(`expected parsePrefix success, got Failure(${String(r.failure)})`)
-  return r.success
-}
-
 export const printOk = <A>(grammar: Grammar.Grammar<A>, value: A): string => {
-  const r = Effect.runSync(Effect.result(Grammar.print(grammar, value)))
-  if (r._tag !== "Success") assert.fail(`expected print success, got Failure(${String(r.failure)})`)
+  const r = Grammar.print(grammar, value)
+  if (Result.isFailure(r)) assert.fail(`expected print success, got ${r.failure.message}`)
   return r.success
 }
 
 export const printFail = <A>(grammar: Grammar.Grammar<A>, value: A): Grammar.PrintError => {
-  const r = Effect.runSync(Effect.result(Grammar.print(grammar, value)))
-  if (r._tag !== "Failure")
-    assert.fail(`expected print failure, got Success(${JSON.stringify(r.success)})`)
+  const r = Grammar.print(grammar, value)
+  if (Result.isSuccess(r)) {
+    assert.fail(`expected print failure, got ${JSON.stringify(r.success)}`)
+  }
   return r.failure
 }
 
-/**
- * Round-trip law: print then re-parse must yield a structurally equal value.
- * Delegates to {@link Grammar.checkRoundTrip}.
- */
+/** Round-trip law: print then re-parse must yield an `Equal` value. */
 export const assertRoundTrip = <A>(grammar: Grammar.Grammar<A>, value: A): void => {
-  const r = Effect.runSync(Effect.result(Grammar.checkRoundTrip(grammar, value)))
-  if (r._tag !== "Success") assert.fail(String(r.failure))
+  const r = Grammar.checkRoundTrip(grammar, value)
+  if (Result.isFailure(r)) assert.fail(`${r.failure.stage}: ${r.failure.message}`)
 }

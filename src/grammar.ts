@@ -1,37 +1,56 @@
+/**
+ * Bidirectional grammars: one definition parses a string to a value, prints a
+ * value to its canonical string, renders itself as text, and derives a
+ * `Schema.Codec<A, string>`.
+ *
+ * The parser is a synchronous backtracking interpreter over a whole string.
+ * Errors report the furthest position reached and everything expected there.
+ *
+ * Sequencing rule that makes generators printable: a *silent* grammar
+ * (`literal`, `symbol`, `skip`, ...) carries no value and can be `yield*`-ed
+ * bare inside {@link gen} or listed bare inside {@link seq}; a value grammar
+ * must be wrapped in {@link field} so the printer knows which part of the
+ * value belongs to it. Printing a `gen` grammar replays the generator, feeding
+ * each field its value back in, so control flow takes the same path both ways.
+ */
 import {
   Effect,
   Equal,
+  Function as F,
   Option,
+  Pipeable,
+  Result,
   Schema,
   SchemaIssue,
   SchemaTransformation,
-  Scope,
-  Stream,
 } from "effect"
 
-import { many as manyEffect, or_, attempt as attemptEffect } from "./combinators.ts"
-import { locateParseError, ParseError, UpstreamError } from "./error.ts"
-import {
-  failHere,
-  getPos,
-  isEof,
-  makeStringState,
-  matchRegex,
-  ParseState,
-  seek,
-  startsWith,
-} from "./state.ts"
-import {
-  parseStream as parseStreamEffect,
-  streamElements as streamElementsEffect,
-} from "./stream.ts"
-import {
-  InvalidCardinalityError,
-  EvaluationError,
-  InvalidIntegerError,
-  validateNonNegativeSafeInteger,
-} from "./validation.ts"
+// ---------------------------------------------------------------------------
+// errors
+// ---------------------------------------------------------------------------
 
+/** A parse failure at the furthest position the parser reached. */
+export class ParseError extends Schema.TaggedErrorClass<ParseError>()("ParseError", {
+  /** 0-based offset into the input. */
+  pos: Schema.Finite,
+  /** 1-based. */
+  line: Schema.Finite,
+  /** 1-based column within `line`. */
+  column: Schema.Finite,
+  /** Everything that could have matched at `pos`. */
+  expected: Schema.Array(Schema.String),
+  /** The character at `pos`, or `undefined` at end of input. */
+  found: Schema.UndefinedOr(Schema.String),
+}) {
+  override get message(): string {
+    const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
+    const expected =
+      this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
+    return `line ${this.line}, column ${this.column}: expected ${expected}, found ${found}`
+  }
+}
+
+/** A value the grammar cannot print. */
 export class PrintError extends Schema.TaggedErrorClass<PrintError>()("PrintError", {
   message: Schema.String,
 }) {}
@@ -47,719 +66,848 @@ export class RoundTripError extends Schema.TaggedErrorClass<RoundTripError>()("R
   message: Schema.String,
 }) {}
 
-declare const typeId: unique symbol
+// ---------------------------------------------------------------------------
+// AST
+// ---------------------------------------------------------------------------
 
-export interface Literal {
-  readonly _tag: "Literal"
-  readonly value: string
-}
+/** One element of a sequence: a named value, or a silent grammar. */
+export type Part = Field<string, any> | Grammar<any>
 
-export interface Regex {
-  readonly _tag: "Regex"
-  readonly re: RegExp
-  readonly expected: string
-}
-
-export interface MapNode {
-  readonly _tag: "Map"
-  readonly inner: Grammar<any>
-  readonly to: (a: any) => any
-  readonly from: ((b: any) => any) | undefined
-}
-
-export interface StructNode {
-  readonly _tag: "Struct"
-  readonly fields: Record<string, Grammar<any>>
-}
-
-export interface Choice {
-  readonly _tag: "Choice"
-  readonly options: ReadonlyArray<Grammar<any>>
-}
-
-export interface Many {
-  readonly _tag: "Many"
-  readonly inner: Grammar<any>
-  readonly atLeast: number
-}
-
-export interface SepBy {
-  readonly _tag: "SepBy"
-  readonly inner: Grammar<any>
-  readonly sep: Grammar<any>
-  readonly atLeast: number
-}
-
-export interface Optional {
-  readonly _tag: "Optional"
-  readonly inner: Grammar<any>
-}
-
-export interface Attempt {
-  readonly _tag: "Attempt"
-  readonly inner: Grammar<any>
-}
-
-export interface FromEffect {
-  readonly _tag: "FromEffect"
-  readonly eff: Effect.Effect<any, ParseError, ParseState>
-  readonly expected: string
-}
-
-export interface Lazy {
-  readonly _tag: "Lazy"
-  readonly thunk: () => Grammar<any>
-  readonly name: string | undefined
-  /** Memoized `thunk()` result, filled in on first use. */
-  resolved?: Grammar<any>
-}
-
-export interface End {
-  readonly _tag: "End"
-}
-
-export interface Bind {
-  readonly _tag: "Bind"
-  readonly inner: Grammar<any>
-  readonly to: (a: any) => Grammar<any>
-  readonly from: ((b: any) => any) | undefined
-}
-
-export interface Count {
-  readonly _tag: "Count"
-  readonly inner: Grammar<any>
-  readonly n: number
-}
-
-export interface Guard {
-  readonly _tag: "Guard"
-  readonly inner: Grammar<any>
-  readonly pred: (value: any) => boolean
-}
-
-export interface Label {
-  readonly _tag: "Label"
-  readonly expected: string
-  readonly inner: Grammar<any>
+interface Bounds {
+  readonly min: number
+  readonly max: number
 }
 
 export type Node =
-  | Literal
-  | Regex
-  | MapNode
-  | StructNode
-  | Choice
-  | Many
-  | SepBy
-  | Optional
-  | Attempt
-  | FromEffect
-  | Lazy
-  | End
-  | Bind
-  | Count
-  | Guard
-  | Label
+  | { readonly _tag: "Literal"; readonly value: string }
+  | { readonly _tag: "Regex"; readonly re: RegExp; readonly name: string }
+  | { readonly _tag: "Seq"; readonly parts: ReadonlyArray<Part> }
+  | { readonly _tag: "Gen"; readonly run: () => Generator<Part, any, any> }
+  | {
+      readonly _tag: "Wrap"
+      readonly open: Grammar<void>
+      readonly inner: Grammar<any>
+      readonly close: Grammar<void>
+    }
+  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<Grammar<any>> }
+  | ({ readonly _tag: "Many"; readonly inner: Grammar<any> } & Bounds)
+  | ({ readonly _tag: "SepBy"; readonly inner: Grammar<any>; readonly sep: Grammar<void> } & Bounds)
+  | { readonly _tag: "Optional"; readonly inner: Grammar<any> }
+  | {
+      readonly _tag: "Transform"
+      readonly inner: Grammar<any>
+      readonly decode: (a: any) => any
+      readonly encode: (b: any) => any
+      readonly is: ((u: unknown) => boolean) | undefined
+      readonly name: string | undefined
+    }
+  | { readonly _tag: "Const"; readonly inner: Grammar<void>; readonly value: unknown }
+  | {
+      readonly _tag: "Skip"
+      readonly inner: Grammar<any>
+      readonly printAs: unknown
+      /** `false` hides it from `render` (whitespace). */
+      readonly show: boolean
+    }
+  | { readonly _tag: "Label"; readonly inner: Grammar<any>; readonly name: string }
+  | {
+      readonly _tag: "Suspend"
+      readonly thunk: () => Grammar<any>
+      readonly name: string | undefined
+      /** Memoized `thunk()` result, filled in on first use. */
+      resolved?: Grammar<any>
+    }
 
-export type Grammar<A> = Node & { readonly [typeId]: A }
+// ---------------------------------------------------------------------------
+// grammar values
+// ---------------------------------------------------------------------------
 
-const makeGrammar = <A>(node: Node): Grammar<A> => node as Grammar<A>
-
-export type GrammarType<G> = G extends Grammar<infer A> ? A : never
-
-export const literal = <L extends string>(value: L): Grammar<L> =>
-  makeGrammar({ _tag: "Literal", value })
-
-/** Clone the pattern and drop `g`/`y` so `lastIndex` and sticky start never affect matching. */
-export const regex = (re: RegExp, expected: string): Grammar<string> =>
-  makeGrammar({
-    _tag: "Regex",
-    re: new RegExp(re.source, re.flags.replace(/[gy]/g, "")),
-    expected,
-  })
-
-export const map = <A, B>(
-  inner: Grammar<A>,
-  f: { readonly to: (a: A) => B; readonly from?: (b: B) => A },
-): Grammar<B> => makeGrammar({ _tag: "Map", inner, to: f.to, from: f.from })
-
-export const struct = <F extends Record<string, Grammar<any>>>(
-  fields: F,
-): Grammar<{ [K in keyof F]: GrammarType<F[K]> }> => makeGrammar({ _tag: "Struct", fields })
-
-export const choice = <Gs extends readonly [Grammar<any>, ...Array<Grammar<any>>]>(
-  ...options: Gs
-): Grammar<GrammarType<Gs[number]>> => makeGrammar({ _tag: "Choice", options })
-
-export const many = <A>(
-  inner: Grammar<A>,
-  opts?: { readonly atLeast?: number },
-): Grammar<Array<A>> =>
-  makeGrammar({
-    _tag: "Many",
-    inner,
-    atLeast: validateNonNegativeSafeInteger("many", opts?.atLeast ?? 0),
-  })
-
-export const sepBy = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> =>
-  makeGrammar({
-    _tag: "SepBy",
-    inner,
-    sep,
-    atLeast: 0,
-  })
-
-/** Like `sepBy`, but requires at least one element — the first failure propagates. */
-export const sepBy1 = <A, S>(inner: Grammar<A>, sep: Grammar<S>): Grammar<Array<A>> =>
-  makeGrammar({
-    _tag: "SepBy",
-    inner,
-    sep,
-    atLeast: 1,
-  })
-
-export const optional = <A>(inner: Grammar<A>): Grammar<A | undefined> =>
-  makeGrammar({
-    _tag: "Optional",
-    inner,
-  })
-
-/**
- * Rewind on failure: if `inner` fails after consuming input, restore the
- * position so an enclosing `choice` tries its next option.
- */
-export const attempt = <A>(inner: Grammar<A>): Grammar<A> => makeGrammar({ _tag: "Attempt", inner })
-
-/**
- * Print-time filter: parse runs `inner` unchanged, but printing fails with
- * `PrintError` when `pred(value)` is false — so an enclosing `choice` moves
- * on to its next option.
- */
-export const guard = <A>(inner: Grammar<A>, pred: (value: A) => boolean): Grammar<A> =>
-  makeGrammar({
-    _tag: "Guard",
-    inner,
-    pred,
-  })
-
-/**
- * {@link map} with a Schema as the value contract: the schema types the mapped
- * value and doubles as the print-time {@link guard}, so an enclosing `choice`
- * skips values the schema rejects. Tying `to`/`from` to `S["Type"]` means the
- * grammar and the schema can't drift apart.
- *
- * The guard compiles lazily on first print, so recursive schemas
- * (`Schema.suspend`) are safe even while their definition is still in progress.
- */
-export const mapSchema = <S extends Schema.Top, A>(
-  inner: Grammar<A>,
-  schema: S,
-  f: {
-    readonly to: (a: A) => S["Type"]
-    readonly from?: (b: S["Type"]) => A
-  },
-): Grammar<S["Type"]> => {
-  let is: ((u: unknown) => boolean) | undefined
-  return guard(map(inner, f), (value) => (is ??= Schema.is(schema))(value))
+/** The `yield*` protocol: yield yourself once, resume with the value sent back. */
+export interface GenIterator<Y, A> {
+  next(...args: ReadonlyArray<any>): IteratorResult<Y, A>
+  [Symbol.iterator](): GenIterator<Y, A>
 }
 
-/**
- * Name a grammar for error messages. Replaces `expected` only when `inner`
- * fails without consuming input. Print is transparent; render shows
- * `<expected>` when `inner` is a raw regex.
- */
-export const label = <A>(expected: string, inner: Grammar<A>): Grammar<A> =>
-  makeGrammar({
-    _tag: "Label",
-    expected,
-    inner,
-  })
-
-export const fromEffect = <A>(
-  eff: Effect.Effect<A, ParseError, ParseState>,
-  expected: string,
-): Grammar<A> => makeGrammar({ _tag: "FromEffect", eff, expected })
-
-/**
- * Defer grammar construction to first use — the building block for recursive
- * grammars. The thunk result is memoized on the node. `name` is what `render`
- * shows at the recursion point.
- */
-export const lazy = <A>(thunk: () => Grammar<A>, opts?: { readonly name?: string }): Grammar<A> =>
-  makeGrammar({
-    _tag: "Lazy",
-    thunk,
-    name: opts?.name,
-  })
-
-/** Zero-width assertion: succeeds only at end of input. Prints as "". */
-export const end: Grammar<void> = makeGrammar({ _tag: "End" })
-
-/**
- * Dependent parsing: the grammar that runs next is computed from the value
- * just parsed (e.g. a length prefix deciding how many chars to read).
- * Printable when `from` recovers the intermediate value from the result.
- */
-export const bind = <A, B>(
-  inner: Grammar<A>,
-  f: { readonly to: (a: A) => Grammar<B>; readonly from?: (b: B) => A },
-): Grammar<B> => makeGrammar({ _tag: "Bind", inner, to: f.to, from: f.from })
-
-/** Run `inner` exactly `n` times, collecting the results. */
-export const count = <A>(inner: Grammar<A>, n: number): Grammar<Array<A>> => {
-  return makeGrammar({ _tag: "Count", inner, n: validateNonNegativeSafeInteger("count", n) })
-}
-
-export const integer: Grammar<number> = map(label("integer", regex(/-?\d+/, "integer")), {
-  to: (value) => {
-    const integer = Number(value)
-    if (!Number.isSafeInteger(integer)) throw new InvalidIntegerError()
-    return integer
-  },
-  from: String,
-})
-
-/** Run `inner`, then skip trailing whitespace. Printing emits one canonical space. */
-export const lexeme = <A>(inner: Grammar<A>): Grammar<A> =>
-  map(struct({ value: inner, ws: label("whitespace", regex(/\s*/, "whitespace")) }), {
-    to: ({ value }) => value,
-    from: (value) => ({ value, ws: " " }),
-  })
-
-/** A literal that skips trailing whitespace. */
-export const symbol = <L extends string>(s: L): Grammar<L> => lexeme(literal(s))
-
-/**
- * Run `open`, `inner`, `close` in sequence, keeping only `inner`'s value.
- * Print supplies `undefined` for open/close — they must be value-ignoring
- * printers (`literal`, `symbol`, `end`, or a transparent wrapper around those).
- */
-export const between = <O, C, A>(
-  open: Grammar<O>,
-  close: Grammar<C>,
-  inner: Grammar<A>,
-): Grammar<A> =>
-  map(struct({ open, inner, close }), {
-    to: ({ inner }) => inner,
-    from: (value) => ({ open: undefined as O, inner: value, close: undefined as C }),
-  })
-
-/** Quote a string the way JSON would, for expected-token messages. */
-const quote = Schema.encodeSync(Schema.fromJsonString(Schema.String))
-
-const interpret = (g: Grammar<any>): Effect.Effect<any, ParseError | UpstreamError, ParseState> =>
-  Effect.gen(function* () {
-    switch (g._tag) {
-      case "Literal": {
-        const pos = yield* getPos
-        if (!(yield* startsWith(g.value))) return yield* failHere(quote(g.value))
-        yield* seek(pos + g.value.length)
-        return g.value
-      }
-      case "Regex": {
-        const pos = yield* getPos
-        const m = yield* matchRegex(g.re)
-        if (Option.isNone(m)) return yield* failHere(g.expected)
-        yield* seek(pos + m.value.length)
-        return m.value
-      }
-      case "Map": {
-        const value = yield* interpret(g.inner)
-        return yield* Effect.try({
-          try: () => g.to(value),
-          catch: (cause) => new EvaluationError({ cause }),
-        }).pipe(
-          Effect.catchTag("EvaluationError", (error) =>
-            error.cause instanceof InvalidIntegerError
-              ? failHere("integer")
-              : Effect.die(error.cause),
-          ),
-        )
-      }
-      case "Struct": {
-        const out: Record<string, any> = {}
-        for (const [key, field] of Object.entries(g.fields)) {
-          out[key] = yield* interpret(field)
-        }
-        return out
-      }
-      case "Choice": {
-        const first = g.options[0]
-        if (first === undefined) {
-          return yield* new ParseError({
-            pos: yield* getPos,
-            expected: "choice",
-            found: undefined,
-          })
-        }
-        let parser = interpret(first)
-        for (const option of g.options.slice(1)) {
-          parser = or_(parser, interpret(option))
-        }
-        return yield* parser
-      }
-      case "Many": {
-        return yield* manyEffect(interpret(g.inner), { atLeast: g.atLeast })
-      }
-      case "SepBy": {
-        const start = yield* getPos
-        const first = yield* Effect.result(interpret(g.inner))
-        if (first._tag === "Failure") {
-          if (!Schema.is(ParseError)(first.failure)) return yield* first.failure
-          if ((yield* getPos) > start || g.atLeast >= 1) return yield* first.failure
-          return []
-        }
-        const rest = yield* manyEffect(interpret(g.sep).pipe(Effect.andThen(interpret(g.inner))))
-        return [first.success, ...rest]
-      }
-      case "Optional": {
-        return yield* or_(interpret(g.inner), Effect.succeed(undefined))
-      }
-      case "Attempt": {
-        return yield* attemptEffect(interpret(g.inner))
-      }
-      case "FromEffect": {
-        return yield* g.eff
-      }
-      case "Lazy": {
-        return yield* interpret((g.resolved ??= g.thunk()))
-      }
-      case "End": {
-        if (!(yield* isEof)) return yield* failHere("end of input")
-        return undefined
-      }
-      case "Bind": {
-        const a = yield* interpret(g.inner)
-        const next = yield* Effect.try({
-          try: () => g.to(a),
-          catch: (cause) => new EvaluationError({ cause }),
-        }).pipe(
-          Effect.catchTag("EvaluationError", (error) =>
-            error.cause instanceof InvalidCardinalityError
-              ? failHere("count")
-              : Effect.die(error.cause),
-          ),
-        )
-        return yield* interpret(next)
-      }
-      case "Count": {
-        const out: Array<any> = []
-        for (let i = 0; i < g.n; i++) out.push(yield* interpret(g.inner))
-        return out
-      }
-      case "Guard": {
-        return yield* interpret(g.inner)
-      }
-      case "Label": {
-        const mark = yield* getPos
-        const r = yield* Effect.result(interpret(g.inner))
-        if (r._tag === "Success") return r.success
-        if (!Schema.is(ParseError)(r.failure)) return yield* r.failure
-        if ((yield* getPos) === mark) {
-          return yield* new ParseError({
-            pos: r.failure.pos,
-            expected: g.expected,
-            found: r.failure.found,
-          })
-        }
-        return yield* r.failure
-      }
-    }
-  })
-
-const printNode = (g: Grammar<any>, value: any): Effect.Effect<string, PrintError> => {
-  switch (g._tag) {
-    case "Literal":
-      return Effect.succeed(g.value)
-    case "Regex": {
-      const flags = g.re.flags.replace(/[gy]/g, "")
-      const anchored = new RegExp(`^(?:${g.re.source})$`, flags)
-      return anchored.test(value)
-        ? Effect.succeed(value)
-        : Effect.fail(
-            new PrintError({
-              message: `cannot print ${JSON.stringify(value)}: does not match ${g.expected}`,
-            }),
-          )
-    }
-    case "Map":
-      return g.from === undefined
-        ? Effect.fail(
-            new PrintError({
-              message: `cannot print: this grammar is parse-only (map is missing \`from\`)`,
-            }),
-          )
-        : printNode(g.inner, g.from(value))
-    case "Struct":
-      return Effect.forEach(Object.entries(g.fields), ([key, field]) =>
-        printNode(field, value[key]),
-      ).pipe(Effect.map((parts) => parts.join("")))
-    case "Choice": {
-      const tryOptions = (
-        options: ReadonlyArray<Grammar<any>>,
-      ): Effect.Effect<string, PrintError> => {
-        const [head, ...rest] = options
-        return head === undefined
-          ? Effect.fail(
-              new PrintError({ message: `cannot print: no choice option accepts the value` }),
-            )
-          : Effect.result(printNode(head, value)).pipe(
-              Effect.flatMap((r) =>
-                r._tag === "Success" ? Effect.succeed(r.success) : tryOptions(rest),
-              ),
-            )
-      }
-      return tryOptions(g.options)
-    }
-    case "Many": {
-      const items = value as Array<any>
-      return items.length < g.atLeast
-        ? Effect.fail(
-            new PrintError({
-              message: `cannot print: expected at least ${g.atLeast} items, got ${items.length}`,
-            }),
-          )
-        : Effect.forEach(items, (v) => printNode(g.inner, v)).pipe(
-            Effect.map((parts) => parts.join("")),
-          )
-    }
-    case "SepBy": {
-      const items = value as Array<any>
-      if (items.length < g.atLeast) {
-        return Effect.fail(
-          new PrintError({
-            message: `cannot print: expected at least ${g.atLeast} items, got ${items.length}`,
-          }),
-        )
-      }
-      // Separator is printed with `undefined` — same contract as `between` delimiters.
-      return Effect.forEach(items, (v) => printNode(g.inner, v)).pipe(
-        Effect.flatMap((printed) =>
-          printed.length <= 1
-            ? Effect.succeed(printed.join(""))
-            : Effect.map(
-                Effect.forEach(printed.slice(1), (item) =>
-                  Effect.map(printNode(g.sep, undefined), (s) => s + item),
-                ),
-                (rest) => printed[0] + rest.join(""),
-              ),
-        ),
-      )
-    }
-    case "Optional":
-      return value === undefined ? Effect.succeed("") : printNode(g.inner, value)
-    case "Attempt":
-      return printNode(g.inner, value)
-    case "FromEffect":
-      return Effect.fail(
-        new PrintError({
-          message: `cannot print: grammar contains an effect-only fragment (${g.expected})`,
-        }),
-      )
-    case "Lazy":
-      return Effect.suspend(() => printNode((g.resolved ??= g.thunk()), value))
-    case "End":
-      return Effect.succeed("")
-    case "Bind": {
-      if (g.from === undefined) {
-        return Effect.fail(
-          new PrintError({
-            message: `cannot print: this grammar is parse-only (bind is missing \`from\`)`,
-          }),
-        )
-      }
-      const a = g.from(value)
-      return Effect.zipWith(printNode(g.inner, a), printNode(g.to(a), value), (l, r) => l + r)
-    }
-    case "Count":
-      return (value as Array<any>).length !== g.n
-        ? Effect.fail(
-            new PrintError({
-              message: `cannot print: expected exactly ${g.n} items, got ${(value as Array<any>).length}`,
-            }),
-          )
-        : Effect.forEach(value as Array<any>, (v) => printNode(g.inner, v)).pipe(
-            Effect.map((parts) => parts.join("")),
-          )
-    case "Guard":
-      return g.pred(value)
-        ? printNode(g.inner, value)
-        : Effect.fail(new PrintError({ message: `cannot print: value rejected by guard` }))
-    case "Label":
-      return printNode(g.inner, value)
+class SingleShot<Y, A> implements GenIterator<Y, A> {
+  private called = false
+  readonly self: Y
+  constructor(self: Y) {
+    this.self = self
+  }
+  next(a: A): IteratorResult<Y, A> {
+    if (this.called) return { done: true, value: a }
+    this.called = true
+    return { done: false, value: this.self }
+  }
+  [Symbol.iterator](): GenIterator<Y, A> {
+    return new SingleShot(this.self)
   }
 }
 
-export const parse = <A>(input: string, grammar: Grammar<A>): Effect.Effect<A, ParseError> =>
-  Effect.gen(function* () {
-    const state = yield* makeStringState(input)
-    return yield* Effect.gen(function* () {
-      const a = yield* interpret(grammar)
-      if (!(yield* isEof)) return yield* failHere("end of input")
-      return a
-    }).pipe(
-      Effect.provideService(ParseState, state),
-      // String input has no upstream; this can never fire.
-      Effect.catchIf(Schema.is(UpstreamError), (e) => Effect.die(e)),
-      Effect.mapError((e) => locateParseError(input, e)),
-    )
-  })
+declare const TypeId: unique symbol
 
-/** Like `parse`, but leaves the cursor wherever the grammar stopped — trailing input is allowed. */
-export const parsePrefix = <A>(input: string, grammar: Grammar<A>): Effect.Effect<A, ParseError> =>
-  Effect.gen(function* () {
-    const state = yield* makeStringState(input)
-    return yield* interpret(grammar).pipe(
-      Effect.provideService(ParseState, state),
-      // String input has no upstream; this can never fire.
-      Effect.catchIf(Schema.is(UpstreamError), (e) => Effect.die(e)),
-      Effect.mapError((e) => locateParseError(input, e)),
-    )
-  })
-
-/** Run a grammar once over a stream of chunks. See `parseStream` in `stream.ts`. */
-export const parseStream = <A, E2, R2>(
-  input: Stream.Stream<string, E2, R2>,
-  grammar: Grammar<A>,
-): Effect.Effect<A, ParseError | UpstreamError, Exclude<R2, Scope.Scope>> =>
-  parseStreamEffect(
-    input,
-    Effect.gen(function* () {
-      const a = yield* interpret(grammar)
-      if (!(yield* isEof)) return yield* failHere("end of input")
-      return a
-    }),
-  )
-
-/** Parse a stream of chunks into a stream of values, one per grammar run. */
-export const streamElements = <A, E2, R2>(
-  input: Stream.Stream<string, E2, R2>,
-  grammar: Grammar<A>,
-): Stream.Stream<A, ParseError | UpstreamError, Exclude<R2, Scope.Scope>> =>
-  streamElementsEffect(input, interpret(grammar))
-
-export const print = <A>(grammar: Grammar<A>, value: A): Effect.Effect<string, PrintError> =>
-  printNode(grammar, value)
+/** A grammar that parses a string to `A` and prints an `A` back to a string. */
+export interface Grammar<out A> extends Pipeable.Pipeable {
+  readonly [TypeId]: { readonly _A: () => A }
+  readonly node: Node
+}
 
 /**
- * Law: `parse(print(value))` equals `value` (structurally).
+ * A grammar with no value: `literal`, `symbol`, `whitespace`, anything under
+ * `skip`. Only these can be `yield*`-ed bare in {@link gen} or listed bare in
+ * {@link seq}, because the printer needs no value to emit them.
+ */
+export interface Silent extends Grammar<void> {
+  [Symbol.iterator](): GenIterator<Silent, void>
+}
+
+/** A named part of a sequence. Printing reads `value[name]` for it. */
+export interface Field<K extends string, A> {
+  readonly _tag: "Field"
+  readonly name: K
+  readonly grammar: Grammar<A>
+  [Symbol.iterator](): GenIterator<Field<K, A>, A>
+}
+
+class GrammarImpl<A> implements Grammar<A> {
+  declare readonly [TypeId]: { readonly _A: () => A }
+  readonly node: Node
+  constructor(node: Node) {
+    this.node = node
+  }
+  pipe() {
+    return Pipeable.pipeArguments(this, arguments)
+  }
+}
+
+class SilentImpl extends GrammarImpl<void> implements Silent {
+  [Symbol.iterator](): GenIterator<Silent, void> {
+    return new SingleShot<Silent, void>(this)
+  }
+}
+
+class FieldImpl<K extends string, A> implements Field<K, A> {
+  readonly _tag = "Field" as const
+  readonly name: K
+  readonly grammar: Grammar<A>
+  constructor(name: K, grammar: Grammar<A>) {
+    this.name = name
+    this.grammar = grammar
+  }
+  [Symbol.iterator](): GenIterator<Field<K, A>, A> {
+    return new SingleShot<Field<K, A>, A>(this)
+  }
+}
+
+const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
+const silent = (node: Node): Silent => new SilentImpl(node)
+const isGrammar = (u: unknown): u is Grammar<any> => u instanceof GrammarImpl
+const isSilent = (g: Grammar<any>): g is Silent => g instanceof SilentImpl
+const isField = (p: Part): p is Field<string, any> => p instanceof FieldImpl
+
+/** The value type of a grammar. */
+export type Type<G> = G extends Grammar<infer A> ? A : never
+
+type Names<Y> = Y extends Field<infer K, any> ? K : never
+
+/** The object a sequence produces: one key per `field`, silent parts dropped. */
+export type Fields<Y> = { [K in Names<Y>]: Y extends Field<K, infer A> ? A : never }
+
+// ---------------------------------------------------------------------------
+// primitives
+// ---------------------------------------------------------------------------
+
+/** Match `value` exactly. Silent: carries no value, prints itself. */
+export const literal = (value: string): Silent => silent({ _tag: "Literal", value })
+
+/** Matches nothing, prints nothing. Useful as a `choice` fallback with {@link as}. */
+export const empty: Silent = literal("")
+
+/**
+ * Match `re` at the cursor; the value is the matched text. `name` is what
+ * errors and `render` call it. `g`/`y` flags are dropped so `lastIndex`
+ * never leaks between matches.
+ */
+export const regex = (re: RegExp, name: string): Grammar<string> =>
+  make({ _tag: "Regex", re: new RegExp(re.source, re.flags.replace(/[gy]/g, "")), name })
+
+// ---------------------------------------------------------------------------
+// sequencing
+// ---------------------------------------------------------------------------
+
+/**
+ * Name a value inside a sequence. Infers through the grammar's type, so a
+ * conditional like `cond ? g1 : g2` yields the union of both value types.
+ */
+export const field = <const K extends string, G extends Grammar<any>>(
+  name: K,
+  grammar: G,
+): Field<K, Type<G>> => new FieldImpl(name, grammar)
+
+/**
+ * Static sequence. Parts are silent grammars and named fields, in order; the
+ * value is the object of fields. A sequence of only silent parts is silent.
+ */
+export const seq: {
+  (...parts: ReadonlyArray<Silent>): Silent
+  <const Parts extends ReadonlyArray<Silent | Field<string, any>>>(
+    ...parts: Parts
+  ): Grammar<Fields<Parts[number]>>
+} = (...parts: ReadonlyArray<Part>): any =>
+  parts.every((p) => !isField(p)) ? silent({ _tag: "Seq", parts }) : make({ _tag: "Seq", parts })
+
+/**
+ * Dynamic sequence. Inside the generator, `yield*` a silent grammar to consume
+ * it, or `yield* field("name", g)` to parse `g` and bind its value. Return an
+ * object holding every field under its name — or return nothing to get the
+ * object of fields. Printing replays the generator with the value's fields,
+ * so `if`/`switch` on a parsed value is safe. A field name may be yielded at
+ * most once per run; repeat with `many`.
+ */
+export const gen = <Y extends Silent | Field<string, any>, R extends Fields<Y> | void = void>(
+  run: () => Generator<Y, R, any>,
+): Grammar<[R] extends [void] ? Fields<Y> : R> => make({ _tag: "Gen", run })
+
+const toSilent = (s: Silent | string): Silent => (typeof s === "string" ? literal(s) : s)
+
+/** `open inner close`, keeping only `inner`'s value. Strings are shorthand for `literal`. */
+export const wrap: {
+  (open: Silent | string, inner: Silent, close: Silent | string): Silent
+  <A>(open: Silent | string, inner: Grammar<A>, close: Silent | string): Grammar<A>
+} = (open: Silent | string, inner: Grammar<any>, close: Silent | string): any => {
+  const node: Node = { _tag: "Wrap", open: toSilent(open), inner, close: toSilent(close) }
+  return isSilent(inner) ? silent(node) : make(node)
+}
+
+/** `open inner`, keeping `inner`'s value. */
+export const prefix: {
+  (open: Silent | string, inner: Silent): Silent
+  <A>(open: Silent | string, inner: Grammar<A>): Grammar<A>
+} = (open: Silent | string, inner: Grammar<any>): any => wrap(open, inner, empty)
+
+/** `inner close`, keeping `inner`'s value. */
+export const suffix: {
+  (inner: Silent, close: Silent | string): Silent
+  <A>(inner: Grammar<A>, close: Silent | string): Grammar<A>
+} = (inner: Grammar<any>, close: Silent | string): any => wrap(empty, inner, close)
+
+// ---------------------------------------------------------------------------
+// alternation and repetition
+// ---------------------------------------------------------------------------
+
+/**
+ * Ordered choice with full backtracking: each option starts from the same
+ * position. Printing tries options in order and uses the first that accepts
+ * the value — see {@link as}, {@link decodeTo}, and `transform`'s `is`.
+ */
+export const choice = <const Gs extends readonly [Grammar<any>, ...Array<Grammar<any>>]>(
+  ...options: Gs
+): Grammar<Type<Gs[number]>> => make({ _tag: "Choice", options })
+
+/** Zero or one. An optional silent grammar is silent and prints nothing. */
+export const optional: {
+  (inner: Silent): Silent
+  <A>(inner: Grammar<A>): Grammar<A | undefined>
+} = (inner: Grammar<any>): any => {
+  const node: Node = { _tag: "Optional", inner }
+  return isSilent(inner) ? silent(node) : make(node)
+}
+
+export interface RepeatOptions {
+  /** Default 0. */
+  readonly min?: number
+  /** Default unbounded. */
+  readonly max?: number
+}
+
+const bounds = (name: string, opts: RepeatOptions | undefined): Bounds => {
+  const min = opts?.min ?? 0
+  const max = opts?.max ?? Number.POSITIVE_INFINITY
+  if (!Number.isSafeInteger(min) || min < 0) {
+    throw new RangeError(`${name}: min must be a non-negative safe integer`)
+  }
+  if (!(max === Number.POSITIVE_INFINITY || (Number.isSafeInteger(max) && max >= min))) {
+    throw new RangeError(`${name}: max must be a safe integer >= min`)
+  }
+  return { min, max }
+}
+
+/** Repeat `inner`, collecting values. Stops at the first failure or at `max`. */
+export const many: {
+  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>>
+  (opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<Array<A>>
+} = F.dual(
+  (args) => isGrammar(args[0]),
+  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>> =>
+    make({ _tag: "Many", inner, ...bounds("many", opts) }),
+)
+
+/** `inner` separated by `sep`. Prints `sep` between elements. */
+export const sepBy = <A>(
+  inner: Grammar<A>,
+  sep: Silent | string,
+  opts?: RepeatOptions,
+): Grammar<Array<A>> => make({ _tag: "SepBy", inner, sep: toSilent(sep), ...bounds("sepBy", opts) })
+
+// ---------------------------------------------------------------------------
+// values
+// ---------------------------------------------------------------------------
+
+export interface TransformOptions<A, B> {
+  readonly decode: (a: A) => B
+  readonly encode: (b: B) => A
+  /**
+   * Guard on both sides: parsing fails (so a `choice` moves on) when the
+   * decoded value is rejected, and printing fails when the value to print is
+   * rejected. Prefer {@link decodeTo}, which derives this from a Schema.
+   */
+  readonly is?: (u: unknown) => boolean
+  /** What errors call this when `is` rejects. Defaults to the inner grammar's rendering. */
+  readonly name?: string
+}
+
+/** Map the value both ways. */
+export const transform: {
+  <A, B>(f: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
+  <A, B>(inner: Grammar<A>, f: TransformOptions<A, B>): Grammar<B>
+} = F.dual(
+  2,
+  <A, B>(inner: Grammar<A>, f: TransformOptions<A, B>): Grammar<B> =>
+    make({
+      _tag: "Transform",
+      inner,
+      decode: f.decode,
+      encode: f.encode,
+      is: f.is,
+      name: f.name,
+    }),
+)
+
+export interface DecodeToOptions<A, T> {
+  readonly decode: (a: A) => T
+  readonly encode: (b: T) => A
+  /** What errors call this when the schema rejects. Defaults to the inner grammar's rendering. */
+  readonly name?: string
+}
+
+/**
+ * {@link transform} with a Schema as the value contract, named after
+ * `Schema.decodeTo`. The schema types `decode`/`encode` and guards both
+ * directions, so a `choice` of schema-typed branches picks the right one when
+ * printing. The guard compiles lazily, so recursive schemas are safe.
  *
- * Prints, re-parses with strict EOF, then compares with `Equal.equals`.
- * Fails with {@link RoundTripError} naming the stage that broke.
+ * Curried on purpose: fixing the schema's type before the options are checked
+ * is what lets `decode` return `{ kind: "number", ... }` without annotating it.
+ *
+ * ```ts
+ * const num = Grammar.integer.pipe(
+ *   Grammar.decodeTo(Num)({ decode: (value) => ({ kind: "num", value }), encode: (n) => n.value }),
+ * )
+ * ```
+ */
+export const decodeTo =
+  <T>(schema: Schema.Codec<T, unknown, unknown, unknown>) =>
+  <A>(f: DecodeToOptions<A, T>) =>
+  (inner: Grammar<A>): Grammar<T> => {
+    let is: ((u: unknown) => boolean) | undefined
+    return transform(inner, { ...f, is: (u) => (is ??= Schema.is(schema))(u) })
+  }
+
+/**
+ * Give a silent grammar a constant value: `literal("null").pipe(as(null))`.
+ * Prints only when the value is `Equal` to the constant, so a `choice` of
+ * constants prints the right branch.
+ */
+export const as: {
+  <const V>(value: V): (inner: Silent) => Grammar<V>
+  <const V>(inner: Silent, value: V): Grammar<V>
+} = F.dual(
+  2,
+  <const V>(inner: Silent, value: V): Grammar<V> => make({ _tag: "Const", inner, value }),
+)
+
+/** A boolean from presence: `flag("-")` is `true` when `-` is present. */
+export const flag = (s: Silent | string): Grammar<boolean> =>
+  choice(as(toSilent(s), true), as(empty, false))
+
+/** Discard a value grammar's result; printing emits `printAs`. The result is silent. */
+export const skip: {
+  <A>(printAs: A): (inner: Grammar<A>) => Silent
+  <A>(inner: Grammar<A>, printAs: A): Silent
+} = F.dual(
+  2,
+  <A>(inner: Grammar<A>, printAs: A): Silent =>
+    silent({ _tag: "Skip", inner, printAs, show: true }),
+)
+
+/** Name a grammar for errors: replaces the expected set when it fails at its own start. */
+export const label: {
+  (name: string): <A>(inner: Grammar<A>) => Grammar<A>
+  <A>(inner: Grammar<A>, name: string): Grammar<A>
+} = F.dual(
+  2,
+  <A>(inner: Grammar<A>, name: string): Grammar<A> => make({ _tag: "Label", inner, name }),
+)
+
+/** Defer construction — for recursive grammars. `name` is what `render` shows at the recursion point. */
+export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
+  make({ _tag: "Suspend", thunk, name })
+
+// ---------------------------------------------------------------------------
+// small standard library
+// ---------------------------------------------------------------------------
+
+const hiddenWhitespace = (printAs: string): Silent =>
+  silent({ _tag: "Skip", inner: regex(/\s*/, "whitespace"), printAs, show: false })
+
+/** Optional whitespace; prints nothing. Hidden from `render`. */
+export const whitespace: Silent = hiddenWhitespace("")
+
+/** `inner` followed by optional whitespace; prints one trailing space. */
+export const lexeme: {
+  (inner: Silent): Silent
+  <A>(inner: Grammar<A>): Grammar<A>
+} = (inner: Grammar<any>): any => suffix(inner, hiddenWhitespace(" "))
+
+/** A literal followed by optional whitespace. */
+export const symbol = (s: string): Silent => lexeme(literal(s))
+
+/** A signed decimal integer within `Number.isSafeInteger`. */
+export const integer: Grammar<number> = regex(/-?\d+/, "integer").pipe(
+  transform({ decode: Number, encode: String, is: Number.isSafeInteger, name: "integer" }),
+)
+
+// ---------------------------------------------------------------------------
+// parse
+// ---------------------------------------------------------------------------
+
+interface State {
+  readonly input: string
+  pos: number
+  furthest: number
+  expected: Set<string>
+}
+
+const FAIL: unique symbol = Symbol.for("effect-grammar/fail")
+type Res<A> = A | typeof FAIL
+
+const failAt = (s: State, expected: string): typeof FAIL => {
+  if (s.pos > s.furthest) {
+    s.furthest = s.pos
+    s.expected = new Set([expected])
+  } else if (s.pos === s.furthest) {
+    s.expected.add(expected)
+  }
+  return FAIL
+}
+
+const resolve = (n: Extract<Node, { _tag: "Suspend" }>): Grammar<any> => (n.resolved ??= n.thunk())
+
+const runPart = (p: Part, s: State): Res<any> => go(isField(p) ? p.grammar : p, s)
+
+const go = (g: Grammar<any>, s: State): Res<any> => {
+  const n = g.node
+  switch (n._tag) {
+    case "Literal": {
+      if (!s.input.startsWith(n.value, s.pos)) return failAt(s, JSON.stringify(n.value))
+      s.pos += n.value.length
+      return undefined
+    }
+    case "Regex": {
+      const m = n.re.exec(s.input.slice(s.pos))
+      if (m === null || m.index !== 0) return failAt(s, n.name)
+      s.pos += m[0].length
+      return m[0]
+    }
+    case "Seq": {
+      const out: Record<string, unknown> = {}
+      let hasField = false
+      for (const p of n.parts) {
+        const v = runPart(p, s)
+        if (v === FAIL) return FAIL
+        if (isField(p)) {
+          out[p.name] = v
+          hasField = true
+        }
+      }
+      return hasField ? out : undefined
+    }
+    case "Gen": {
+      const it = n.run()
+      const out: Record<string, unknown> = {}
+      let r = it.next()
+      while (!r.done) {
+        const p = r.value
+        const v = runPart(p, s)
+        if (v === FAIL) {
+          it.return?.(undefined)
+          return FAIL
+        }
+        if (isField(p)) {
+          if (p.name in out) {
+            throw new Error(`gen: field "${p.name}" yielded twice — use many() to repeat`)
+          }
+          out[p.name] = v
+        }
+        r = it.next(v)
+      }
+      return r.value === undefined ? out : r.value
+    }
+    case "Wrap": {
+      if (go(n.open, s) === FAIL) return FAIL
+      const v = go(n.inner, s)
+      if (v === FAIL) return FAIL
+      if (go(n.close, s) === FAIL) return FAIL
+      return v
+    }
+    case "Choice": {
+      const start = s.pos
+      for (const o of n.options) {
+        const v = go(o, s)
+        if (v !== FAIL) return v
+        s.pos = start
+      }
+      return FAIL
+    }
+    case "Many": {
+      const out: Array<unknown> = []
+      while (out.length < n.max) {
+        const mark = s.pos
+        const v = go(n.inner, s)
+        if (v === FAIL) {
+          s.pos = mark
+          break
+        }
+        if (s.pos === mark) throw new Error("many: inner grammar matched without consuming input")
+        out.push(v)
+      }
+      return out.length < n.min ? FAIL : out
+    }
+    case "SepBy": {
+      const out: Array<unknown> = []
+      let mark = s.pos
+      let v = go(n.inner, s)
+      while (v !== FAIL && out.length < n.max) {
+        out.push(v)
+        mark = s.pos
+        if (go(n.sep, s) === FAIL) break
+        if (s.pos === mark) throw new Error("sepBy: separator matched without consuming input")
+        v = go(n.inner, s)
+      }
+      s.pos = mark
+      return out.length < n.min ? FAIL : out
+    }
+    case "Optional": {
+      const mark = s.pos
+      const v = go(n.inner, s)
+      if (v !== FAIL) return v
+      s.pos = mark
+      return undefined
+    }
+    case "Transform": {
+      const start = s.pos
+      const v = go(n.inner, s)
+      if (v === FAIL) return FAIL
+      const b = n.decode(v)
+      if (n.is !== undefined && !n.is(b)) {
+        s.pos = start
+        return failAt(s, n.name ?? describe(n.inner))
+      }
+      return b
+    }
+    case "Const":
+      return go(n.inner, s) === FAIL ? FAIL : n.value
+    case "Skip":
+      return go(n.inner, s) === FAIL ? FAIL : undefined
+    case "Label": {
+      const start = s.pos
+      const v = go(n.inner, s)
+      if (v !== FAIL) return v
+      if (s.furthest === start) s.expected = new Set([n.name])
+      return FAIL
+    }
+    case "Suspend":
+      return go(resolve(n), s)
+  }
+}
+
+const lineColumn = (input: string, pos: number): { line: number; column: number } => {
+  let line = 1
+  let column = 1
+  for (let i = 0; i < pos; i++) {
+    if (input.charCodeAt(i) === 10) {
+      line++
+      column = 1
+    } else {
+      column++
+    }
+  }
+  return { line, column }
+}
+
+const toError = (s: State): ParseError =>
+  new ParseError({
+    pos: s.furthest,
+    ...lineColumn(s.input, s.furthest),
+    expected: [...s.expected],
+    found: s.input[s.furthest],
+  })
+
+/** Parse the whole input. Trailing input is a failure. */
+export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
+  const s: State = { input, pos: 0, furthest: 0, expected: new Set() }
+  const v = go(grammar, s)
+  if (v === FAIL) return Result.fail(toError(s))
+  if (s.pos < input.length) {
+    failAt(s, "end of input")
+    return Result.fail(toError(s))
+  }
+  return Result.succeed(v as A)
+}
+
+// ---------------------------------------------------------------------------
+// print
+// ---------------------------------------------------------------------------
+
+class PrintFail {
+  readonly message: string
+  constructor(message: string) {
+    this.message = message
+  }
+}
+
+const printFail = (message: string): never => {
+  throw new PrintFail(message)
+}
+
+const preview = (u: unknown): string => {
+  try {
+    return JSON.stringify(u) ?? String(u)
+  } catch {
+    return String(u)
+  }
+}
+
+const printPart = (p: Part, value: Record<string, unknown>): string =>
+  isField(p) ? out(p.grammar, value[p.name]) : out(p, undefined)
+
+const out = (g: Grammar<any>, value: any): string => {
+  const n = g.node
+  switch (n._tag) {
+    case "Literal":
+      return n.value
+    case "Regex": {
+      if (typeof value !== "string") {
+        return printFail(`${n.name}: expected a string, got ${preview(value)}`)
+      }
+      const anchored = new RegExp(`^(?:${n.re.source})$`, n.re.flags)
+      return anchored.test(value)
+        ? value
+        : printFail(`${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
+    }
+    case "Seq":
+      return n.parts.map((p) => printPart(p, value)).join("")
+    case "Gen": {
+      const it = n.run()
+      let acc = ""
+      let r = it.next()
+      while (!r.done) {
+        const p = r.value
+        acc += printPart(p, value)
+        r = it.next(isField(p) ? value[p.name] : undefined)
+      }
+      return acc
+    }
+    case "Wrap":
+      return out(n.open, undefined) + out(n.inner, value) + out(n.close, undefined)
+    case "Choice": {
+      const reasons: Array<string> = []
+      for (const o of n.options) {
+        try {
+          return out(o, value)
+        } catch (e) {
+          if (!(e instanceof PrintFail)) throw e
+          reasons.push(e.message)
+        }
+      }
+      return printFail(`no choice branch accepts ${preview(value)}:\n  ${reasons.join("\n  ")}`)
+    }
+    case "Many":
+    case "SepBy": {
+      if (!Array.isArray(value)) return printFail(`expected an array, got ${preview(value)}`)
+      if (value.length < n.min || value.length > n.max) {
+        const range =
+          n.max === Number.POSITIVE_INFINITY ? `at least ${n.min}` : `${n.min}..${n.max}`
+        return printFail(`expected ${range} items, got ${value.length}`)
+      }
+      const sep = n._tag === "SepBy" ? out(n.sep, undefined) : ""
+      return value.map((v) => out(n.inner, v)).join(sep)
+    }
+    case "Optional":
+      return value === undefined ? "" : out(n.inner, value)
+    case "Transform":
+      if (n.is !== undefined && !n.is(value)) {
+        return printFail(`${n.name ?? describe(n.inner)}: rejected ${preview(value)}`)
+      }
+      return out(n.inner, n.encode(value))
+    case "Const":
+      return Equal.equals(value, n.value)
+        ? out(n.inner, undefined)
+        : printFail(`expected ${preview(n.value)}, got ${preview(value)}`)
+    case "Skip":
+      return out(n.inner, n.printAs)
+    case "Label":
+      return out(n.inner, value)
+    case "Suspend":
+      return out(resolve(n), value)
+  }
+}
+
+/** Print a value in the grammar's canonical form. */
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> => {
+  try {
+    return Result.succeed(out(grammar, value))
+  } catch (e) {
+    if (e instanceof PrintFail) return Result.fail(new PrintError({ message: e.message }))
+    throw e
+  }
+}
+
+// ---------------------------------------------------------------------------
+// render
+// ---------------------------------------------------------------------------
+
+/**
+ * The grammar as text. Exact for everything but {@link gen}, which is
+ * dry-run with `undefined` in place of every value: straight-line sequences
+ * render fully, and a branch that inspects a value renders as `…` from there.
+ */
+export const render = (g: Grammar<any>): string => show(g, new Set())
+
+/** Short name for error messages. */
+const describe = (g: Grammar<any>): string => {
+  const n = g.node
+  if (n._tag === "Regex") return n.name
+  if (n._tag === "Label") return n.name
+  return render(g)
+}
+
+const repetition = (b: Bounds): string => {
+  if (b.max === Number.POSITIVE_INFINITY) {
+    return b.min === 0 ? "*" : b.min === 1 ? "+" : `{${b.min},}`
+  }
+  return b.min === b.max ? `{${b.min}}` : `{${b.min},${b.max}}`
+}
+
+const joinShown = (parts: ReadonlyArray<string>): string => parts.filter((p) => p !== "").join(" ")
+
+const showPart = (p: Part, seen: Set<Node>): string =>
+  isField(p) ? `${p.name}:${show(p.grammar, seen)}` : show(p, seen)
+
+const show = (g: Grammar<any>, seen: Set<Node>): string => {
+  const n = g.node
+  switch (n._tag) {
+    case "Literal":
+      return n.value === "" ? "" : JSON.stringify(n.value)
+    case "Regex":
+      return `<${n.name}>`
+    case "Seq":
+      return joinShown(n.parts.map((p) => showPart(p, seen)))
+    case "Gen": {
+      const parts: Array<string> = []
+      try {
+        const it = n.run()
+        let r = it.next()
+        while (!r.done) {
+          parts.push(showPart(r.value, seen))
+          r = it.next(undefined)
+        }
+      } catch {
+        parts.push("…")
+      }
+      return joinShown(parts)
+    }
+    case "Wrap":
+      return joinShown([show(n.open, seen), show(n.inner, seen), show(n.close, seen)])
+    case "Choice":
+      return `(${n.options.map((o) => show(o, seen)).join(" | ")})`
+    case "Many":
+      return `(${show(n.inner, seen)})${repetition(n)}`
+    case "SepBy": {
+      const inner = show(n.inner, seen)
+      const sep = show(n.sep, seen)
+      const rest = repetition({
+        min: Math.max(0, n.min - 1),
+        max: n.max === Number.POSITIVE_INFINITY ? n.max : n.max - 1,
+      })
+      const body = `${inner} (${joinShown([sep, inner])})${rest}`
+      return n.min === 0 ? `(${body})?` : body
+    }
+    case "Optional":
+      return `(${show(n.inner, seen)})?`
+    case "Transform":
+    case "Const":
+    case "Label":
+      return show(n.inner, seen)
+    case "Skip":
+      return n.show ? show(n.inner, seen) : ""
+    case "Suspend": {
+      if (seen.has(n)) return n.name ?? "…"
+      seen.add(n)
+      const s = show(resolve(n), seen)
+      seen.delete(n)
+      return s
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// laws and the Schema boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * The round-trip law: `parse(print(value))` equals `value` (by `Equal`).
+ * Fails with {@link RoundTripError} naming the stage that broke. This is the
+ * property to test every grammar against.
  */
 export const checkRoundTrip = <A>(
   grammar: Grammar<A>,
   value: A,
-): Effect.Effect<void, RoundTripError> =>
-  Effect.gen(function* () {
-    const printed = yield* print(grammar, value).pipe(
-      Effect.mapError(
-        (e) =>
-          new RoundTripError({
-            stage: "print",
-            message: `checkRoundTrip: print failed: ${e.message}`,
-          }),
-      ),
+): Result.Result<void, RoundTripError> => {
+  const printed = print(grammar, value)
+  if (Result.isFailure(printed)) {
+    return Result.fail(new RoundTripError({ stage: "print", message: printed.failure.message }))
+  }
+  const reparsed = parse(grammar, printed.success)
+  if (Result.isFailure(reparsed)) {
+    return Result.fail(
+      new RoundTripError({
+        stage: "parse",
+        message: `${reparsed.failure.message}\n  printed: ${JSON.stringify(printed.success)}`,
+      }),
     )
-
-    const reparsed = yield* parse(printed, grammar).pipe(
-      Effect.mapError(
-        (e) =>
-          new RoundTripError({
-            stage: "parse",
-            message:
-              `checkRoundTrip: re-parse failed: ${e.message}` +
-              `\n  printed: ${quote(printed)}` +
-              `\n  original: ${preview(value)}`,
-          }),
-      ),
-    )
-
-    if (!Equal.equals(reparsed, value)) {
-      return yield* new RoundTripError({
+  }
+  if (!Equal.equals(reparsed.success, value)) {
+    return Result.fail(
+      new RoundTripError({
         stage: "equal",
         message:
-          `checkRoundTrip: value mismatch` +
-          `\n  original: ${preview(value)}` +
-          `\n  reparsed: ${preview(reparsed)}` +
-          `\n  printed:  ${quote(printed)}`,
-      })
-    }
-  })
-
-/** Best-effort value preview for error messages (not a full pretty-printer). */
-const preview = (value: unknown): string => {
-  try {
-    return Schema.encodeSync(Schema.UnknownFromJsonString)(value)
-  } catch {
-    return String(value)
+          `original: ${preview(value)}` +
+          `\n  reparsed: ${preview(reparsed.success)}` +
+          `\n  printed:  ${JSON.stringify(printed.success)}`,
+      }),
+    )
   }
+  return Result.void
 }
 
-export const render = (g: Grammar<any>): string => renderInner(g, new Set())
-
-const renderRepetition = (atLeast: number): string => {
-  const minimum = Math.ceil(atLeast)
-  if (minimum <= 0) return "*"
-  if (minimum === 1) return "+"
-  return `{${minimum},}`
-}
-
-const renderInner = (g: Grammar<any>, inProgress: Set<Grammar<any>>): string => {
-  switch (g._tag) {
-    case "Literal":
-      return JSON.stringify(g.value)
-    case "Regex":
-      return `/${g.re.source}/${g.re.flags}`
-    case "Map":
-      return renderInner(g.inner, inProgress)
-    case "Struct":
-      return Object.entries(g.fields)
-        .map(([key, field]) => `${key}: ${renderInner(field, inProgress)}`)
-        .join(" ")
-    case "Choice":
-      return g.options.map((option) => renderInner(option, inProgress)).join(" | ")
-    case "Many":
-      return `(${renderInner(g.inner, inProgress)})${renderRepetition(g.atLeast)}`
-    case "SepBy": {
-      const inner = renderInner(g.inner, inProgress)
-      const sep = renderInner(g.sep, inProgress)
-      const sequence = `${inner} (${sep} ${inner})${renderRepetition(Math.max(0, g.atLeast - 1))}`
-      return g.atLeast <= 0 ? `(${sequence})?` : sequence
-    }
-    case "Optional":
-      return `(${renderInner(g.inner, inProgress)})?`
-    case "Attempt":
-      return `attempt(${renderInner(g.inner, inProgress)})`
-    case "FromEffect":
-      return `<${g.expected}>`
-    case "Lazy": {
-      if (inProgress.has(g)) return g.name ?? "…"
-      inProgress.add(g)
-      const out = renderInner((g.resolved ??= g.thunk()), inProgress)
-      inProgress.delete(g)
-      return out
-    }
-    case "End":
-      return "<end>"
-    case "Bind":
-      return `${renderInner(g.inner, inProgress)} >>= <bind>`
-    case "Count":
-      return `(${renderInner(g.inner, inProgress)}){${g.n}}`
-    case "Guard":
-      return renderInner(g.inner, inProgress)
-    case "Label":
-      return g.inner._tag === "Regex" ? `<${g.expected}>` : renderInner(g.inner, inProgress)
-  }
-}
-
-const parseIssue = (input: string) => (e: ParseError) =>
-  new SchemaIssue.InvalidValue(Option.some(input), {
-    message: locateParseError(input, e).message,
-  })
-
+/**
+ * A `Schema.Codec<Target, string>`: decoding parses with the grammar and then
+ * validates against `target`; encoding prints with the grammar. The rendered
+ * grammar becomes the schema's `description`.
+ */
 export const toSchema = <S extends Schema.Top>(
-  grammar: Grammar<S["Encoded"]>,
+  grammar: Grammar<S["Type"]>,
   target: S,
   options?: { readonly identifier?: string },
 ) =>
@@ -767,9 +915,14 @@ export const toSchema = <S extends Schema.Top>(
     Schema.decodeTo(
       target,
       SchemaTransformation.transformOrFail({
-        decode: (s: string) => parse(s, grammar).pipe(Effect.mapError(parseIssue(s))),
-        encode: (a) =>
-          print(grammar, a).pipe(
+        decode: (s: string) =>
+          Effect.fromResult(parse(grammar, s)).pipe(
+            Effect.mapError(
+              (e) => new SchemaIssue.InvalidValue(Option.some(s), { message: e.message }),
+            ),
+          ),
+        encode: (a: S["Type"]) =>
+          Effect.fromResult(print(grammar, a)).pipe(
             Effect.mapError(
               (e) => new SchemaIssue.InvalidValue(Option.some(a), { message: e.message }),
             ),

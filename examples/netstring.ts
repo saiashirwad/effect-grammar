@@ -1,50 +1,45 @@
-import { Console, Effect, Schema } from "effect"
+/**
+ * Netstrings (`<length>:<payload>,`): a dependent parse. The length just
+ * parsed decides how many characters to read next — plain control flow inside
+ * `gen`. The value drops the length, so a `transform` supplies the inverse.
+ */
+import { Console, Effect, Result } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
-const length = Grammar.map(Grammar.struct({ n: Grammar.integer, colon: Grammar.literal(":") }), {
-  to: ({ n }) => n,
-  from: (n: number) => ({ n, colon: ":" as const }),
-})
-
-const exactly = (n: number): Grammar.Grammar<string> =>
-  Grammar.map(Grammar.count(Grammar.regex(/[\s\S]/, "char"), n), {
-    to: (chars) => chars.join(""),
-    from: (s: string) => s.split(""),
-  })
-
-const netstring: Grammar.Grammar<string> = Grammar.map(
-  Grammar.struct({
-    payload: Grammar.bind(length, { to: exactly, from: (s: string) => s.length }),
-    comma: Grammar.literal(","),
+const netstring = Grammar.gen(function* () {
+  const n = yield* Grammar.field("n", Grammar.integer)
+  yield* Grammar.literal(":")
+  const payload = yield* Grammar.field(
+    "payload",
+    Grammar.many(Grammar.regex(/[\s\S]/, "char"), { min: n, max: n }),
+  )
+  yield* Grammar.literal(",")
+  return { n, payload }
+}).pipe(
+  Grammar.transform({
+    decode: ({ payload }) => payload.join(""),
+    encode: (s) => ({ n: s.length, payload: s.split("") }),
   }),
-  {
-    to: ({ payload }) => payload,
-    from: (s: string) => ({ payload: s, comma: "," as const }),
-  },
 )
 
-const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const show = (r: Result.Result<unknown, { readonly message: string }>) =>
+  Result.isSuccess(r) ? JSON.stringify(r.success) : `✗ ${r.failure.message}`
 
-Effect.runSync(Console.log(`grammar: ${Grammar.render(netstring)}\n`))
-
-const parsed = Effect.runSync(Grammar.parse("12:hello world!,", netstring))
-Effect.runSync(Console.log(`parse "12:hello world!,"\n  →  ${json(parsed)}`))
-
-const printed = Effect.runSync(Grammar.print(netstring, "round trip ✓"))
-const reparsed = Effect.runSync(Grammar.parse(printed, netstring))
 Effect.runSync(
-  Console.log(
-    `print ${json("round trip ✓")}\n  →  ${printed}\n  →  re-parse  →  ${json(reparsed)}`,
-  ),
-)
-
-const parseOnly = Grammar.bind(Grammar.integer, { to: exactly })
-const r = Effect.runSync(Effect.result(Grammar.print(parseOnly, "abc")))
-Effect.runSync(
-  Console.log(
-    r._tag === "Success"
-      ? `print without \`from\`  →  ${r.success}`
-      : `print without \`from\`  →  PrintError: ${r.failure.message}`,
-  ),
+  Effect.gen(function* () {
+    yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)
+    yield* Console.log(
+      `parse "12:hello world!,"  →  ${show(Grammar.parse(netstring, "12:hello world!,"))}`,
+    )
+    yield* Console.log(
+      `parse "5:hello world!,"   →  ${show(Grammar.parse(netstring, "5:hello world!,"))}`,
+    )
+    yield* Console.log(
+      `print "round trip ✓"     →  ${show(Grammar.print(netstring, "round trip ✓"))}`,
+    )
+    yield* Console.log(
+      `roundTrip "a,b:c"        →  ${show(Grammar.checkRoundTrip(netstring, "a,b:c"))}`,
+    )
+  }),
 )

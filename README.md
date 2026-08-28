@@ -1,7 +1,27 @@
 # effect-grammar
 
-Effect Schema, but for text formats. One definition yields a parser, a printer,
-a rendered grammar, and a `Schema.Codec<A, string>`.
+Schema for the inside of a string.
+
+You model your domain with Effect Schema. Some of those values also have a text
+form — a connection string, `1h30m`, a cron line, a search query, an
+S-expression. `effect-grammar` lets you write that format once, as a grammar,
+and derive everything else from it:
+
+- a parser with line/column errors that say what was expected,
+- a printer that emits the canonical text for a value,
+- a `Schema.Codec<A, string>` wiring both into `decode` and `encode`, so Schema
+  refinements compose with the grammar,
+- `render`, the grammar as text, used as the Schema's description,
+- one law, `parse(print(a)) == a`, exposed as `checkRoundTrip` so every grammar
+  is a one-line property test.
+
+Effect's `Schema.transformOrFail` gives you the frame and leaves both functions
+to you; `Schema.TemplateLiteralParser` handles flat `${a}-${b}` patterns only.
+This fills the gap between the two for formats with optional parts, repetition,
+alternation, and recursion.
+
+Scope: format strings, not documents. The parser backtracks freely without
+memoisation, there is no left recursion, and printing is canonical, not pretty.
 
 ## Install
 
@@ -9,91 +29,132 @@ a rendered grammar, and a `Schema.Codec<A, string>`.
 pnpm add effect-grammar
 ```
 
-Depends on Effect v4.
+Depends on Effect v4. The package pins `effect` to `4.0.0-beta.102` for now.
 
-## Compatibility policy
-
-This package pins `effect` to `4.0.0-beta.102` because the current v4 release
-candidate line is not source-compatible with the package yet. In particular, the
-current RC removes the `Schema.TaggedErrorClass` and
-`Schema.UnknownFromJsonString` APIs used by the implementation. The exact pin
-will be reconsidered when Effect provides compatible replacements or this
-package intentionally migrates to the RC API, with the full test, typecheck,
-format, and build checks run against the new lockfile.
-
-## Grammar
-
-Define an HTTPS endpoint once, then parse it, print it, or derive a validated
-Schema. `mapSchema` ties the mapped value to a Schema — the Schema types the
-mapping, doubles as the print-time guard, and is reused as the `toSchema`
-target, so grammar and Schema can't drift apart.
+## A grammar
 
 ```ts
 import { Schema } from "effect"
 import { Grammar } from "effect-grammar"
 
-const EndpointStruct = Schema.Struct({
-  host: Schema.NonEmptyString,
-  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+const endpoint = Grammar.gen(function* () {
+  yield* Grammar.literal("https://")
+  const host = yield* Grammar.field("host", Grammar.regex(/[^:/?#]+/, "host"))
+  const port = yield* Grammar.field(
+    "port",
+    Grammar.optional(Grammar.prefix(":", Grammar.integer)),
+  )
+  return { host, port: port ?? 443 }
 })
 
-const endpoint = Grammar.mapSchema(
-  Grammar.struct({
-    scheme: Grammar.literal("https://"),
-    host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
-    portPart: Grammar.optional(
-      Grammar.struct({ sep: Grammar.literal(":"), port: Grammar.integer }),
-    ),
-  }),
-  EndpointStruct,
-  {
-    to: ({ host, portPart }) => ({ host, port: portPart?.port ?? 443 }),
-    from: ({ host, port }) => ({
-      scheme: "https://" as const,
-      host,
-      portPart: { sep: ":" as const, port },
-    }),
-  },
-)
-const Endpoint = Grammar.toSchema(endpoint, EndpointStruct, {
-  identifier: "Endpoint",
-})
-Schema.decodeUnknownSync(Endpoint)("https://effect.website:443") // { host: "effect.website", port: 443 }
-Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 }) // "https://effect.website:443"
+Grammar.parse(endpoint, "https://effect.website:8080")
+// Result.succeed({ host: "effect.website", port: 8080 })
+Grammar.parse(endpoint, "https://effect.website:abc")
+// Result.fail(ParseError: line 1, column 24: expected integer, found "a")
+Grammar.print(endpoint, { host: "effect.website", port: 443 })
+// Result.succeed("https://effect.website:443")
+Grammar.render(endpoint)
+// "https://" host:<host> port:(":" <integer>)?
 ```
 
-## Parse-only with `Effect.gen`
+The rule that makes a generator printable: a **silent** grammar (`literal`,
+`symbol`, `whitespace`, anything under `skip`) carries no value and can be
+`yield*`-ed bare. A **value** grammar goes through `field(name, g)`. Printing
+replays the generator, reading each field from `value[name]` and feeding it back
+in, so an `if` on a parsed value takes the same path in both directions. The
+generator's return must hold every field under its name — the types enforce it —
+or return nothing and get the object of fields.
+
+`seq` is the same thing without control flow, and renders exactly:
 
 ```ts
-import { Effect, Schema } from "effect"
-import { char, digit, endOfInput, many, parse } from "effect-grammar/parser"
-
-class OutOfRange extends Schema.TaggedErrorClass<OutOfRange>()("OutOfRange", {
-  n: Schema.Finite,
-}) {}
-
-const byte = Effect.gen(function* () {
-  const digits = yield* many(digit, { atLeast: 1 })
-  const n = Number(digits.join(""))
-  if (n > 255) return yield* new OutOfRange({ n })
-  return n
-})
-
-const ip = Effect.gen(function* () {
-  const a = yield* byte
-  yield* char(".")
-  const b = yield* byte
-  yield* char(".")
-  const c = yield* byte
-  yield* char(".")
-  const d = yield* byte
-  yield* endOfInput
-  return [a, b, c, d] as const
-})
-
-Effect.runSync(parse("192.168.1.1", ip))
-// { _tag: "Success", value: [192, 168, 1, 1] }
+const member = Grammar.seq(
+  Grammar.field("key", jsonString),
+  Grammar.symbol(":"),
+  Grammar.field("value", jsonValue),
+)
+// Grammar<{ key: string; value: Json }>
 ```
 
-Parsing is strict by default, so `parse` rejects trailing input. Use
-`parsePrefix` when the input may contain content after the parsed value.
+## The Schema
+
+`toSchema` takes the grammar and the Schema it should decode to. Parsing happens
+first, then the target's refinements; encoding prints.
+
+```ts
+const Endpoint = Grammar.toSchema(
+  endpoint,
+  Schema.Struct({
+    host: Schema.NonEmptyString,
+    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+  }),
+  { identifier: "Endpoint" },
+)
+
+Schema.decodeUnknownSync(Endpoint)("https://effect.website:443")
+// { host: "effect.website", port: 443 }
+Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
+// "https://effect.website:443"
+```
+
+## Values and alternatives
+
+`transform` maps a value both ways. `decodeTo` does the same with a Schema as
+the contract: the Schema types `decode`/`encode` and guards both directions, so
+a `choice` of Schema-typed branches picks the right one when printing.
+
+```ts
+const Num = Schema.Struct({ kind: Schema.Literal("num"), value: Schema.Finite })
+const num = Grammar.integer.pipe(
+  Grammar.decodeTo(Num)({
+    decode: (value) => ({ kind: "num", value }),
+    encode: (n) => n.value,
+  }),
+)
+```
+
+Constants come from silent grammars with `as`; presence becomes a boolean with
+`flag`:
+
+```ts
+const jsonNull = Grammar.symbol("null").pipe(Grammar.as(null))
+const negate = Grammar.flag("-")
+```
+
+Recursion goes through `suspend`:
+
+```ts
+const jsonValue: Grammar.Grammar<Json> = Grammar.suspend(
+  () =>
+    Grammar.choice(
+      jsonNull,
+      jsonBool,
+      jsonNumber,
+      jsonString,
+      jsonArray,
+      jsonObject,
+    ),
+  "value",
+)
+```
+
+See `examples/` for JSON, Scheme, a Postgres DSN, netstrings, and GitHub's
+search syntax.
+
+## Errors
+
+`choice` backtracks fully. Errors report the furthest position the parser
+reached and everything that could have matched there:
+
+```
+line 1, column 7: expected one of "null", "true", "false", number, string, "[", "{", found end of input
+```
+
+`label(name)` names a grammar for these messages.
+
+## The law
+
+```ts
+Grammar.checkRoundTrip(endpoint, { host: "a", port: 1 })
+// Result.void, or RoundTripError naming the stage: "print" | "parse" | "equal"
+```

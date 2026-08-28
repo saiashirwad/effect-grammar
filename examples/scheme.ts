@@ -3,12 +3,12 @@
  * Minimal subset: numbers, strings, booleans, symbols, lists, and quote.
  *
  * The schemas are the single source of truth for the AST: atom types are
- * derived from them, and `Grammar.mapSchema` reuses them as print-time guards
- * instead of hand-written `kind` checks.
+ * derived from them, and `Grammar.decodeTo` reuses them as guards in both
+ * directions, so `choice` picks the right branch when printing.
  */
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
 // --- AST schemas ---
 
@@ -47,82 +47,63 @@ const ExprSchema: Schema.Codec<Expr> = Schema.Union([
 
 // --- grammar ---
 
-const numberAtom = Grammar.mapSchema(
-  Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")),
-  NumberAtom,
-  {
-    to: (raw): typeof NumberAtom.Type => ({ kind: "number", value: Number(raw) }),
-    from: (n) => String(n.value),
-  },
+const numberAtom = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")).pipe(
+  Grammar.decodeTo(NumberAtom)({
+    decode: (raw) => ({ kind: "number", value: Number(raw) }),
+    encode: (n) => String(n.value),
+  }),
 )
 
-const stringAtom = Grammar.mapSchema(
-  Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")),
-  StringAtom,
-  {
-    to: (raw): typeof StringAtom.Type => ({ kind: "string", value: JSON.parse(raw) }),
-    from: (s) => JSON.stringify(s.value),
-  },
+const stringAtom = Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")).pipe(
+  Grammar.decodeTo(StringAtom)({
+    decode: (raw) => ({ kind: "string", value: JSON.parse(raw) }),
+    encode: (s) => JSON.stringify(s.value),
+  }),
 )
 
-const booleanAtom = Grammar.mapSchema(
-  Grammar.lexeme(Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean")),
-  BooleanAtom,
-  {
-    to: (raw): typeof BooleanAtom.Type => ({
-      kind: "boolean",
-      value: raw === "#t" || raw === "#true",
-    }),
-    from: (b) => (b.value ? "#t" : "#f"),
-  },
+const booleanAtom = Grammar.lexeme(
+  Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean"),
+).pipe(
+  Grammar.decodeTo(BooleanAtom)({
+    decode: (raw) => ({ kind: "boolean", value: raw === "#t" || raw === "#true" }),
+    encode: (b) => (b.value ? "#t" : "#f"),
+  }),
 )
 
 // After numbers/booleans; excludes whitespace, delimiters, and string quotes.
-const symbolAtom = Grammar.mapSchema(
-  Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")),
-  SymbolAtom,
-  {
-    to: (value): typeof SymbolAtom.Type => ({ kind: "symbol", value }),
-    from: (s) => s.value,
-  },
+const symbolAtom = Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")).pipe(
+  Grammar.decodeTo(SymbolAtom)({
+    decode: (value) => ({ kind: "symbol", value }),
+    encode: (s) => s.value,
+  }),
 )
 
 const atom: Grammar.Grammar<Atom> = Grammar.choice(numberAtom, stringAtom, booleanAtom, symbolAtom)
 
-const expr: Grammar.Grammar<Expr> = Grammar.lazy(() => Grammar.choice(quoteExpr, list, atom), {
-  name: "expr",
-})
-
-const list: Grammar.Grammar<List> = Grammar.mapSchema(
-  Grammar.between(Grammar.symbol("("), Grammar.symbol(")"), Grammar.many(expr)),
-  ListSchema,
-  {
-    to: (elements): List => ({ kind: "list", elements }),
-    from: (l) => [...l.elements],
-  },
+const expr: Grammar.Grammar<Expr> = Grammar.suspend(
+  () => Grammar.choice(quoteExpr, list, atom),
+  "expr",
 )
 
-const quoteExpr: Grammar.Grammar<Quote> = Grammar.mapSchema(
-  Grammar.struct({ tick: Grammar.literal("'"), inner: expr }),
-  QuoteSchema,
-  {
-    to: ({ inner }): Quote => ({ kind: "quote", inner }),
-    from: (q) => ({ tick: "'" as const, inner: q.inner }),
-  },
-)
-
-const document = Grammar.map(
-  Grammar.struct({
-    ws1: Grammar.map(Grammar.regex(/\s*/, "whitespace"), { to: () => "", from: () => "" }),
-    e: expr,
-    ws2: Grammar.map(Grammar.regex(/\s*/, "whitespace"), { to: () => "", from: () => "" }),
-    end: Grammar.end,
+const list: Grammar.Grammar<List> = Grammar.wrap(
+  Grammar.symbol("("),
+  Grammar.many(expr),
+  Grammar.symbol(")"),
+).pipe(
+  Grammar.decodeTo(ListSchema)({
+    decode: (elements) => ({ kind: "list", elements }),
+    encode: (l) => [...l.elements],
   }),
-  {
-    to: ({ e }) => e,
-    from: (e) => ({ ws1: "", e, ws2: "", end: undefined }),
-  },
 )
+
+const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
+  Grammar.decodeTo(QuoteSchema)({
+    decode: (inner) => ({ kind: "quote", inner }),
+    encode: (q) => q.inner,
+  }),
+)
+
+const document = Grammar.wrap(Grammar.whitespace, expr, Grammar.whitespace)
 
 // --- special-form catalog (arity only; unknown heads are free) ---
 
@@ -262,4 +243,18 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.runFork(Effect.forEach(samples, check, { discard: true }))
+Effect.runFork(
+  Effect.gen(function* () {
+    yield* Console.log(`grammar ${Grammar.render(document)}\n`)
+    yield* Effect.forEach(samples, check, { discard: true })
+    const printed = yield* Schema.encodeEffect(ValidScheme)({
+      kind: "list",
+      elements: [
+        { kind: "symbol", value: "define" },
+        { kind: "symbol", value: "x" },
+        { kind: "quote", inner: { kind: "list", elements: [{ kind: "number", value: 1 }] } },
+      ],
+    })
+    yield* Console.log(`\nencode (define x '(1))  →  ${printed}`)
+  }),
+)

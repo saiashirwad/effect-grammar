@@ -1,36 +1,32 @@
 import { Console, Effect, Schema } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
-const EndpointStruct = Schema.Struct({
-  host: Schema.NonEmptyString,
-  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+const endpoint = Grammar.gen(function* () {
+  yield* Grammar.literal("https://")
+  const host = yield* Grammar.field("host", Grammar.regex(/[^:/?#]+/, "host"))
+  const port = yield* Grammar.field("port", Grammar.optional(Grammar.prefix(":", Grammar.integer)))
+  return { host, port: port ?? 443 }
 })
 
-const endpoint = Grammar.mapSchema(
-  Grammar.struct({
-    scheme: Grammar.literal("https://"),
-    host: Grammar.label("host", Grammar.regex(/[^:/?#]+/, "host")),
-    portPart: Grammar.optional(
-      Grammar.struct({ sep: Grammar.literal(":"), port: Grammar.integer }),
-    ),
+const Endpoint = Grammar.toSchema(
+  endpoint,
+  Schema.Struct({
+    host: Schema.NonEmptyString,
+    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
   }),
-  EndpointStruct,
-  {
-    to: ({ host, portPart }) => ({ host, port: portPart?.port ?? 443 }),
-    from: ({ host, port }) => ({
-      scheme: "https://" as const,
-      host,
-      portPart: { sep: ":" as const, port },
-    }),
-  },
+  { identifier: "Endpoint" },
 )
-
-const Endpoint = Grammar.toSchema(endpoint, EndpointStruct, { identifier: "Endpoint" })
 
 const source = "https://effect.website:443"
 const decoded = Schema.decodeUnknownSync(Endpoint)(source)
 const encoded = Schema.encodeSync(Endpoint)(decoded)
 
+Effect.runSync(Console.log(`grammar ${Grammar.render(endpoint)}`))
 Effect.runSync(Console.log(`decode ${source}\n  →  ${JSON.stringify(decoded)}`))
 Effect.runSync(Console.log(`encode ${JSON.stringify(decoded)}\n  →  ${encoded}`))
+Effect.runSync(
+  Console.log(
+    `decode https://effect.website\n  →  ${JSON.stringify(Schema.decodeUnknownSync(Endpoint)("https://effect.website"))}`,
+  ),
+)

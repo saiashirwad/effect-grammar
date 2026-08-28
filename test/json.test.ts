@@ -1,27 +1,20 @@
 import assert from "node:assert/strict"
 
-import { it } from "@effect/vitest"
-import { Effect } from "effect"
-import { describe } from "vitest"
+import { describe, it } from "vitest"
 
 import { jsonString } from "../examples/json.ts"
 import { parseFail, parseOk } from "./helpers.ts"
 
 describe("JSON strings", () => {
-  it.effect("rejects invalid escapes with a ParseError", () =>
-    Effect.sync(() => {
-      const error = parseFail('"a\\q"', jsonString)
+  it("rejects invalid escapes with a ParseError", () => {
+    const error = parseFail(jsonString, '"a\\q"')
+    assert.deepEqual(error.expected, ["string"])
+  })
 
-      assert.equal(error.expected, "string")
-    }),
-  )
+  it("accepts quoted strings and valid JSON escapes", () => {
+    assert.equal(parseOk(jsonString, '"hello"'), "hello")
 
-  it.effect("accepts quoted strings and valid JSON escapes", () =>
-    Effect.sync(() => {
-      assert.equal(parseOk('"hello"', jsonString), "hello")
-
-      const escaped = String.raw`"\"\\\/\b\f\n\r\t\u0041"`
-      assert.equal(parseOk(escaped, jsonString), '"\\/\b\f\n\r\tA')
-    }),
-  )
+    const escaped = String.raw`"\"\\\/\b\f\n\r\t\u0041"`
+    assert.equal(parseOk(jsonString, escaped), '"\\/\b\f\n\r\tA')
+  })
 })

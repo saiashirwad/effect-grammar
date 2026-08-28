@@ -1,32 +1,32 @@
+/** The grammar owns shape; the target Schema owns refinements. Both report through SchemaIssue. */
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/grammar.ts"
+import { Grammar } from "../src/index.ts"
 
-const age = Grammar.map(Grammar.label("age", Grammar.regex(/\d+/, "digits")), {
-  to: Number,
-  from: String,
-})
+const person = Grammar.seq(
+  Grammar.field("name", Grammar.regex(/[a-z]+/, "name")),
+  Grammar.literal(":"),
+  Grammar.field("age", Grammar.integer),
+)
 
 const Person = Grammar.toSchema(
-  Grammar.map(
-    Grammar.struct({
-      name: Grammar.label("name", Grammar.regex(/[a-z]+/, "name")),
-      sep: Grammar.literal(":"),
-      age,
-    }),
-    {
-      to: ({ name, age }) => ({ name, age }),
-      from: ({ name, age }) => ({ name, sep: ":" as const, age }),
-    },
-  ),
+  person,
   Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(3)),
     age: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 120 })),
   }),
 )
 
+const formatIssue = SchemaIssue.makeFormatterDefault()
+
 Effect.runSync(
-  Schema.decodeUnknownEffect(Person, { errors: "all" })("ab:200").pipe(
-    Effect.catch((err) => Console.error(SchemaIssue.makeFormatterDefault()(err.issue))),
+  Effect.forEach(["ab:200", "alice:x"], (source) =>
+    Schema.decodeUnknownEffect(Person, { errors: "all" })(source).pipe(
+      Effect.match({
+        onSuccess: (v) => `${source}  →  ${JSON.stringify(v)}`,
+        onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
+      }),
+      Effect.flatMap(Console.log),
+    ),
   ),
 )

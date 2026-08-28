@@ -1,44 +1,55 @@
 import assert from "node:assert/strict"
 
-import { it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
-import { describe } from "vitest"
+import { describe, it } from "vitest"
 
-import { count, literal } from "../src/grammar.ts"
-import * as Grammar from "../src/grammar.ts"
-import { parse, UpstreamError } from "../src/parser.ts"
+import { Grammar } from "../src/index.ts"
+import { parseFail, parseOk } from "./helpers.ts"
 
 describe("correctness regressions", () => {
-  it.effect("preserves caller-supplied upstream failures", () =>
-    Effect.gen(function* () {
-      const upstream = new UpstreamError({ cause: "upstream-broke" })
-      const result = yield* parse("input", Effect.fail(upstream))
+  it("rejects invalid repetition bounds at construction", () => {
+    for (const n of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.throws(() => Grammar.many(Grammar.literal("x"), { min: n }), RangeError)
+      assert.throws(() => Grammar.sepBy(Grammar.literal("x"), ",", { min: n }), RangeError)
+    }
+  })
 
-      assert.equal(result._tag, "Failure")
-      if (result._tag === "Failure") {
-        assert.ok(Schema.is(UpstreamError)(result.failure))
-        assert.equal(result.failure, upstream)
-      }
-    }),
-  )
+  it("a failing choice option does not leave the cursor moved", () => {
+    const g = Grammar.seq(
+      Grammar.field(
+        "head",
+        Grammar.choice(
+          Grammar.literal("abc").pipe(Grammar.as(1)),
+          Grammar.literal("ab").pipe(Grammar.as(2)),
+        ),
+      ),
+      Grammar.literal("!"),
+    )
+    assert.deepEqual(parseOk(g, "ab!"), { head: 2 })
+  })
 
-  it.effect("rejects invalid count cardinalities", () =>
-    Effect.sync(() => {
-      for (const n of [
-        -1,
-        1.5,
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-        Number.MAX_SAFE_INTEGER + 1,
-      ]) {
-        assert.throws(() => count(literal("x"), n), RangeError)
-      }
-    }),
-  )
+  it("a transform guard that rejects rewinds so the next option can try", () => {
+    const small = Grammar.integer.pipe(
+      Grammar.transform({
+        decode: (n) => n,
+        encode: (n) => n,
+        is: (u) => typeof u === "number" && u < 10,
+        name: "small",
+      }),
+    )
+    const g = Grammar.choice(small, Grammar.regex(/\d+/, "digits"))
+    assert.equal(parseOk(g, "123"), "123")
+    assert.equal(parseOk(g, "3"), 3)
+  })
+
+  it("strict end-of-input reports alongside the deeper expectation", () => {
+    const e = parseFail(Grammar.sepBy(Grammar.integer, ","), "1,2 ")
+    assert.equal(e.pos, 3)
+    assert.deepEqual(e.expected, ['","', "end of input"])
+  })
 })
 
-const rawStringNode: Grammar.Node = { _tag: "Literal", value: "raw" }
-
-// @ts-expect-error A raw AST node must not be assignable to Grammar<number>.
-const numberGrammar: Grammar.Grammar<number> = rawStringNode
-void numberGrammar
+// A raw node must not be assignable to a Grammar.
+const rawNode: Grammar.Node = { _tag: "Literal", value: "raw" }
+// @ts-expect-error
+const notAGrammar: Grammar.Grammar<number> = rawNode
+void notAGrammar
