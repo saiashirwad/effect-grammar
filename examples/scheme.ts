@@ -1,16 +1,6 @@
-/**
- * Scheme S-expressions: grammar owns shape; Schema catalog owns special-form arity.
- * Minimal subset: numbers, strings, booleans, symbols, lists, and quote.
- *
- * The schemas are the single source of truth for the AST: atom types are
- * derived from them, and `Grammar.decodeTo` reuses them as guards in both
- * directions, so `choice` picks the right branch when printing.
- */
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
-import { Grammar } from "../src/index.ts"
-
-// --- AST schemas ---
+import * as Grammar from "../src/index.ts"
 
 const NumberAtom = Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite })
 const StringAtom = Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String })
@@ -21,7 +11,6 @@ const AtomSchema = Schema.Union([NumberAtom, StringAtom, BooleanAtom, SymbolAtom
 
 type Atom = typeof AtomSchema.Type
 
-// The recursive variants can't be derived from their own schemas — declared once, by hand.
 type List = { readonly kind: "list"; readonly elements: ReadonlyArray<Expr> }
 type Quote = { readonly kind: "quote"; readonly inner: Expr }
 type Expr = Atom | List | Quote
@@ -44,8 +33,6 @@ const ExprSchema: Schema.Codec<Expr> = Schema.Union([
   ListSchema,
   QuoteSchema,
 ])
-
-// --- grammar ---
 
 const numberAtom = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")).pipe(
   Grammar.decodeTo(NumberAtom)({
@@ -70,7 +57,6 @@ const booleanAtom = Grammar.lexeme(
   }),
 )
 
-// After numbers/booleans; excludes whitespace, delimiters, and string quotes.
 const symbolAtom = Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")).pipe(
   Grammar.decodeTo(SymbolAtom)({
     decode: (value) => ({ kind: "symbol", value }),
@@ -85,27 +71,30 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   "expr",
 )
 
-const list: Grammar.Grammar<List> = Grammar.wrap(
-  Grammar.symbol("("),
-  Grammar.many(expr),
-  Grammar.symbol(")"),
-).pipe(
+const list: Grammar.Grammar<List> = Grammar.gen(function* () {
+  yield* Grammar.symbol("(")
+  const elements = yield* Grammar.field("elements", Grammar.many(expr))
+  yield* Grammar.symbol(")")
+  return { elements }
+}).pipe(
   Grammar.decodeTo(ListSchema)({
-    decode: (elements) => ({ kind: "list", elements }),
-    encode: (l) => [...l.elements],
+    decode: ({ elements }) => ({ kind: "list", elements }),
+    encode: (l) => ({ elements: [...l.elements] }),
   }),
 )
 
-const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
+const quoteExpr: Grammar.Grammar<Quote> = Grammar.gen(function* () {
+  yield* Grammar.literal("'")
+  const inner = yield* Grammar.field("inner", expr)
+  return { inner }
+}).pipe(
   Grammar.decodeTo(QuoteSchema)({
-    decode: (inner) => ({ kind: "quote", inner }),
-    encode: (q) => q.inner,
+    decode: ({ inner }) => ({ kind: "quote", inner }),
+    encode: (q) => ({ inner: q.inner }),
   }),
 )
 
 const document = Grammar.wrap(Grammar.whitespace, expr, Grammar.whitespace)
-
-// --- special-form catalog (arity only; unknown heads are free) ---
 
 const form = (min: number, max = Number.POSITIVE_INFINITY) => ({ min, max })
 
@@ -184,8 +173,6 @@ const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme
   catalogIssues,
 )
 
-// --- sample run ---
-
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const show = (e: Expr): string => {
@@ -243,18 +230,16 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.runFork(
-  Effect.gen(function* () {
-    yield* Console.log(`grammar ${Grammar.render(document)}\n`)
-    yield* Effect.forEach(samples, check, { discard: true })
-    const printed = yield* Schema.encodeEffect(ValidScheme)({
-      kind: "list",
-      elements: [
-        { kind: "symbol", value: "define" },
-        { kind: "symbol", value: "x" },
-        { kind: "quote", inner: { kind: "list", elements: [{ kind: "number", value: 1 }] } },
-      ],
-    })
-    yield* Console.log(`\nencode (define x '(1))  →  ${printed}`)
-  }),
-)
+Effect.gen(function* () {
+  yield* Console.log(`grammar ${Grammar.render(document)}\n`)
+  yield* Effect.forEach(samples, check, { discard: true })
+  const printed = yield* Schema.encodeEffect(ValidScheme)({
+    kind: "list",
+    elements: [
+      { kind: "symbol", value: "define" },
+      { kind: "symbol", value: "x" },
+      { kind: "quote", inner: { kind: "list", elements: [{ kind: "number", value: 1 }] } },
+    ],
+  })
+  yield* Console.log(`\nencode (define x '(1))  →  ${printed}`)
+}).pipe(Effect.runSync)

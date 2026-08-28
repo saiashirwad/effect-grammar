@@ -4,7 +4,7 @@ import { Result } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
 import { describe, it } from "vitest"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
 type Nested = number | ReadonlyArray<Nested>
 

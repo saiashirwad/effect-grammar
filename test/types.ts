@@ -2,7 +2,7 @@
  * Type-level guarantees. Every `@ts-expect-error` below must be a real error —
  * `pnpm typecheck` fails on an unused directive.
  */
-import { Grammar as G } from "../src/index.ts"
+import * as G from "../src/index.ts"
 
 // A value grammar cannot be yielded bare: the printer would have nothing to print it from.
 G.gen(function* () {

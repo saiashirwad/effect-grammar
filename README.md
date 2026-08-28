@@ -35,7 +35,7 @@ Depends on Effect v4. The package pins `effect` to `4.0.0-beta.102` for now.
 
 ```ts
 import { Schema } from "effect"
-import { Grammar } from "effect-grammar"
+import * as Grammar from "effect-grammar"
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")

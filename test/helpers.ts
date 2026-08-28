@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 
 import { Result } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
 export const parseOk = <A>(grammar: Grammar.Grammar<A>, input: string): A => {
   const r = Grammar.parse(grammar, input)

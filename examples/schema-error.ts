@@ -1,13 +1,14 @@
 /** The grammar owns shape; the target Schema owns refinements. Both report through SchemaIssue. */
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
-const person = Grammar.seq(
-  Grammar.field("name", Grammar.regex(/[a-z]+/, "name")),
-  Grammar.literal(":"),
-  Grammar.field("age", Grammar.integer),
-)
+const person = Grammar.gen(function* () {
+  const name = yield* Grammar.field("name", Grammar.regex(/[a-z]+/, "name"))
+  yield* Grammar.literal(":")
+  const age = yield* Grammar.field("age", Grammar.integer)
+  return { name, age }
+})
 
 const Person = Grammar.toSchema(
   person,
@@ -19,8 +20,10 @@ const Person = Grammar.toSchema(
 
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
-Effect.runSync(
-  Effect.forEach(["ab:200", "alice:x"], (source) =>
+const samples = ["ab:200", "alice:x"]
+
+Effect.asVoid(
+  Effect.forEach(samples, (source) =>
     Schema.decodeUnknownEffect(Person, { errors: "all" })(source).pipe(
       Effect.match({
         onSuccess: (v) => `${source}  →  ${JSON.stringify(v)}`,
@@ -29,4 +32,4 @@ Effect.runSync(
       Effect.flatMap(Console.log),
     ),
   ),
-)
+).pipe(Effect.runSync)

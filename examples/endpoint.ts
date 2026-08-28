@@ -1,6 +1,6 @@
 import { Console, Effect, Schema } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
@@ -18,15 +18,16 @@ const Endpoint = Grammar.toSchema(
   { identifier: "Endpoint" },
 )
 
+const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const source = "https://effect.website:443"
-const decoded = Schema.decodeUnknownSync(Endpoint)(source)
-const encoded = Schema.encodeSync(Endpoint)(decoded)
 
-Effect.runSync(Console.log(`grammar ${Grammar.render(endpoint)}`))
-Effect.runSync(Console.log(`decode ${source}\n  →  ${JSON.stringify(decoded)}`))
-Effect.runSync(Console.log(`encode ${JSON.stringify(decoded)}\n  →  ${encoded}`))
-Effect.runSync(
-  Console.log(
-    `decode https://effect.website\n  →  ${JSON.stringify(Schema.decodeUnknownSync(Endpoint)("https://effect.website"))}`,
-  ),
-)
+Effect.gen(function* () {
+  const decoded = yield* Schema.decodeUnknownEffect(Endpoint)(source)
+  const encoded = yield* Schema.encodeEffect(Endpoint)(decoded)
+  const defaultPort = yield* Schema.decodeUnknownEffect(Endpoint)("https://effect.website")
+
+  yield* Console.log(`grammar ${Grammar.render(endpoint)}`)
+  yield* Console.log(`decode ${source}\n  →  ${json(decoded)}`)
+  yield* Console.log(`encode ${json(decoded)}\n  →  ${encoded}`)
+  yield* Console.log(`decode https://effect.website\n  →  ${json(defaultPort)}`)
+}).pipe(Effect.runSync)

@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { Result, Schema } from "effect"
 import { describe, it } from "vitest"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 import { assertRoundTrip, parseFail, parseOk, printFail, printOk } from "./helpers.ts"
 
 const G = Grammar

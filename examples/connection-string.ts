@@ -1,12 +1,13 @@
 import { Console, Effect, Schema } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
-const pair = Grammar.seq(
-  Grammar.field("key", Grammar.regex(/[^=&]+/, "param key")),
-  Grammar.literal("="),
-  Grammar.field("value", Grammar.regex(/[^&]*/, "param value")),
-)
+const pair = Grammar.gen(function* () {
+  const key = yield* Grammar.field("key", Grammar.regex(/[^=&]+/, "param key"))
+  yield* Grammar.literal("=")
+  const value = yield* Grammar.field("value", Grammar.regex(/[^&]*/, "param value"))
+  return { key, value }
+})
 
 /** `?k=v&k=v` as a record; absent when the record is empty. */
 const params = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"))).pipe(
@@ -49,24 +50,13 @@ const decode = Schema.decodeUnknownEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-Effect.runSync(Console.log(`grammar: ${Grammar.render(dsn)}\n`))
-
-for (const source of [
+const samples = [
   "postgres://alice:s3cret@db.internal:5432/shop?sslmode=require&connect_timeout=10",
   "postgres://bob@localhost/postgres",
   "postgres://alice@db.internal:99999/shop",
   "postgres://no-host-at-all",
   "postgres://bob@localhost/postgres#leftover",
-]) {
-  const r = Effect.runSync(Effect.result(decode(source)))
-  Effect.runSync(
-    Console.log(
-      r._tag === "Success"
-        ? `decode ${source}\n  →  ${json(r.success)}`
-        : `decode ${source}\n  →  ${String(r.failure)}`,
-    ),
-  )
-}
+]
 
 const value = {
   user: "alice",
@@ -76,8 +66,22 @@ const value = {
   database: "shop",
   params: { sslmode: "require" },
 }
-const encoded = Effect.runSync(encode(value))
-const roundTripped = Effect.runSync(decode(encoded))
-Effect.runSync(
-  Console.log(`\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`),
-)
+
+Effect.gen(function* () {
+  yield* Console.log(`grammar: ${Grammar.render(dsn)}\n`)
+
+  for (const source of samples) {
+    const r = yield* Effect.result(decode(source))
+    yield* Console.log(
+      r._tag === "Success"
+        ? `decode ${source}\n  →  ${json(r.success)}`
+        : `decode ${source}\n  →  ${String(r.failure)}`,
+    )
+  }
+
+  const encoded = yield* encode(value)
+  const roundTripped = yield* decode(encoded)
+  yield* Console.log(
+    `\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`,
+  )
+}).pipe(Effect.runSync)

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 
 import { describe, it } from "vitest"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 import { parseFail, parseOk } from "./helpers.ts"
 
 describe("correctness regressions", () => {

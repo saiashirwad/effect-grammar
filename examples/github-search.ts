@@ -1,10 +1,9 @@
 /**
- * GitHub search query: grammar owns shape; Schema catalog owns qualifier refinement.
  * Spec: https://docs.github.com/en/search-github
  */
 import { Console, Effect, Result, Schema, SchemaIssue } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
 type CompareOp = ">" | ">=" | "<" | "<="
 
@@ -26,8 +25,6 @@ type And = { readonly kind: "and"; readonly parts: ReadonlyArray<Query> }
 type Or = { readonly kind: "or"; readonly parts: ReadonlyArray<Query> }
 type Group = { readonly kind: "group"; readonly inner: Query }
 type Query = Term | Qualifier | Not | And | Or | Group
-
-// --- AST schemas ---
 
 const WordValueSchema = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
 const QuotedValueSchema = Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String })
@@ -92,15 +89,12 @@ const QuerySchema: Schema.Codec<Query> = Schema.Union([
   GroupSchema,
 ])
 
-// --- grammar ---
-
-/** Required whitespace; prints one space. */
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
 const doubleQuoted = Grammar.wrap('"', Grammar.regex(/[^"]*/, "string content"), '"')
 
-const compareValue = Grammar.seq(
-  Grammar.field(
+const compareValue = Grammar.gen(function* () {
+  const op = yield* Grammar.field(
     "op",
     Grammar.choice(
       Grammar.literal(">=").pipe(Grammar.as(">=")),
@@ -108,9 +102,10 @@ const compareValue = Grammar.seq(
       Grammar.literal(">").pipe(Grammar.as(">")),
       Grammar.literal("<").pipe(Grammar.as("<")),
     ),
-  ),
-  Grammar.field("value", token("compare value")),
-).pipe(
+  )
+  const value = yield* Grammar.field("value", token("compare value"))
+  return { op, value }
+}).pipe(
   Grammar.decodeTo(CompareValueSchema)({
     decode: ({ op, value }) => ({ kind: "compare", op, value }),
     encode: (v) => ({ op: v.op, value: v.value }),
@@ -145,12 +140,13 @@ const quotedValue = doubleQuoted.pipe(
 
 const qualifierValue = Grammar.choice(quotedValue, compareValue, rangeValue, wordValue)
 
-const qualifier = Grammar.seq(
-  Grammar.field("negate", Grammar.flag("-")),
-  Grammar.field("key", Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name")),
-  Grammar.literal(":"),
-  Grammar.field("value", qualifierValue),
-).pipe(
+const qualifier = Grammar.gen(function* () {
+  const negate = yield* Grammar.field("negate", Grammar.flag("-"))
+  const key = yield* Grammar.field("key", Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name"))
+  yield* Grammar.literal(":")
+  const value = yield* Grammar.field("value", qualifierValue)
+  return { negate, key, value }
+}).pipe(
   Grammar.decodeTo(QualifierSchema)({
     decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
     encode: (q) => ({ negate: q.negate, key: q.key, value: q.value }),
@@ -159,14 +155,17 @@ const qualifier = Grammar.seq(
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group: Grammar.Grammar<Group> = Grammar.wrap(
-  "(",
-  Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace),
-  ")",
-).pipe(
+const group: Grammar.Grammar<Group> = Grammar.gen(function* () {
+  yield* Grammar.literal("(")
+  yield* Grammar.whitespace
+  const inner = yield* Grammar.field("inner", query)
+  yield* Grammar.whitespace
+  yield* Grammar.literal(")")
+  return { inner }
+}).pipe(
   Grammar.decodeTo(GroupSchema)({
-    decode: (inner) => ({ kind: "group", inner }),
-    encode: (g) => g.inner,
+    decode: ({ inner }) => ({ kind: "group", inner }),
+    encode: (g) => ({ inner: g.inner }),
   }),
 )
 
@@ -189,29 +188,29 @@ const termQuoted: Grammar.Grammar<Term> = doubleQuoted.pipe(
 
 const atom: Grammar.Grammar<Query> = Grammar.choice(qualifier, group, termQuoted, termWord)
 
-// Precedence: NOT > AND > OR. Choice backtracks, so a trailing operator that
-// doesn't complete is simply left for the outer level.
 const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
   () => Grammar.choice(notBranch, atom),
   "not",
 )
 
-const notBranch: Grammar.Grammar<Not> = Grammar.prefix(
-  Grammar.seq(Grammar.literal("NOT"), ws),
-  notExpr,
-).pipe(
+const notBranch: Grammar.Grammar<Not> = Grammar.gen(function* () {
+  yield* Grammar.literal("NOT")
+  yield* ws
+  const inner = yield* Grammar.field("inner", notExpr)
+  return { inner }
+}).pipe(
   Grammar.decodeTo(NotSchema)({
-    decode: (inner) => ({ kind: "not", inner }),
-    encode: (n) => n.inner,
+    decode: ({ inner }) => ({ kind: "not", inner }),
+    encode: (n) => ({ inner: n.inner }),
   }),
 )
 
-/** `first (sep next)*` flattened into an n-ary node when there is more than one part. */
 const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
-  Grammar.seq(
-    Grammar.field("first", part),
-    Grammar.field("rest", Grammar.many(Grammar.prefix(sep, part))),
-  ).pipe(
+  Grammar.gen(function* () {
+    const first = yield* Grammar.field("first", part)
+    const rest = yield* Grammar.field("rest", Grammar.many(Grammar.prefix(sep, part)))
+    return { first, rest }
+  }).pipe(
     Grammar.transform({
       decode: ({ first, rest }): Query =>
         rest.length === 0 ? first : { kind, parts: [first, ...rest] },
@@ -232,8 +231,6 @@ const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
 const orExpr: Grammar.Grammar<Query> = nary("or", orSep, andExpr)
 
 const whole = Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace)
-
-// --- qualifier catalog ---
 
 const pattern = (re: RegExp, identifier: string, message: string) =>
   Schema.String.check(Schema.isPattern(re, { identifier, message }))
@@ -414,4 +411,4 @@ Effect.gen(function* () {
   }
   const decoded = yield* Schema.decodeUnknownEffect(ValidGithubQuery)(samples[1]!)
   yield* Console.log(`\nencode  →  ${yield* Schema.encodeEffect(ValidGithubQuery)(decoded)}`)
-}).pipe(Effect.runFork)
+}).pipe(Effect.runSync)

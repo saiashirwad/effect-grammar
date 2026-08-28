@@ -1,11 +1,6 @@
-/**
- * Netstrings (`<length>:<payload>,`): a dependent parse. The length just
- * parsed decides how many characters to read next — plain control flow inside
- * `gen`. The value drops the length, so a `transform` supplies the inverse.
- */
 import { Console, Effect, Result } from "effect"
 
-import { Grammar } from "../src/index.ts"
+import * as Grammar from "../src/index.ts"
 
 const netstring = Grammar.gen(function* () {
   const n = yield* Grammar.field("n", Grammar.integer)
