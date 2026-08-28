@@ -11,13 +11,11 @@ class Failure {
   }
 }
 
-const fail = (reason: () => string): never => {
-  throw new Failure(reason)
-}
+const fail = (reason: () => string): Failure => new Failure(reason)
 
 type PrintFields = Fields<Part>
 
-const printPart = <A>(p: Part, value: A): string => {
+const printPart = <A>(p: Part, value: A): string | Failure => {
   if (isField(p)) {
     // SAFETY: Seq and Gen only pass field bags shaped by the grammar's parts.
     const fields = value as PrintFields
@@ -26,7 +24,7 @@ const printPart = <A>(p: Part, value: A): string => {
   return out(p, undefined)
 }
 
-const out = <A>(g: Grammar<A>, value: A): string => {
+const out = <A>(g: Grammar<A>, value: A): string | Failure => {
   const n = g.node
   switch (n._tag) {
     case "Literal":
@@ -39,8 +37,15 @@ const out = <A>(g: Grammar<A>, value: A): string => {
         return fail(() => `${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
       }
       return value
-    case "Seq":
-      return n.parts.map((p) => printPart(p, value)).join("")
+    case "Seq": {
+      let acc = ""
+      for (const p of n.parts) {
+        const r = printPart(p, value)
+        if (r instanceof Failure) return r
+        acc += r
+      }
+      return acc
+    }
     case "Gen": {
       // SAFETY: gen values are the field bag produced by the surrounding grammar.
       const fields = value as PrintFields
@@ -49,22 +54,28 @@ const out = <A>(g: Grammar<A>, value: A): string => {
       let r = it.next()
       while (!r.done) {
         const p = r.value
-        acc += printPart(p, fields)
+        const s = printPart(p, fields)
+        if (s instanceof Failure) return s
+        acc += s
         r = it.next(isField(p) ? fields[p.name] : undefined)
       }
       return acc
     }
-    case "Wrap":
-      return out(n.open, undefined) + out(n.inner, value) + out(n.close, undefined)
+    case "Wrap": {
+      const open = out(n.open, undefined)
+      if (open instanceof Failure) return open
+      const inner = out(n.inner, value)
+      if (inner instanceof Failure) return inner
+      const close = out(n.close, undefined)
+      if (close instanceof Failure) return close
+      return open + inner + close
+    }
     case "Choice": {
       const reasons: Array<() => string> = []
       for (const o of n.options) {
-        try {
-          return out(o, value)
-        } catch (e) {
-          if (!(e instanceof Failure)) throw e
-          reasons.push(e.reason)
-        }
+        const r = out(o, value)
+        if (!(r instanceof Failure)) return r
+        reasons.push(r.reason)
       }
       return fail(
         () =>
@@ -78,7 +89,15 @@ const out = <A>(g: Grammar<A>, value: A): string => {
           n.max === Number.POSITIVE_INFINITY ? `at least ${n.min}` : `${n.min}..${n.max}`
         return fail(() => `expected ${range} items, got ${value.length}`)
       }
-      return value.map((v) => out(n.inner, v)).join(out(n.sep, undefined))
+      const sep = out(n.sep, undefined)
+      if (sep instanceof Failure) return sep
+      let acc = ""
+      for (let i = 0; i < value.length; i++) {
+        const r = out(n.inner, value[i])
+        if (r instanceof Failure) return r
+        acc += i === 0 ? r : sep + r
+      }
+      return acc
     }
     case "Optional":
       return value === undefined ? "" : out(n.inner, value)
@@ -97,10 +116,8 @@ const out = <A>(g: Grammar<A>, value: A): string => {
 }
 
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> => {
-  try {
-    return Result.succeed(out(grammar, value))
-  } catch (e) {
-    if (e instanceof Failure) return Result.fail(new PrintError({ message: e.reason() }))
-    throw e
-  }
+  const r = out(grammar, value)
+  return r instanceof Failure
+    ? Result.fail(new PrintError({ message: r.reason() }))
+    : Result.succeed(r)
 }
