@@ -1,23 +1,23 @@
 # effect-grammar
 
-Schema for the inside of a string.
+Invertible grammar combinators and parser-printers for Effect.
 
-You model your domain with Effect Schema. Some of those values also have a text
-form: a connection string, `1h30m`, a cron line, a search query, an
-S-expression. Write that format once as a grammar and get:
+Schema models your structured data. `effect-grammar` models the text formats inside your strings: connection strings, duration strings (`1h30m`), cron expressions, search queries, or DSLs.
 
-- a parser with line/column errors that say what was expected
-- a printer that emits the canonical text for a value
-- a `Schema.Codec<A, string>` so `decode` parses and `encode` prints, and Schema
-  refinements compose with the grammar
-- `render`, the grammar as text, used as the Schema's description
+You write the grammar definition once. You get four outputs:
 
-`Schema.transformOrFail` takes a decode and an encode. You write both.
-`Schema.TemplateLiteralParser` handles flat `${a}-${b}` patterns only. Use this
-when the format has optional parts, repetition, alternation, or recursion.
+- **A Parser**: Reads text and outputs structured data with line and column error messages.
+- **A Printer**: Converts structured data back to canonical text.
+- **A `Schema.Codec<A, string>`**: Integrates directly with Effect Schema (`decode` parses, `encode` prints, and Schema refinements compose).
+- **A Text Renderer**: Formats the grammar as readable text for documentation and schema descriptions.
 
-This is for format strings, not documents. The parser backtracks with no
-memoisation and no left recursion. Printing is canonical, not pretty.
+## Why effect-grammar?
+
+- **`Schema.transformOrFail`**: Requires you to write and maintain both `decode` and `encode` functions manually.
+- **`Schema.TemplateLiteralParser`**: Supports only flat `${a}-${b}` string patterns.
+- **`effect-grammar`**: Automatically derives the parser and printer for formats with optional parts, repetition, alternation, and recursion.
+
+This is for format strings, not documents. The parser backtracks with no memoization and no left recursion. Printing is canonical, not pretty.
 
 ## Install
 
