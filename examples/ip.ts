@@ -12,7 +12,7 @@ const ip = Grammar.sepBy(
 ).pipe(
   Grammar.transform({
     decode: ([a, b, c, d]) => [a!, b!, c!, d!] as const,
-    encode: (tuple) => [...tuple],
+    encode: (tuple) => tuple,
   }),
 )
 

@@ -17,7 +17,7 @@ const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
       Grammar.transform({
         decode: (a): Nested => a,
         // SAFETY: `sepBy` yields an array and `encode` only runs on values that passed `is: Array.isArray`.
-        encode: (a) => a as Array<Nested>,
+        encode: (a) => a as ReadonlyArray<Nested>,
         is: Array.isArray,
       }),
     ),

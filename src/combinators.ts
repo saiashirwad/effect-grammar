@@ -24,8 +24,15 @@ export const literal = (value: string): Silent => silent({ _tag: "Literal", valu
 export const empty: Silent = literal("")
 
 /** The regex is made sticky so the parser can match at a position without slicing. */
-export const regex = (re: RegExp, name: string): Grammar<string> =>
-  make({ _tag: "Regex", re: new RegExp(re.source, `${re.flags.replace(/[gy]/g, "")}y`), name })
+export const regex = (re: RegExp, name: string): Grammar<string> => {
+  const flags = re.flags.replace(/[gy]/g, "")
+  return make({
+    _tag: "Regex",
+    re: new RegExp(re.source, `${flags}y`),
+    whole: new RegExp(`^(?:${re.source})$`, flags),
+    name,
+  })
+}
 
 const toSilent = (s: Silent | string): Silent => (isGrammar(s) ? s : literal(s))
 
@@ -46,7 +53,11 @@ export const gen = <Y extends Silent | Field<string, any>, R extends Fields<Y> |
 ): Grammar<[R] extends [void] ? Fields<Y> : R> => make({ _tag: "Gen", run })
 
 export function wrap(open: Silent | string, inner: Silent, close: Silent | string): Silent
-export function wrap<A>(open: Silent | string, inner: Grammar<A>, close: Silent | string): Grammar<A>
+export function wrap<A>(
+  open: Silent | string,
+  inner: Grammar<A>,
+  close: Silent | string,
+): Grammar<A>
 export function wrap(open: Silent | string, inner: Grammar<any>, close: Silent | string) {
   const node = {
     _tag: "Wrap",
@@ -101,20 +112,20 @@ const bounds = (name: string, opts: RepeatOptions | undefined): Bounds => {
 const dataFirst = (args: IArguments) => isGrammar(args[0])
 
 export const many: {
-  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>>
-  (opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<Array<A>>
+  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<ReadonlyArray<A>>
+  (opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
 } = F.dual(
   dataFirst,
-  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<Array<A>> =>
+  <A>(inner: Grammar<A>, opts?: RepeatOptions): Grammar<ReadonlyArray<A>> =>
     make({ _tag: "Many", inner, sep: empty, ...bounds("many", opts) }),
 )
 
 export const sepBy: {
-  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<Array<A>>
-  (sep: Silent | string, opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<Array<A>>
+  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<ReadonlyArray<A>>
+  (sep: Silent | string, opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
 } = F.dual(
   dataFirst,
-  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<Array<A>> =>
+  <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions): Grammar<ReadonlyArray<A>> =>
     make({ _tag: "Many", inner, sep: toSilent(sep), ...bounds("sepBy", opts) }),
 )
 
@@ -135,7 +146,14 @@ export const transform: {
     make({ _tag: "Transform", inner, ...f }),
 )
 
-export type DecodeToOptions<A, T> = Omit<TransformOptions<A, T>, "is">
+export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
+  /**
+   * Defaults to `Schema.is(schema)`, which checks the whole value. Inside a recursive
+   * grammar every nested node would then re-check its subtree, so pass a cheap
+   * discriminator there, e.g. `is: (v) => v.kind === "list"`.
+   */
+  readonly is?: ((value: T) => boolean) | undefined
+}
 
 /**
  * Curried on purpose: with the schema and options in one call TS widens literal
@@ -146,7 +164,7 @@ export const decodeTo =
   <A>(f: DecodeToOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> => {
     let is: ((value: T) => boolean) | undefined
-    return transform(inner, { ...f, is: (value) => (is ??= Schema.is(schema))(value) })
+    return transform(inner, { ...f, is: f.is ?? ((value) => (is ??= Schema.is(schema))(value)) })
   }
 
 export const as: {

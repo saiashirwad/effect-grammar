@@ -76,7 +76,8 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
 const list = Grammar.wrap(Grammar.symbol("("), Grammar.many(expr), Grammar.symbol(")")).pipe(
   Grammar.decodeTo(ListSchema)({
     decode: (elements) => ({ kind: "list", elements }),
-    encode: (l) => [...l.elements],
+    encode: (l) => l.elements,
+    is: (v) => v.kind === "list",
   }),
 )
 
@@ -84,6 +85,7 @@ const quoteExpr = Grammar.prefix("'", expr).pipe(
   Grammar.decodeTo(QuoteSchema)({
     decode: (inner) => ({ kind: "quote", inner }),
     encode: (q) => q.inner,
+    is: (v) => v.kind === "quote",
   }),
 )
 

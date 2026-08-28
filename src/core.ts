@@ -9,7 +9,14 @@ export interface Bounds {
 
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
-  | { readonly _tag: "Regex"; readonly re: RegExp; readonly name: string }
+  | {
+      readonly _tag: "Regex"
+      /** Sticky, for matching at a position. */
+      readonly re: RegExp
+      /** Anchored, for checking a whole value on print. */
+      readonly whole: RegExp
+      readonly name: string
+    }
   | { readonly _tag: "Seq"; readonly parts: ReadonlyArray<Part> }
   | { readonly _tag: "Gen"; readonly run: () => Generator<Part, any, any> }
   | {

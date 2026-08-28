@@ -358,6 +358,21 @@ describe("transform / decodeTo", () => {
     )
     assert.deepEqual(parseFail(g, "10").expected, ["digit"])
   })
+
+  it("decodeTo takes an `is` override in place of the schema guard", () => {
+    const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
+    const g = G.integer.pipe(
+      G.decodeTo(Small)({
+        decode: (n) => n,
+        encode: (n) => n,
+        is: (n) => n % 2 === 0,
+        name: "even",
+      }),
+    )
+    assert.equal(parseOk(g, "10"), 10)
+    assert.deepEqual(parseFail(g, "3").expected, ["even"])
+    assert.match(printFail(g, 3).message, /even/)
+  })
 })
 
 describe("as / flag / skip", () => {
@@ -414,6 +429,11 @@ describe("label", () => {
 
   it("replaces the expected set when failing at its own start", () => {
     assert.deepEqual(parseFail(g, "1").expected, ["pair"])
+  })
+
+  it("keeps sibling expectations recorded at the same position", () => {
+    const c = G.choice(G.literal("x"), g, G.regex(/\d/, "digit").pipe(G.label("num")))
+    assert.deepEqual(parseFail(c, "!").expected, ['"x"', "pair", "num"])
   })
 
   it("keeps the deeper expectation after consuming input", () => {

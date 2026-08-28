@@ -6,7 +6,6 @@ import { describe } from "./render.ts"
 
 type ParseValue = string | number | boolean | bigint | symbol | null | undefined | object
 
-
 interface State {
   readonly input: string
   pos: number
@@ -125,8 +124,10 @@ const go = (g: Grammar<unknown>, s: State): ParseValue | typeof FAIL => {
       return go(n.inner, s) === FAIL ? FAIL : undefined
     case "Label": {
       const start = s.pos
+      // Expectations already recorded here belong to sibling branches; only the inner ones collapse.
+      const siblings = s.furthest === start ? [...s.expected] : []
       const v = go(n.inner, s)
-      if (v === FAIL && s.furthest === start) s.expected = new Set([n.name])
+      if (v === FAIL && s.furthest === start) s.expected = new Set([...siblings, n.name])
       return v
     }
     case "Suspend":

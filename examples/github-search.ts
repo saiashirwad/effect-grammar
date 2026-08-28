@@ -157,6 +157,7 @@ const group = Grammar.wrap(
   Grammar.decodeTo(GroupSchema)({
     decode: (inner) => ({ kind: "group", inner }),
     encode: (g) => g.inner,
+    is: (v) => v.kind === "group",
   }),
 )
 
@@ -185,6 +186,7 @@ const notBranch = Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws), notExp
   Grammar.decodeTo(NotSchema)({
     decode: (inner) => ({ kind: "not", inner }),
     encode: (n) => n.inner,
+    is: (v) => v.kind === "not",
   }),
 )
 
@@ -193,7 +195,7 @@ const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Que
     Grammar.transform({
       decode: (parts): Query =>
         parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts },
-      encode: (q) => (q.kind === kind ? [...q.parts] : [q]),
+      encode: (q) => (q.kind === kind ? q.parts : [q]),
     }),
   )
 

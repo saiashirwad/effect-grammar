@@ -2,7 +2,13 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
-type JsonValue = null | boolean | number | string | Array<JsonValue> | { [key: string]: JsonValue }
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ReadonlyArray<JsonValue>
+  | { readonly [key: string]: JsonValue }
 
 const jsonNull = Grammar.symbol("null").pipe(Grammar.as(null))
 
