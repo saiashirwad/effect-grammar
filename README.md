@@ -82,29 +82,6 @@ print { kind: "text", size: 2, body: "hello" }
 kind:("text" | "bits") "/" size:<integer> ":" body:match(kind){"text" => <char>{size} | "bits" => (<bit>){size}}
 ```
 
-## How `gen` works
-
-`gen` runs the generator once when you build the grammar. It does not parse text
-at that time.
-
-A value grammar produces a `Ref<A>` inside the generator. A ref represents the
-value that will exist during parsing or printing. A silent grammar, such as
-`literal` or `symbol`, does not produce a value.
-
-The generator return value defines the result shape. Parsing fills that shape.
-Printing reads the same fields to produce text.
-
-Each binding must occur in the return value exactly once. `gen` reports an error
-when a binding is missing or occurs more than once. Use `skip` when you must
-parse and discard a value.
-
-A ref is not a JavaScript value. Use `match` or `matchValue` to select a grammar
-from a ref. You can also use a property of a ref, such as `header.kind` or
-`header.size`. Use `get(ref, key)` for reserved property names.
-
-`match` cases must cover all string literals in the selector type. The parser
-and printer use the same selected branch.
-
 ## Schema integration
 
 `toSchema` combines a grammar with an Effect Schema. Decoding parses the text
