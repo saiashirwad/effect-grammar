@@ -14,16 +14,14 @@ describe("correctness regressions", () => {
   })
 
   it("a failing choice option does not leave the cursor moved", () => {
-    const g = Grammar.seq(
-      Grammar.field(
-        "head",
-        Grammar.choice(
-          Grammar.literal("abc").pipe(Grammar.as(1)),
-          Grammar.literal("ab").pipe(Grammar.as(2)),
-        ),
-      ),
-      Grammar.literal("!"),
-    )
+    const g = Grammar.gen(function* () {
+      const head = yield* Grammar.choice(
+        Grammar.literal("abc").pipe(Grammar.as(1)),
+        Grammar.literal("ab").pipe(Grammar.as(2)),
+      )
+      yield* Grammar.literal("!")
+      return { head }
+    })
     assert.deepEqual(parseOk(g, "ab!"), { head: 2 })
   })
 
@@ -45,6 +43,23 @@ describe("correctness regressions", () => {
     const e = parseFail(Grammar.sepBy(Grammar.integer, ","), "1,2 ")
     assert.equal(e.pos, 3)
     assert.deepEqual(e.expected, ['","', "end of input"])
+  })
+
+  it("a gen inside a gen keeps its own bindings, and a failed inner gen backtracks", () => {
+    const pair = Grammar.gen(function* () {
+      const a = yield* Grammar.integer
+      yield* Grammar.literal("=")
+      const b = yield* Grammar.integer
+      return { a, b }
+    })
+    const g = Grammar.gen(function* () {
+      const first = yield* Grammar.choice(pair, Grammar.integer)
+      yield* Grammar.literal(";")
+      const second = yield* pair
+      return { first, second }
+    })
+    assert.deepEqual(parseOk(g, "1;2=3"), { first: 1, second: { a: 2, b: 3 } })
+    assert.deepEqual(parseOk(g, "1=2;3=4"), { first: { a: 1, b: 2 }, second: { a: 3, b: 4 } })
   })
 })
 

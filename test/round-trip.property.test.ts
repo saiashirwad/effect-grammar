@@ -34,13 +34,18 @@ const nestedArb: FastCheck.Arbitrary<Nested> = FastCheck.letrec<{ nested: Nested
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
-  const host = yield* Grammar.field("host", Grammar.regex(/[a-z][a-z0-9.-]*/, "host"))
-  const port = yield* Grammar.field("port", Grammar.optional(Grammar.prefix(":", Grammar.integer)))
-  const path = yield* Grammar.field(
-    "path",
-    Grammar.many(Grammar.prefix("/", Grammar.regex(/[a-z0-9]+/, "segment"))),
-  )
+  const host = yield* Grammar.regex(/[a-z][a-z0-9.-]*/, "host")
+  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
+  const path = yield* Grammar.many(Grammar.prefix("/", Grammar.regex(/[a-z0-9]+/, "segment")))
   return { host, port, path }
+})
+
+const netstring = Grammar.gen(function* () {
+  const length = yield* Grammar.integer
+  yield* Grammar.literal(":")
+  const payload = yield* Grammar.take(length)
+  yield* Grammar.literal(",")
+  return payload
 })
 
 const endpointArb = FastCheck.record({
@@ -69,10 +74,18 @@ describe("round-trip law: parse(print(a)) == a", () => {
     )
   })
 
-  it("gen grammar with optional and repeated fields", () => {
+  it("gen grammar with optional and repeated bindings", () => {
     FastCheck.assert(
       FastCheck.property(endpointArb, (value) => {
         assertRoundTrip(endpoint, value)
+      }),
+    )
+  })
+
+  it("gen grammar with a recovered length prefix", () => {
+    FastCheck.assert(
+      FastCheck.property(FastCheck.string(), (value) => {
+        assertRoundTrip(netstring, value)
       }),
     )
   })

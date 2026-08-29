@@ -37,9 +37,9 @@ const jsonArray = Grammar.wrap(
 )
 
 const member = Grammar.gen(function* () {
-  const key = yield* Grammar.field("key", jsonString)
+  const key = yield* jsonString
   yield* Grammar.symbol(":")
-  const value = yield* Grammar.field("value", jsonValue)
+  const value = yield* jsonValue
   return { key, value }
 })
 

@@ -23,7 +23,8 @@ You write the grammar definition once. You get four outputs:
 - **`Schema.TemplateLiteralParser`**: Supports only flat `${a}-${b}` string
   patterns.
 - **`effect-grammar`**: Automatically derives the parser and printer for formats
-  with optional parts, repetition, alternation, and recursion.
+  with optional parts, repetition, alternation, recursion, and parts that depend
+  on earlier parts.
 
 This is for format strings, not documents. The parser backtracks with no
 memoization and no left recursion. Printing is canonical, not pretty.
@@ -44,12 +45,9 @@ import * as Grammar from "effect-grammar"
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
-  const host = yield* Grammar.field("host", Grammar.regex(/[^:/?#]+/, "host"))
-  const port = yield* Grammar.field(
-    "port",
-    Grammar.optional(Grammar.prefix(":", Grammar.integer)),
-  )
-  return { host, port: port ?? 443 }
+  const host = yield* Grammar.regex(/[^:/?#]+/, "host")
+  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
+  return { host, port }
 })
 
 Grammar.parse(endpoint, "https://effect.website:8080")
@@ -62,33 +60,96 @@ Grammar.render(endpoint)
 // "https://" host:<host> port:(":" <integer>)?
 ```
 
-A silent grammar (`literal`, `symbol`, `whitespace`, anything under `skip`)
-carries no value and can be `yield*`-ed bare. A value grammar goes through
-`field(name, g)`.
+`gen` runs the generator once, when you build the grammar. Nothing is parsed
+yet, so `yield*` on a value grammar does not return a value. It returns a
+`Ref<A>`: a name for the value that will be there at parse and print time. A
+silent grammar (`literal`, `symbol`, `whitespace`, anything under `skip`)
+carries no value and returns nothing.
 
-`print` replays the generator. It reads each field from `value[name]` and passes
-that back as the `yield*` result. An `if` on a parsed value takes the same path
-both ways. The generator's return must hold every field under its name, and the
-types enforce it. Return nothing and you get the object of fields.
-
-`render` cannot read a generator. It runs the generator once with no values and
-shows the parts it yields. The rendering is exact when the generator is
-straight-line, as above. If the generator branches on a parsed value, render
-still runs with no values. `if (kind === "a") yield* ...` shows only the path
-`undefined` takes, with no warning. Put the branch in `choice` instead, which
-renders every option.
-
-`seq` is the same field object without generator control flow. It renders every
-part:
+The generator's return is a pattern over those refs: a bare ref, a plain object,
+an array, or constants around them. Parsing fills the pattern in. Printing reads
+each ref back out of the value you give it. That is what makes the grammar
+invertible without a `field` name for every part.
 
 ```ts
-const member = Grammar.seq(
-  Grammar.field("key", jsonString),
-  Grammar.symbol(":"),
-  Grammar.field("value", jsonValue),
-)
-// Grammar<{ key: string; value: Json }>
+const nested = Grammar.gen(function* () {
+  const host = yield* Grammar.regex(/[^:]+/, "host")
+  yield* Grammar.literal(":")
+  const port = yield* Grammar.integer
+  return { kind: "endpoint", address: { host, port } } as const
+})
+// Grammar<{ kind: "endpoint"; address: { host: string; port: number } }>
 ```
+
+Write `as const` for a tuple or a literal, as you would anywhere else.
+
+Every binding must appear in the return exactly once, or `gen` throws when you
+build it. A binding the return does not hold is a value the printer could not
+print. To parse something and drop it, `skip` it: the grammar then prints its
+canonical form.
+
+A ref is not a value, so JavaScript cannot look at it. `port ?? 443` keeps the
+ref; `kind === "num"` is a type error; interpolating one throws. Defaults and
+other computation go in `transform`. Branching goes through `match`.
+
+## Depending on an earlier part
+
+`match` picks a grammar by the value of an earlier binding. The cases are keyed
+by the literal's string form, so a boolean takes `{ true, false }`. The printer
+runs the same choice backwards.
+
+```ts
+const tagged = Grammar.gen(function* () {
+  const kind = yield* Grammar.choice(
+    Grammar.literal("n:").pipe(Grammar.as("num")),
+    Grammar.literal("w:").pipe(Grammar.as("word")),
+  )
+  const value = yield* Grammar.match(kind, {
+    num: Grammar.integer,
+    word: Grammar.regex(/[a-z]+/, "word"),
+  })
+  return { kind, value }
+})
+// n:12 → { kind: "num", value: 12 }
+```
+
+A property of a ref is a ref to that property, so a header parsed by one grammar
+can steer the body in another:
+
+```ts
+const frame = Grammar.gen(function* () {
+  const header = yield* headerGrammar // Ref<{ kind: "text" | "bin"; size: number }>
+  yield* Grammar.literal(":")
+  const body = yield* Grammar.match(header.kind, {
+    text: Grammar.take(header.size),
+    bin: Grammar.repeat(byte, header.size),
+  })
+  return { header, body }
+})
+```
+
+`take(n)` reads exactly `n` characters and `repeat(g, n)` exactly `n`
+repetitions. Both know how to get `n` back from what they parsed, so the count
+need not be returned. A netstring is:
+
+```ts
+const netstring = Grammar.gen(function* () {
+  const length = yield* Grammar.integer
+  yield* Grammar.literal(":")
+  const payload = yield* Grammar.take(length)
+  yield* Grammar.literal(",")
+  return payload
+})
+// "5:hello," ⇄ "hello"
+```
+
+A `match` whose scrutinee is not returned recovers it the way `choice` prints:
+by trying each case in order. `dependent(refs, select, { recover, show })` is
+the primitive under all three, for grammars that depend on values in ways these
+do not cover.
+
+`seq(...silents)` is a silent sequence with no bindings:
+`seq(literal("NOT"), whitespace)`.
 
 ## The Schema
 
@@ -100,7 +161,9 @@ const Endpoint = Grammar.toSchema(
   endpoint,
   Schema.Struct({
     host: Schema.NonEmptyString,
-    port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+    port: Schema.UndefinedOr(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+    ),
   }),
   { identifier: "Endpoint" },
 )
@@ -154,6 +217,17 @@ const jsonValue: Grammar.Grammar<Json> = Grammar.suspend(
 
 See `examples/` for JSON, Scheme, a Postgres DSN, netstrings, and GitHub's
 search syntax.
+
+## Rendering
+
+`render` walks the static grammar, so it is exact: every `gen` step, every
+`choice` option, every `match` case. Bindings are named by their path in the
+return; a recovered binding has no name and shows as `$n`.
+
+```
+"https://" host:<host> port:(":" <integer>)?
+h:(kind:("t" | "b") size:<integer>) ":" body:match(h.kind){text => <char>{h.size} | bin => (<bit>){h.size}}
+```
 
 ## Errors
 

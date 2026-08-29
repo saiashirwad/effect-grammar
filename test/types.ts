@@ -4,40 +4,45 @@
  */
 import * as G from "../src/index.ts"
 
-// A value grammar cannot be yielded bare: the printer would have nothing to print it from.
+const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
+
+// A ref has no value while the grammar is built, so JavaScript cannot branch on it.
 G.gen(function* () {
-  // @ts-expect-error wrap it in field("name", ...)
-  const s = yield* G.regex(/x/, "x")
-  return { s }
+  const kind = yield* kindOf
+  // @ts-expect-error a Ref is not a string
+  const value = yield* kind === "a" ? G.integer : G.regex(/x/, "x")
+  return { kind, value }
 })
 
-// The returned object must hold every field under its name.
-// @ts-expect-error missing "host"
+// match must cover every literal.
 G.gen(function* () {
-  const host = yield* G.field("host", G.regex(/x/, "x"))
-  return { hostname: host }
+  const kind = yield* kindOf
+  // @ts-expect-error missing case "b"
+  const value = yield* G.match(kind, { a: G.integer })
+  return { kind, value }
 })
 
-// ...with the field's type.
-// @ts-expect-error port is number | undefined
+// match needs a literal ref.
 G.gen(function* () {
-  const port = yield* G.field("port", G.optional(G.integer))
-  return { port: String(port) }
+  const n = yield* G.optional(G.integer)
+  // @ts-expect-error number | undefined is not a key
+  const value = yield* G.match(n, { 1: G.integer })
+  return { n, value }
 })
 
-// seq only accepts silent grammars and fields.
-// @ts-expect-error bare value grammar
-G.seq(G.literal("a"), G.integer)
+// take and repeat need a number ref.
+G.gen(function* () {
+  const w = yield* G.regex(/x/, "x")
+  // @ts-expect-error Ref<string> is not Ref<number>
+  const s = yield* G.take(w)
+  return { w, s }
+})
 
-// `as` only applies to silent grammars.
-// @ts-expect-error integer is not silent
-G.integer.pipe(G.as(1))
-
-// The value type is exactly the generator's return type...
+// The value type is the return with every Ref<A> replaced by A...
 const g = G.gen(function* () {
   yield* G.literal("(")
-  const n = yield* G.field("n", G.integer)
-  const tags = yield* G.field("tags", G.many(G.regex(/[a-z]+/, "tag")))
+  const n = yield* G.integer
+  const tags = yield* G.many(G.regex(/[a-z]+/, "tag"))
   yield* G.literal(")")
   return { n, tags }
 })
@@ -45,27 +50,90 @@ const ok: G.Type<typeof g> = { n: 1, tags: ["a"] }
 // @ts-expect-error n must be a number
 const bad: G.Type<typeof g> = { n: "1", tags: [] }
 
-// ...or the object of fields when there is no return.
-const g2 = G.gen(function* () {
-  yield* G.literal("(")
-  yield* G.field("n", G.integer)
+// ...through a bare ref, a tuple (`as const`, or it is an array), nesting, and constants.
+const bare = G.gen(function* () {
+  const n = yield* G.integer
+  return n
 })
-const ok2: G.Type<typeof g2> = { n: 1 }
+const okBare: G.Type<typeof bare> = 1
+const tuple = G.gen(function* () {
+  const a = yield* G.integer
+  const b = yield* G.regex(/x/, "x")
+  return [a, b] as const
+})
+const okTuple: G.Type<typeof tuple> = [1, "x"]
+// @ts-expect-error the tuple has two items
+const badTuple: G.Type<typeof tuple> = [1]
+const nested = G.gen(function* () {
+  const a = yield* G.integer
+  return { kind: "x", inner: { a } } as const
+})
+const okNested: G.Type<typeof nested> = { kind: "x", inner: { a: 1 } }
+// @ts-expect-error kind is the literal "x"
+const badNested: G.Type<typeof nested> = { kind: "y", inner: { a: 1 } }
 
-// A conditional grammar yields the union of both value types.
-const g3 = G.gen(function* () {
-  const kind = yield* G.field("kind", G.flag("#"))
-  const value = yield* G.field("value", kind ? G.integer : G.regex(/x/, "x"))
+// An optional binding denotes to A | undefined.
+const opt = G.gen(function* () {
+  const port = yield* G.optional(G.integer)
+  return { port }
+})
+const okOpt: G.Type<typeof opt> = { port: undefined }
+
+// match yields the union of its cases.
+const matched = G.gen(function* () {
+  const kind = yield* kindOf
+  const value = yield* G.match(kind, { a: G.integer, b: G.regex(/x/, "x") })
   return { kind, value }
 })
-const ok3: G.Type<typeof g3> = { kind: true, value: 1 }
-const ok3b: G.Type<typeof g3> = { kind: false, value: "x" }
+const okMatched: G.Type<typeof matched> = { kind: "a", value: 1 }
+const okMatchedB: G.Type<typeof matched> = { kind: "b", value: "x" }
+
+// A property of a ref is a ref to that property, and only real properties exist.
+const header = G.gen(function* () {
+  const kind = yield* kindOf
+  const size = yield* G.integer
+  return { kind, size }
+})
+G.gen(function* () {
+  const h = yield* header
+  const body = yield* G.match(h.kind, { a: G.take(h.size), b: G.repeat(G.integer, h.size) })
+  // @ts-expect-error no such property
+  void h.nope
+  return { h, body }
+})
+
+// No bindings and no return is silent.
+const s: G.Silent = G.gen(function* () {
+  yield* G.literal("a")
+})
+
+// seq only accepts silent grammars.
+// @ts-expect-error bare value grammar
+G.seq(G.literal("a"), G.integer)
+
+// `as` only applies to silent grammars.
+// @ts-expect-error integer is not silent
+G.integer.pipe(G.as(1))
 
 // Silent composition stays silent.
-const s: G.Silent = G.seq(G.literal("a"), G.optional(G.wrap("<", G.symbol("b"), ">")))
+const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.wrap("<", G.symbol("b"), ">")))
 
 // A silent choice is not silent (it has no canonical print).
 // @ts-expect-error
 const notSilent: G.Silent = G.choice(G.literal("a"), G.literal("b"))
 
-void [ok, bad, ok2, ok3, ok3b, s, notSilent]
+void [
+  ok,
+  bad,
+  okBare,
+  okTuple,
+  badTuple,
+  okNested,
+  badNested,
+  okOpt,
+  okMatched,
+  okMatchedB,
+  s,
+  s2,
+  notSilent,
+]

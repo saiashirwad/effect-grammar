@@ -86,11 +86,8 @@ const doubleQuoted = Grammar.wrap('"', Grammar.regex(/[^"]*/, "string content"),
 const keyword = <const S extends string>(s: S) => Grammar.as(Grammar.literal(s), s)
 
 const compareValue = Grammar.gen(function* () {
-  const op = yield* Grammar.field(
-    "op",
-    Grammar.choice(keyword(">="), keyword("<="), keyword(">"), keyword("<")),
-  )
-  const value = yield* Grammar.field("value", token("compare value"))
+  const op = yield* Grammar.choice(keyword(">="), keyword("<="), keyword(">"), keyword("<"))
+  const value = yield* token("compare value")
   return { op, value }
 }).pipe(
   Grammar.decodeTo(CompareValueSchema)({
@@ -103,9 +100,9 @@ const rangeBound = (name: string) =>
   Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
 
 const rangeValue = Grammar.gen(function* () {
-  const from = yield* Grammar.field("from", rangeBound("range start"))
+  const from = yield* rangeBound("range start")
   yield* Grammar.literal("..")
-  const to = yield* Grammar.field("to", rangeBound("range end"))
+  const to = yield* rangeBound("range end")
   return { from, to }
 }).pipe(
   Grammar.decodeTo(RangeValueSchema)({
@@ -131,10 +128,10 @@ const quotedValue = doubleQuoted.pipe(
 const qualifierValue = Grammar.choice(quotedValue, compareValue, rangeValue, wordValue)
 
 const qualifier = Grammar.gen(function* () {
-  const negate = yield* Grammar.field("negate", Grammar.flag("-"))
-  const key = yield* Grammar.field("key", Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name"))
+  const negate = yield* Grammar.flag("-")
+  const key = yield* Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name")
   yield* Grammar.literal(":")
-  const value = yield* Grammar.field("value", qualifierValue)
+  const value = yield* qualifierValue
   return { negate, key, value }
 }).pipe(
   Grammar.decodeTo(QualifierSchema)({

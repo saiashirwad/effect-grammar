@@ -3,9 +3,9 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 
 const person = Grammar.gen(function* () {
-  const name = yield* Grammar.field("name", Grammar.regex(/[a-z]+/, "name"))
+  const name = yield* Grammar.regex(/[a-z]+/, "name")
   yield* Grammar.literal(":")
-  const age = yield* Grammar.field("age", Grammar.integer)
+  const age = yield* Grammar.integer
   return { name, age }
 })
 

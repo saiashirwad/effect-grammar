@@ -3,9 +3,9 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 
 const pair = Grammar.gen(function* () {
-  const key = yield* Grammar.field("key", Grammar.regex(/[^=&]+/, "param key"))
+  const key = yield* Grammar.regex(/[^=&]+/, "param key")
   yield* Grammar.literal("=")
-  const value = yield* Grammar.field("value", Grammar.regex(/[^&]*/, "param value"))
+  const value = yield* Grammar.regex(/[^&]*/, "param value")
   return { key, value }
 })
 
@@ -21,17 +21,16 @@ const queryParams = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"
 
 const dsn = Grammar.gen(function* () {
   yield* Grammar.literal("postgres://")
-  const user = yield* Grammar.field("user", Grammar.regex(/[^:@/?#]+/, "user"))
-  const password = yield* Grammar.field(
-    "password",
-    Grammar.optional(Grammar.prefix(":", Grammar.regex(/[^@/?#]+/, "password"))),
+  const user = yield* Grammar.regex(/[^:@/?#]+/, "user")
+  const password = yield* Grammar.optional(
+    Grammar.prefix(":", Grammar.regex(/[^@/?#]+/, "password")),
   )
   yield* Grammar.literal("@")
-  const host = yield* Grammar.field("host", Grammar.regex(/[^:/?#]+/, "host"))
-  const port = yield* Grammar.field("port", Grammar.optional(Grammar.prefix(":", Grammar.integer)))
+  const host = yield* Grammar.regex(/[^:/?#]+/, "host")
+  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
   yield* Grammar.literal("/")
-  const database = yield* Grammar.field("database", Grammar.regex(/[^/?#]+/, "database"))
-  const params = yield* Grammar.field("params", queryParams)
+  const database = yield* Grammar.regex(/[^/?#]+/, "database")
+  const params = yield* queryParams
   return { user, password, host, port, database, params }
 })
 

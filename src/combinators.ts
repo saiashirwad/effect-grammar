@@ -1,23 +1,23 @@
-import { Equal, Function as F, Schema } from "effect"
+import { Equal, Function as F, Predicate, Schema } from "effect"
 
 import {
+  assertInScope,
   type Bounds,
-  type Field,
-  type Fields,
   type Grammar,
-  isField,
   isGrammar,
   isSilent,
   make,
   type Node,
-  type Part,
+  type Ref,
+  type RefBase,
   type Silent,
   silent,
   type Type,
+  type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
 
-export { field } from "./core.ts"
+export { gen, type GenGrammar, seq } from "./gen.ts"
 
 export const literal = (value: string) => silent({ _tag: "Literal", value })
 
@@ -37,18 +37,6 @@ export const regex = (re: RegExp, name: string): Grammar<string> => {
 const _toSilent = (s: Silent | string) => (isGrammar(s) ? s : literal(s))
 
 const _silentIf = (cond: boolean, node: Node): any => (cond ? silent(node) : make(node))
-
-export function seq(...parts: ReadonlyArray<Silent>): Silent
-export function seq<const Parts extends ReadonlyArray<Silent | Field<string, any>>>(
-  ...parts: Parts
-): Grammar<Fields<Parts[number]>>
-export function seq(...parts: ReadonlyArray<Part>) {
-  return _silentIf(!parts.some(isField), { _tag: "Seq", parts })
-}
-
-export const gen = <Y extends Silent | Field<string, any>, R extends Fields<Y> | void = void>(
-  run: () => Generator<Y, R, any>,
-): Grammar<[R] extends [void] ? Fields<Y> : R> => make({ _tag: "Gen", run })
 
 export function wrap(open: Silent | string, inner: Silent, close: Silent | string): Silent
 export function wrap<A>(
@@ -118,6 +106,87 @@ export const sepBy: {
   (sep: Silent | string, opts?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
 } = F.dual(_dataFirst, <A>(inner: Grammar<A>, sep: Silent | string, opts?: RepeatOptions) =>
   make({ _tag: "Many", inner, sep: _toSilent(sep), ...bounds("sepBy", opts) }),
+)
+
+/** The value types behind a tuple of refs. */
+export type RefValues<Deps extends ReadonlyArray<RefBase<any>>> = {
+  -readonly [K in keyof Deps]: Deps[K] extends RefBase<infer A> ? A : never
+}
+
+export interface DependentOptions<Deps extends ReadonlyArray<RefBase<any>>, A> {
+  /** On print, the dependencies' values from this grammar's own value, so they need not be returned. */
+  readonly recover?: (value: A) => RefValues<Deps> | undefined
+  /** How `render` shows this grammar, given the rendered dependencies. */
+  readonly show?: (deps: ReadonlyArray<string>) => string
+}
+
+/**
+ * A grammar chosen at parse and print time from the values of earlier bindings.
+ * `select` returns `undefined` to reject those values. `match`, `take`, and
+ * `repeat` are built on this.
+ */
+export const dependent = <const Deps extends ReadonlyArray<RefBase<any>>, A>(
+  deps: Deps,
+  select: (...values: RefValues<Deps>) => Grammar<A> | undefined,
+  options?: DependentOptions<Deps, A>,
+): Grammar<A> =>
+  make({
+    _tag: "Dependent",
+    deps: deps.map((d) => assertInScope(d, "dependent")),
+    // SAFETY: the interpreters evaluate `deps` in order, so `values` has the shape RefValues<Deps>.
+    select: (values) => select(...(values as RefValues<Deps>)),
+    recover: options?.recover,
+    show: options?.show ?? ((ds) => `dependent(${ds.join(", ")})`),
+  })
+
+type Key = string | number | boolean
+
+/**
+ * Branch on the value of an earlier binding. Cases are keyed by the literal's
+ * string form, so a boolean ref takes `{ true, false }`. If the scrutinee is
+ * not returned, printing recovers it by trying each case in order.
+ */
+export const match = <K extends Key, const Cases extends Record<`${K}`, Grammar<any>>>(
+  scrutinee: Ref<K>,
+  cases: Cases,
+): Grammar<Type<Cases[keyof Cases]>> =>
+  make({
+    _tag: "Match",
+    scrutinee: assertInScope(scrutinee, "match"),
+    cases: Object.entries<Grammar<any>>(cases).map(([key, grammar]) => ({ key, grammar })),
+  })
+
+const toCount = (n: Value): number | undefined =>
+  Predicate.isNumber(n) && Number.isSafeInteger(n) && n >= 0 ? n : undefined
+
+/** Exactly `count` characters, where `count` is an earlier binding. Printing recovers the count. */
+export const take = (count: Ref<number>): Grammar<string> =>
+  make({
+    _tag: "Dependent",
+    deps: [assertInScope(count, "take")],
+    select: ([n]) => {
+      const c = toCount(n)
+      return c === undefined ? undefined : regex(new RegExp(`[\\s\\S]{${c}}`), `${c} chars`)
+    },
+    recover: (s) => (Predicate.isString(s) ? [s.length] : undefined),
+    show: ([n]) => `<char>{${n}}`,
+  })
+
+/** Exactly `count` repetitions, where `count` is an earlier binding. Printing recovers the count. */
+export const repeat: {
+  <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
+  (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+} = F.dual(_dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
+  make({
+    _tag: "Dependent",
+    deps: [assertInScope(count, "repeat")],
+    select: ([n]) => {
+      const c = toCount(n)
+      return c === undefined ? undefined : many(inner, { min: c, max: c })
+    },
+    recover: (xs) => (Array.isArray(xs) ? [xs.length] : undefined),
+    show: ([n], render) => `(${render(inner)}){${n}}`,
+  }),
 )
 
 export interface TransformOptions<A, B> {
