@@ -1,241 +1,258 @@
-import { Equal, Option, Predicate, Result, Schema } from "effect"
+import { Predicate, Result } from "effect"
 
-import { type Grammar, type Pattern, resolve, type Step, type Value } from "./core.ts"
-import { caseFor, child, type Env, evaluate, keyCandidates, lookup } from "./env.ts"
-import { preview, PrintError } from "./errors.ts"
-import { describe, describeStep, render } from "./render.ts"
+import {
+  type Grammar,
+  type GrammarInternal,
+  type Node,
+  nodeOf,
+  type Pattern,
+  resolve,
+  type ScopeId,
+  unsafeToNever,
+  type Value,
+} from "./core.ts"
+import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
+import { exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import { unifyPattern } from "./pattern.ts"
+import { describe, describeStep } from "./render.ts"
 
 class Failure {
-  readonly reason: () => string
-  constructor(reason: () => string) {
-    this.reason = reason
+  readonly issue: PrintIssue
+
+  constructor(issue: PrintIssue) {
+    this.issue = issue
   }
 }
 
-const fail = (reason: () => string) => new Failure(reason)
+const fail = (issue: PrintIssue): Failure => new Failure(issue)
 
-const unify = (p: Pattern, value: Value, values: Map<number, Value>): Failure | undefined => {
-  switch (p._tag) {
+const bindingPath = (
+  pattern: Pattern,
+  scope: ScopeId,
+  slot: number,
+  path: ReadonlyArray<string | number>,
+): ReadonlyArray<string | number> | undefined => {
+  switch (pattern._tag) {
     case "Ref":
-      values.set(p.id, value)
-      return undefined
+      return pattern.scope === scope && pattern.slot === slot ? path : undefined
     case "Const":
-      return Equal.equals(value, p.value)
-        ? undefined
-        : fail(() => `expected ${preview(p.value)}, got ${preview(value)}`)
-    case "Object": {
-      if (!Predicate.isObject(value)) return fail(() => `expected an object, got ${preview(value)}`)
-      for (const [key, field] of p.fields) {
-        const r = unify(field, Predicate.hasProperty(value, key) ? value[key] : undefined, values)
-        if (r !== undefined) return r
+      return undefined
+    case "Object":
+      for (const [key, field] of pattern.fields) {
+        const found = bindingPath(field, scope, slot, [...path, key])
+        if (found !== undefined) return found
       }
       return undefined
-    }
-    case "Array": {
-      if (!Array.isArray(value)) return fail(() => `expected an array, got ${preview(value)}`)
-      if (value.length !== p.items.length) {
-        return fail(() => `expected ${p.items.length} items, got ${value.length}`)
-      }
-      for (const [i, item] of p.items.entries()) {
-        const r = unify(item, value[i], values)
-        if (r !== undefined) return r
+    case "Array":
+      for (const [index, item] of pattern.items.entries()) {
+        const found = bindingPath(item, scope, slot, [...path, index])
+        if (found !== undefined) return found
       }
       return undefined
-    }
   }
 }
 
-export const recoverable = (g: Grammar<any>): ReadonlyArray<number> => {
-  const n = g.node
-  switch (n._tag) {
-    case "Label":
-    case "Wrap":
-    case "Transform":
-      return recoverable(n.inner)
-    case "Match":
-      return n.scrutinee._tag === "Ref" ? [n.scrutinee.id] : []
-    case "Dependent":
-      return n.recover === undefined ? [] : n.deps.flatMap((d) => (d._tag === "Ref" ? [d.id] : []))
-    default:
-      return []
+const issueAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): PrintIssue => {
+  let nested = issue
+  for (let index = path.length - 1; index >= 0; index--) {
+    nested = { _tag: "AtPath", path: path[index]!, issue: nested }
   }
+  return nested
 }
 
-type Candidates = Map<number, ReadonlyArray<Value>>
+const outputGen = (
+  node: Extract<Node, { _tag: "Gen" }>,
+  value: Value,
+  env: Frame | undefined,
+): string | Failure => {
+  const local = frame(node.scope, node.slotCount, env)
+  const issue = unifyPattern(node.result, value, local)
+  if (issue !== undefined) return fail(issue)
 
-const hidden = (env: Env, candidates: Candidates, id: number) =>
-  Option.isNone(lookup(env, id)) && !candidates.has(id)
-
-const recover = (g: Grammar<any>, value: Value, env: Env, candidates: Candidates): void => {
-  const n = g.node
-  switch (n._tag) {
-    case "Label":
-    case "Wrap":
-      return recover(n.inner, value, env, candidates)
-    case "Transform":
-      if (n.is?.(value) === false) return
-      return recover(n.inner, n.encode(value), env, candidates)
-    case "Match": {
-      const e = n.scrutinee
-      if (e._tag !== "Ref" || !hidden(env, candidates, e.id)) return
-      for (const c of n.cases) {
-        if (!(out(c.grammar, value, env) instanceof Failure)) {
-          candidates.set(e.id, keyCandidates(c.key))
-          return
-        }
-      }
-      return
+  let text = ""
+  for (const [index, step] of node.steps.entries()) {
+    const result =
+      step._tag === "Silent"
+        ? out(step.grammar, undefined, local)
+        : local.values[step.slot] === Unbound
+          ? fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
+          : out(step.grammar, local.values[step.slot], local)
+    if (result instanceof Failure) {
+      const path =
+        step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
+      return fail(path === undefined ? result.issue : issueAt(result.issue, path))
     }
-    case "Dependent": {
-      const values = n.recover?.(value)
-      if (values === undefined) return
-      n.deps.forEach((d, i) => {
-        if (d._tag === "Ref" && i < values.length && hidden(env, candidates, d.id)) {
-          candidates.set(d.id, [values[i]])
-        }
-      })
-    }
+    text += result
   }
+  return text
 }
 
-const printBind = (
-  step: Extract<Step, { _tag: "Bind" }>,
-  index: number,
-  env: Env,
-  candidates: Candidates,
-) => {
-  if (env.values.has(step.id)) return out(step.grammar, env.values.get(step.id), env)
-  const where = describeStep(step, index)
-  const cs = candidates.get(step.id)
-  if (cs === undefined) {
-    return fail(() => `${where} is not in the value and no later step recovers it`)
-  }
-  const reasons: Array<() => string> = []
-  for (const c of cs) {
-    const r = out(step.grammar, c, env)
-    if (!(r instanceof Failure)) {
-      env.values.set(step.id, c)
-      return r
-    }
-    reasons.push(r.reason)
-  }
-  return fail(
-    () =>
-      `${where} accepts none of the recovered values ${cs.map(preview).join(", ")}:\n  ${reasons.map((r) => r()).join("\n  ")}`,
-  )
-}
-
-const out = <A>(g: Grammar<A>, value: A, env: Env | undefined): string | Failure => {
-  const n = g.node
-  switch (n._tag) {
+const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): string | Failure => {
+  const node = nodeOf(grammar)
+  switch (node._tag) {
     case "Literal":
-      return n.value
-    case "Regex":
-      if (!Schema.is(Schema.String)(value)) {
-        return fail(() => `${n.name}: expected a string, got ${preview(value)}`)
-      }
-      if (!n.whole.test(value)) {
-        return fail(() => `${n.name}: ${JSON.stringify(value)} does not match /${n.re.source}/`)
+      return node.value
+    case "Regex": {
+      if (!Predicate.isString(value))
+        return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
+      node.re.lastIndex = 0
+      const match = node.re.exec(value)
+      if (match === null || match.index !== 0 || match[0].length !== value.length) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: node.name,
+          actual: value,
+          detail: `${JSON.stringify(value)} does not match /${node.re.source}/`,
+        })
       }
       return value
-    case "Gen": {
-      const local = child(env)
-      const u = unify(n.result, value, local.values)
-      if (u !== undefined) return u
-      const candidates: Candidates = new Map()
-      if (n.steps.some((step) => step._tag === "Bind" && !local.values.has(step.id))) {
-        for (const step of n.steps.toReversed()) {
-          if (step._tag === "Bind" && local.values.has(step.id)) {
-            recover(step.grammar, local.values.get(step.id), local, candidates)
-          }
-        }
-      }
-      let acc = ""
-      for (const [i, step] of n.steps.entries()) {
-        const r =
-          step._tag === "Silent"
-            ? out(step.grammar, undefined, local)
-            : printBind(step, i, local, candidates)
-        if (r instanceof Failure) return r
-        acc += r
-      }
-      return acc
     }
+    case "Gen":
+      return outputGen(node, value, env)
     case "Wrap": {
-      const open = out(n.open, undefined, env)
+      const open = out(node.open, undefined, env)
       if (open instanceof Failure) return open
-      const inner = out(n.inner, value, env)
+      const inner = out(node.inner, value, env)
       if (inner instanceof Failure) return inner
-      const close = out(n.close, undefined, env)
-      if (close instanceof Failure) return close
-      return open + inner + close
+      const close = out(node.close, undefined, env)
+      return close instanceof Failure ? close : open + inner + close
     }
     case "Choice": {
-      const reasons: Array<() => string> = []
-      for (const o of n.options) {
-        const r = out(o, value, env)
-        if (!(r instanceof Failure)) return r
-        reasons.push(r.reason)
+      const issues: Array<PrintIssue> = []
+      for (const option of node.options) {
+        const result = out(option, value, env)
+        if (!(result instanceof Failure)) return result
+        issues.push(result.issue)
       }
-      return fail(
-        () =>
-          `no choice branch accepts ${preview(value)}:\n  ${reasons.map((r) => r()).join("\n  ")}`,
-      )
+      return fail({ _tag: "NoAlternative", actual: value, issues })
     }
     case "Many": {
-      if (!Array.isArray(value)) return fail(() => `expected an array, got ${preview(value)}`)
-      if (value.length < n.min || value.length > n.max) {
-        const range =
-          n.max === Number.POSITIVE_INFINITY ? `at least ${n.min}` : `${n.min}..${n.max}`
-        return fail(() => `expected ${range} items, got ${value.length}`)
+      if (!Array.isArray(value))
+        return fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
+      if (value.length < node.min || value.length > node.max) {
+        const expected =
+          node.max === Number.POSITIVE_INFINITY
+            ? `at least ${node.min}`
+            : `${node.min}..${node.max}`
+        return fail({
+          _tag: "InvalidValue",
+          expected: `${expected} items`,
+          actual: value,
+          detail: `expected ${expected} items, got ${value.length}`,
+        })
       }
-      const sep = out(n.sep, undefined, env)
-      if (sep instanceof Failure) return sep
-      let acc = ""
-      for (let i = 0; i < value.length; i++) {
-        const r = out(n.inner, value[i], env)
-        if (r instanceof Failure) return r
-        acc += i === 0 ? r : sep + r
+      const separator = out(node.sep, undefined, env)
+      if (separator instanceof Failure) return separator
+      let text = ""
+      for (const [index, item] of value.entries()) {
+        const result = out(node.inner, item, env)
+        if (result instanceof Failure) {
+          return fail({ _tag: "AtPath", path: index, issue: result.issue })
+        }
+        text += index === 0 ? result : separator + result
       }
-      return acc
+      return text
     }
     case "Optional":
-      return value === undefined ? "" : out(n.inner, value, env)
-    case "Transform":
-      if (n.is?.(value) === false) {
-        return fail(() => `expected ${n.name ?? describe(n.inner)}, got ${preview(value)}`)
+      return value === undefined ? "" : out(node.inner, value, env)
+    case "Transform": {
+      try {
+        if (node.is?.(unsafeToNever(value)) === false) {
+          return fail({
+            _tag: "InvalidValue",
+            expected: node.name ?? describe(node.inner),
+            actual: value,
+          })
+        }
+        const encoded = node.encode(unsafeToNever(value))
+        return Result.isFailure(encoded)
+          ? fail({
+              _tag: "InvalidValue",
+              expected: node.name ?? describe(node.inner),
+              actual: value,
+              detail: encoded.failure.message,
+            })
+          : out(node.inner, encoded.success, env)
+      } catch (error) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: node.name ?? describe(node.inner),
+          actual: value,
+          detail: exceptionMessage(error),
+        })
       }
-      return out(n.inner, n.encode(value), env)
-    case "Skip":
-      return out(n.inner, n.printAs, env)
-    case "Label":
-      return out(n.inner, value, env)
-    case "Suspend":
-      return out(resolve(n), value, env)
-    case "Match": {
-      const k = evaluate(n.scrutinee, env)
-      if (Option.isNone(k)) return fail(() => "match: the ref it branches on is not bound")
-      const c = caseFor(n.cases, k.value)
-      if (c === undefined) return fail(() => `match: no case for ${preview(k.value)}`)
-      return out(c.grammar, value, env)
     }
-    case "Dependent": {
-      const values = Option.all(n.deps.map((d) => evaluate(d, env)))
-      if (Option.isNone(values)) return fail(() => "a ref this grammar depends on is not bound")
-      const chosen = n.select(values.value)
-      if (chosen === undefined) {
-        return fail(
-          () => `expected ${n.show(values.value.map(preview), render)}, got ${preview(value)}`,
-        )
+    case "Skip":
+      return out(node.inner, node.printAs, env)
+    case "Label":
+      return out(node.inner, value, env)
+    case "Suspend":
+      return out(resolve(node), value, env)
+    case "Match": {
+      const key = evaluate(node.scrutinee, env)
+      if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
+      const matchCase = caseFor(node.cases, key)
+      return matchCase === undefined
+        ? fail({
+            _tag: "InvalidValue",
+            expected: `a match case for ${preview(key)}`,
+            actual: value,
+          })
+        : out(matchCase.grammar, value, env)
+    }
+    case "Take": {
+      const count = evaluate(node.count, env)
+      if (count === Unbound) return fail({ _tag: "MissingBinding", binding: "take count" })
+      if (!isCount(count)) {
+        return fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
       }
-      return out(chosen, value, env)
+      if (!Predicate.isString(value))
+        return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
+      return value.length === count
+        ? value
+        : fail({
+            _tag: "InvalidValue",
+            expected: `${count} UTF-16 code units`,
+            actual: value,
+          })
+    }
+    case "RepeatExact": {
+      const count = evaluate(node.count, env)
+      if (count === Unbound) return fail({ _tag: "MissingBinding", binding: "repeat count" })
+      if (!isCount(count)) {
+        return fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
+      }
+      if (!Array.isArray(value))
+        return fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
+      if (value.length !== count) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: `${count} items`,
+          actual: value.length,
+        })
+      }
+      let text = ""
+      for (const [index, item] of value.entries()) {
+        const result = out(node.inner, item, env)
+        if (result instanceof Failure) {
+          return fail({ _tag: "AtPath", path: index, issue: result.issue })
+        }
+        text += result
+      }
+      return text
     }
   }
 }
 
-export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> => {
-  const r = out(grammar, value, undefined)
-  return r instanceof Failure
-    ? Result.fail(new PrintError({ message: r.reason() }))
-    : Result.succeed(r)
+export const printUnknown = (
+  grammar: GrammarInternal,
+  value: Value,
+): Result.Result<string, PrintError> => {
+  const result = out(grammar, value, undefined)
+  return result instanceof Failure
+    ? Result.fail(new PrintError({ issue: result.issue }))
+    : Result.succeed(result)
 }
+
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  printUnknown(grammar, value)

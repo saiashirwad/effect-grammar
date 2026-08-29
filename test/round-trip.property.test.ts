@@ -45,7 +45,7 @@ const netstring = Grammar.gen(function* () {
   yield* Grammar.literal(":")
   const payload = yield* Grammar.take(length)
   yield* Grammar.literal(",")
-  return payload
+  return { length, payload }
 })
 
 const endpointArb = FastCheck.record({
@@ -82,10 +82,10 @@ describe("round-trip law: parse(print(a)) == a", () => {
     )
   })
 
-  it("gen grammar with a recovered length prefix", () => {
+  it("gen grammar with a length prefix", () => {
     FastCheck.assert(
-      FastCheck.property(FastCheck.string(), (value) => {
-        assertRoundTrip(netstring, value)
+      FastCheck.property(FastCheck.string({ maxLength: 64 }), (payload) => {
+        assertRoundTrip(netstring, { length: payload.length, payload })
       }),
     )
   })

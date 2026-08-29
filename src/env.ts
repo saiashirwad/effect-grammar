@@ -1,73 +1,77 @@
-import { Option, Predicate } from "effect"
+import { Predicate } from "effect"
 
-import type { Case, Expr, Pattern, Value } from "./core.ts"
-import { preview } from "./errors.ts"
+import type { Case, Expr, Pattern, RefExpr, ScopeId, Value } from "./core.ts"
 
-export interface Env {
-  readonly parent: Env | undefined
-  readonly values: Map<number, Value>
+/**
+ * Sentinel for "no value has been bound here". Distinguished from `undefined`
+ * because slots can legitimately hold `undefined` (e.g. `optional`).
+ */
+export const Unbound = Symbol("effect-grammar/Unbound")
+
+export type BoundValue = Value | typeof Unbound
+
+export interface Frame {
+  readonly scope: ScopeId
+  readonly parent: Frame | undefined
+  readonly values: Array<Value>
 }
 
-export const child = (parent: Env | undefined): Env => ({ parent, values: new Map() })
+export const frame = (scope: ScopeId, slotCount: number, parent: Frame | undefined): Frame => {
+  // Push (not `Array.from({ length }).fill()`): the slots array must stay packed.
+  const values: Array<Value> = []
+  for (let slot = 0; slot < slotCount; slot++) values.push(Unbound)
+  return { scope, parent, values }
+}
 
-export const lookup = (env: Env | undefined, id: number) => {
-  for (let e = env; e !== undefined; e = e.parent) {
-    if (e.values.has(id)) return Option.some(e.values.get(id))
+export const bind = (target: Frame, slot: number, value: Value): void => {
+  target.values[slot] = value
+}
+
+export const lookup = (env: Frame | undefined, ref: RefExpr): BoundValue => {
+  for (let current = env; current !== undefined; current = current.parent) {
+    if (current.scope !== ref.scope) continue
+    return current.values[ref.slot]
   }
-  return Option.none<Value>()
+  return Unbound
 }
 
-export const evaluate = (expr: Expr, env: Env | undefined): Option.Option<Value> => {
-  switch (expr._tag) {
+export const evaluate = (expr: Expr, env: Frame | undefined): BoundValue => {
+  if (expr._tag === "Ref") return lookup(env, expr)
+
+  const object = evaluate(expr.object, env)
+  if (object === Unbound || !Predicate.isObject(object)) return Unbound
+  return Object.hasOwn(object, expr.key) ? object[expr.key] : Unbound
+}
+
+export const materialize = (pattern: Pattern, env: Frame): BoundValue => {
+  switch (pattern._tag) {
     case "Ref":
-      return lookup(env, expr.id)
-    case "Prop": {
-      const object = evaluate(expr.object, env)
-      if (Option.isNone(object)) return object
-      const o = object.value
-      return Predicate.hasProperty(o, expr.key) ? Option.some(o[expr.key]) : Option.none()
+      return lookup(env, pattern)
+    case "Const":
+      return pattern.value
+    case "Object": {
+      const object: Record<string, Value> = {}
+      for (const [key, field] of pattern.fields) {
+        const value = materialize(field, env)
+        if (value === Unbound) return Unbound
+        object[key] = value
+      }
+      return object
+    }
+    case "Array": {
+      const items: Array<Value> = []
+      for (const item of pattern.items) {
+        const value = materialize(item, env)
+        if (value === Unbound) return Unbound
+        items.push(value)
+      }
+      return items
     }
   }
 }
 
-export const evaluateOrThrow = (expr: Expr, env: Env | undefined) =>
-  Option.getOrThrowWith(
-    evaluate(expr, env),
-    () =>
-      new Error(
-        "a Grammar.Ref was read before its binding was parsed; a ref can only be used after the yield* that produced it, inside the same gen",
-      ),
-  )
+export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
+  cases.find((matchCase) => Object.is(matchCase.key, value))
 
-export const materialize = (pattern: Pattern, env: Env): Value => {
-  switch (pattern._tag) {
-    case "Ref":
-      return evaluateOrThrow(pattern, env)
-    case "Const":
-      return pattern.value
-    case "Object":
-      return Object.fromEntries(pattern.fields.map(([k, p]) => [k, materialize(p, env)]))
-    case "Array":
-      return pattern.items.map((p) => materialize(p, env))
-  }
-}
-
-const keyOf = (value: Value) =>
-  Predicate.isString(value)
-    ? value
-    : Predicate.isNumber(value) || Predicate.isBoolean(value)
-      ? String(value)
-      : preview(value)
-
-export const keyCandidates = (key: string): ReadonlyArray<Value> => {
-  const out: Array<Value> = [key]
-  if (key === "true") out.push(true)
-  if (key === "false") out.push(false)
-  if (String(Number(key)) === key) out.push(Number(key))
-  return out
-}
-
-export const caseFor = (cases: ReadonlyArray<Case>, value: Value) => {
-  const key = keyOf(value)
-  return cases.find((c) => c.key === key)
-}
+export const isCount = (value: Value): value is number =>
+  Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0

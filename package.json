@@ -24,44 +24,58 @@
     "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./Schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
+    "bench": "vitest bench --dir bench",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --dir test",
+    "check": "pnpm fmt:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint",
-    "prepare": "./scripts/prepare-effect.sh && effect-tsgo patch --oxlint",
-    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
-  },
-  "dependencies": {
-    "effect": "4.0.0-beta.102"
+    "prepare": "effect-tsgo patch --oxlint",
+    "prepublishOnly": "pnpm check",
+    "test": "vitest run --dir test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
-    "@effect/language-service": "^0.87.1",
+    "@effect/language-service": "^0.87.2",
     "@effect/tsgo": "0.38.0",
-    "@effect/vitest": "4.0.0-beta.102",
+    "@effect/vitest": "4.0.0-rc.112",
     "@oxlint/plugins": "1.80.0",
     "@types/node": "^26.1.2",
+    "effect": "4.0.0-rc.112",
     "oxfmt": "^0.61.0",
     "oxlint": "1.80.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "^7.0.2",
     "vitest": "4.1.10"
   },
+  "peerDependencies": {
+    "effect": ">=4.0.0-rc.112 <5"
+  },
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=20.0.0"
   },
   "packageManager": "pnpm@11.17.0+sha512.cca3cea332ad254bb84145f966d19f4879615210346fc92c79a047f23a0d7b3cca3c3792f0076ba1f1831d277efbcf0a9119b31a9a60eca7fb3d6231f331ef72"
 }

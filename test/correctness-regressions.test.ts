@@ -72,8 +72,3 @@ describe("correctness regressions", () => {
     assert.deepEqual(parseOk(g, "1=2;3=4"), { first: { a: 1, b: 2 }, second: { a: 3, b: 4 } })
   })
 })
-
-const rawNode: Grammar.Node = { _tag: "Literal", value: "raw" }
-// @ts-expect-error
-const notAGrammar: Grammar.Grammar<number> = rawNode
-void notAGrammar

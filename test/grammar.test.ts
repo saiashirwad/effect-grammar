@@ -19,10 +19,10 @@ describe("literal", () => {
 
   it("fails with position, expected, and found", () => {
     const e = parseFail(g, "help")
-    assert.equal(e.pos, 0)
+    assert.equal(e.pos, 3)
     assert.deepEqual(e.expected, ['"hello"'])
-    assert.equal(e.found, "h")
-    assert.equal(e.message, 'line 1, column 1: expected "hello", found "h"')
+    assert.equal(e.found, "p")
+    assert.equal(e.message, 'line 1, column 4: expected "hello", found "p"')
   })
 
   it("reports end of input", () => {
@@ -45,9 +45,6 @@ describe("regex", () => {
   it("prints a matching string and rejects a non-matching one", () => {
     assert.equal(printOk(word, "xyz"), "xyz")
     assert.match(printFail(word, "x1").message, /does not match/)
-    const badGrammar: Grammar.Grammar<unknown> = word
-    const e = printFail(badGrammar, 42)
-    assert.match(e.message, /expected a string/)
   })
 
   it("ignores g and y flags", () => {
@@ -251,33 +248,7 @@ describe("match", () => {
     assert.deepEqual(parseOk(tagged, "w:ab"), { kind: "word", value: "ab" })
     assert.equal(printOk(tagged, { kind: "word", value: "zz" }), "w:zz")
     assert.equal(printOk(tagged, { kind: "num", value: 5 }), "n:5")
-    const loose: Grammar.Grammar<{ kind: "num" | "word"; value: unknown }> = tagged
-    assert.match(printFail(loose, { kind: "num", value: "zz" }).message, /integer/)
-  })
-
-  it("recovers a scrutinee that is not returned by trying each case", () => {
-    const g = G.gen(function* () {
-      const kind = yield* kindOf
-      const value = yield* G.match(kind, { num: G.integer, word })
-      return value
-    })
-    assert.equal(parseOk(g, "n:12"), 12)
-    assert.equal(printOk(g, 7), "n:7")
-    assert.equal(printOk(g, "ab"), "w:ab")
-    const loose: Grammar.Grammar<unknown> = g
-    assert.match(printFail(loose, true).message, /not in the value/)
-  })
-
-  it("recovers a boolean scrutinee", () => {
-    const g = G.gen(function* () {
-      const quoted = yield* G.flag("'")
-      const body = yield* G.match(quoted, { true: G.wrap("(", word, ")"), false: G.integer })
-      return body
-    })
-    assert.equal(parseOk(g, "'(ab)"), "ab")
-    assert.equal(parseOk(g, "12"), 12)
-    assert.equal(printOk(g, "cd"), "'(cd)")
-    assert.equal(printOk(g, 3), "3")
+    assert.match(printFail(tagged, { kind: "num", value: "zz" }).message, /integer/)
   })
 
   it("branches on a property of a binding", () => {
@@ -303,13 +274,14 @@ describe("match", () => {
     assert.equal(printOk(frame, { h: { kind: "text", size: 2 }, body: "xy" }), "t2:xy")
     assert.equal(
       G.render(frame),
-      'h:(kind:("t" | "b") size:<integer>) ":" body:match(h.kind){text => <char>{h.size} | bin => (<bit>){h.size}}',
+      'h:(kind:("t" | "b") size:<integer>) ":" body:match(h.kind){"text" => <char>{h.size} | "bin" => (<bit>){h.size}}',
     )
   })
 
-  it("fails to parse when no case matches a non-literal scrutinee", () => {
+  it("fails to parse when no case matches a runtime string", () => {
     const g = G.gen(function* () {
-      const kind = yield* word
+      // SAFETY: parsed text can hold any word; the type only records the cases we branch on.
+      const kind = (yield* word) as Grammar.Ref<"num">
       yield* G.literal(":")
       const value = yield* G.match(kind, { num: G.integer })
       return { kind, value }
@@ -324,51 +296,39 @@ describe("take / repeat", () => {
     yield* G.literal(":")
     const payload = yield* G.take(length)
     yield* G.literal(",")
-    return payload
+    return { length, payload }
   })
 
   it("take reads as many characters as an earlier binding says", () => {
-    assert.equal(parseOk(netstring, "5:hello,"), "hello")
-    assert.equal(parseOk(netstring, "0:,"), "")
+    assert.deepEqual(parseOk(netstring, "5:hello,"), { length: 5, payload: "hello" })
+    assert.deepEqual(parseOk(netstring, "0:,"), { length: 0, payload: "" })
     const e = parseFail(netstring, "5:hi,")
     assert.equal(e.pos, 2)
     assert.deepEqual(e.expected, ["5 chars"])
   })
 
-  it("take recovers the count when printing", () => {
-    assert.equal(printOk(netstring, "round trip"), "10:round trip,")
-    assertRoundTrip(netstring, "a:b,c")
+  it("printing requires the count, since nothing derives it", () => {
+    // SAFETY: deliberately omitting the length to show printing requires it.
+    const value = { payload: "round trip" } as Grammar.Type<typeof netstring>
+    const e = printFail(netstring, value)
+    assert.match(e.message, /\.length: missing field/)
+    assertRoundTrip(netstring, { length: 5, payload: "a:b,c" })
   })
 
   it("rejects a count that is not a non-negative integer", () => {
     assert.deepEqual(parseFail(netstring, "-1:,").expected, ["<char>{-1}"])
   })
 
-  it("repeat reads a counted list and recovers the count", () => {
+  it("repeat reads a counted list", () => {
     const g = G.gen(function* () {
       const n = yield* G.integer
       yield* G.literal("/")
       const items = yield* G.regex(/[a-z]/, "letter").pipe(G.repeat(n))
-      return items
+      return { n, items }
     })
-    assert.deepEqual(parseOk(g, "2/ab"), ["a", "b"])
-    assert.equal(printOk(g, ["x", "y", "z"]), "3/xyz")
-    assert.match(G.render(g), /^<integer> "\/" \(<letter>\)\{\$\d+\}$/)
-  })
-
-  it("dependent takes a custom select, recover, and rendering", () => {
-    const g = G.gen(function* () {
-      const width = yield* G.integer
-      yield* G.literal("|")
-      const cell = yield* G.dependent([width], (w) => G.regex(new RegExp(`.{${w}}`), "cell"), {
-        recover: (s) => [s.length],
-        show: ([w]) => `<cell of ${w}>`,
-      })
-      return { cell }
-    })
-    assert.deepEqual(parseOk(g, "3|abc"), { cell: "abc" })
-    assert.equal(printOk(g, { cell: "xy" }), "2|xy")
-    assert.match(G.render(g), /<cell of \$\d+>/)
+    assert.deepEqual(parseOk(g, "2/ab"), { n: 2, items: ["a", "b"] })
+    assert.equal(printOk(g, { n: 3, items: ["x", "y", "z"] }), "3/xyz")
+    assert.equal(G.render(g), 'n:<integer> "/" items:(<letter>){n}')
   })
 })
 
@@ -415,7 +375,10 @@ describe("seq", () => {
 })
 
 describe("choice", () => {
-  const g = G.choice(G.literal("ab").pipe(G.as("ab")), G.literal("ac").pipe(G.as("ac")))
+  const g = G.choice(
+    G.literal("ab").pipe(G.as<string>("ab")),
+    G.literal("ac").pipe(G.as<string>("ac")),
+  )
 
   it("backtracks: a later option can match after an earlier one consumed input", () => {
     assert.equal(parseOk(g, "ab"), "ab")
@@ -424,15 +387,14 @@ describe("choice", () => {
 
   it("merges every expectation at the furthest position", () => {
     const e = parseFail(g, "ad")
-    assert.equal(e.pos, 0)
+    assert.equal(e.pos, 1)
     assert.deepEqual(e.expected, ['"ab"', '"ac"'])
     assert.match(e.message, /expected one of "ab", "ac"/)
   })
 
   it("prints the first option that accepts the value, and lists every reason when none does", () => {
     assert.equal(printOk(g, "ac"), "ac")
-    const badGrammar: Grammar.Grammar<string> = g
-    const e = printFail(badGrammar, "zz")
+    const e = printFail(g, "zz")
     assert.match(e.message, /no choice branch accepts "zz"/)
     assert.match(e.message, /expected "ab"/)
     assert.match(e.message, /expected "ac"/)
@@ -507,8 +469,9 @@ describe("many", () => {
     assert.match(printFail(G.many(G.integer, { max: 1 }), [1, 2]).message, /0..1/)
   })
 
-  it("throws on a zero-width element", () => {
-    assert.throws(() => G.parse(G.many(G.regex(/x*/, "xs")), "y"), /without consuming/)
+  it("rejects a zero-width element when parsing", () => {
+    const e = parseFail(G.many(G.regex(/x*/, "xs")), "abc")
+    assert.deepEqual(e.expected, ["a repetition element that consumes input"])
   })
 
   it("is pipeable", () => {
@@ -609,7 +572,7 @@ describe("transform / decodeTo", () => {
     assert.match(printFail(g, 3).message, /even/)
   })
 
-  it("a transform over take still recovers the count", () => {
+  it("a transform over take composes both ways", () => {
     const g = G.gen(function* () {
       const n = yield* G.integer
       yield* G.literal(":")
@@ -619,10 +582,10 @@ describe("transform / decodeTo", () => {
           encode: (cs) => cs.join(""),
         }),
       )
-      return chars
+      return { n, chars }
     })
-    assert.deepEqual(parseOk(g, "2:ab"), ["a", "b"])
-    assert.equal(printOk(g, ["x", "y", "z"]), "3:xyz")
+    assert.deepEqual(parseOk(g, "2:ab"), { n: 2, chars: ["a", "b"] })
+    assert.equal(printOk(g, { n: 3, chars: ["x", "y", "z"] }), "3:xyz")
   })
 })
 
@@ -661,23 +624,23 @@ describe("as / flag / skip", () => {
   })
 })
 
-describe("lexeme / symbol / whitespace", () => {
+describe("lexeme / symbol / trivia", () => {
   const g = G.wrap(G.symbol("["), G.sepBy(G.lexeme(G.integer), G.symbol(",")), G.symbol("]"))
 
   it("skips trailing whitespace after tokens", () => {
     assert.deepEqual(parseOk(g, "[ 1 ,2,  3 ]"), [1, 2, 3])
   })
 
-  it("prints one canonical space per lexeme", () => {
-    assert.equal(printOk(g, [1, 2]), "[ 1 , 2 ] ")
+  it("prints no implicit trivia", () => {
+    assert.equal(printOk(g, [1, 2]), "[1,2]")
     assertRoundTrip(g, [1, 2])
   })
 
-  it("whitespace is silent, optional, and hidden from render", () => {
-    const w = G.wrap(G.whitespace, G.integer, G.whitespace)
-    assert.equal(parseOk(w, "  4 "), 4)
-    assert.equal(printOk(w, 4), "4")
-    assert.equal(G.render(w), "<integer>")
+  it("trivia is silent, optional, and hidden from render", () => {
+    const spaced = G.wrap(G.trivia, G.integer, G.trivia)
+    assert.equal(parseOk(spaced, "  4 "), 4)
+    assert.equal(printOk(spaced, 4), "4")
+    assert.equal(G.render(spaced), "<integer>")
   })
 })
 

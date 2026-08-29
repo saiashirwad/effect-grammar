@@ -1,30 +1,35 @@
-import { Effect, Option, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 
-import type { Grammar } from "./core.ts"
+import type { Grammar, Value } from "./core.ts"
+import type { PrintIssue } from "./errors.ts"
+import { PrintError } from "./errors.ts"
 import { parse } from "./parse.ts"
-import { print } from "./print.ts"
+import { printUnknown } from "./print.ts"
 import { render } from "./render.ts"
 
-export const toSchema = <S extends Schema.Top>(
-  grammar: Grammar<S["Type"]>,
+const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue => {
+  if (issue._tag === "AtPath") {
+    return new SchemaIssue.Pointer([issue.path], printIssueToSchema(actual, issue.issue))
+  }
+  return new SchemaIssue.InvalidValue({ message: PrintError.format(issue) }, actual)
+}
+
+export const toSchema = <S extends Schema.Top, A extends S["Encoded"]>(
+  grammar: Grammar<A>,
   target: S,
   options?: { readonly identifier?: string },
 ) =>
   Schema.String.pipe(
     Schema.decodeTo(
       target,
-      SchemaTransformation.transformOrFail({
-        decode: (s) =>
-          Effect.fromResult(parse(grammar, s)).pipe(
-            Effect.mapError(
-              ({ message }) => new SchemaIssue.InvalidValue(Option.some(s), { message }),
-            ),
+      SchemaTransformation.transformOrFail<S["Encoded"], string>({
+        decode: (text) =>
+          Effect.fromResult(parse(grammar, text)).pipe(
+            Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message }, text)),
           ),
-        encode: (a) =>
-          Effect.fromResult(print(grammar, a)).pipe(
-            Effect.mapError(
-              ({ message }) => new SchemaIssue.InvalidValue(Option.some(a), { message }),
-            ),
+        encode: (value) =>
+          Effect.fromResult(printUnknown(grammar, value)).pipe(
+            Effect.mapError((error) => printIssueToSchema(value, error.issue)),
           ),
       }),
     ),

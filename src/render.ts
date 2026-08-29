@@ -1,123 +1,195 @@
+import { Predicate } from "effect"
+
 import {
   type Bounds,
   type Expr,
-  type Grammar,
+  type GrammarInternal,
+  nodeOf,
   type Node,
   type Pattern,
   resolve,
+  type ScopeId,
   type Step,
 } from "./core.ts"
+import { preview } from "./errors.ts"
 
-interface Ctx {
-  readonly seen: Set<Node>
-  readonly names: Map<number, string>
+const ChoicePrecedence = 1
+const SequencePrecedence = 2
+const PostfixPrecedence = 3
+const AtomPrecedence = 4
+
+interface Fragment {
+  readonly precedence: number
+  readonly text: string
 }
 
-const repetition = ({ min, max }: Bounds) => {
+interface Context {
+  readonly seen: Set<Node>
+  readonly names: Map<ScopeId, Map<number, string>>
+  readonly includeBindings: boolean
+}
+
+const repetition = ({ min, max }: Bounds): string => {
   if (max === Number.POSITIVE_INFINITY) return min === 0 ? "*" : min === 1 ? "+" : `{${min},}`
   return min === max ? `{${min}}` : `{${min},${max}}`
 }
 
-const words = (parts: ReadonlyArray<string>) => parts.filter((p) => p !== "").join(" ")
+const parenthesize = (fragment: Fragment, minimum: number): string =>
+  fragment.precedence < minimum ? `(${fragment.text})` : fragment.text
 
-const nameBindings = (p: Pattern, path: string | undefined, names: Map<number, string>) => {
-  switch (p._tag) {
+const sequence = (fragments: ReadonlyArray<Fragment>): Fragment => ({
+  precedence: SequencePrecedence,
+  text: fragments
+    .filter((fragment) => fragment.text !== "")
+    .map((fragment) => parenthesize(fragment, SequencePrecedence))
+    .join(" "),
+})
+
+const namesFor = (context: Context, scope: ScopeId): Map<number, string> => {
+  const existing = context.names.get(scope)
+  if (existing !== undefined) return existing
+  const names = new Map<number, string>()
+  context.names.set(scope, names)
+  return names
+}
+
+const nameBindings = (
+  pattern: Pattern,
+  path: string | undefined,
+  scope: ScopeId,
+  names: Map<number, string>,
+): void => {
+  switch (pattern._tag) {
     case "Ref":
-      if (path !== undefined) names.set(p.id, path)
+      if (pattern.scope === scope && path !== undefined) names.set(pattern.slot, path)
       return
     case "Const":
       return
     case "Object":
-      for (const [key, field] of p.fields) {
-        nameBindings(field, path === undefined ? key : `${path}.${key}`, names)
+      for (const [key, field] of pattern.fields) {
+        nameBindings(field, path === undefined ? key : `${path}.${key}`, scope, names)
       }
       return
     case "Array":
-      p.items.forEach((item, i) => {
-        nameBindings(item, path === undefined ? String(i) : `${path}.${i}`, names)
+      pattern.items.forEach((item, index) => {
+        nameBindings(item, path === undefined ? String(index) : `${path}.${index}`, scope, names)
       })
   }
 }
 
-const isLoose = (rendered: string) => {
-  let depth = 0
-  let quoted = false
-  for (let i = 0; i < rendered.length; i++) {
-    const c = rendered[i]
-    if (quoted) {
-      if (c === "\\") i++
-      else if (c === '"') quoted = false
-    } else if (c === '"') quoted = true
-    else if (c === "(" || c === "{" || c === "<") depth++
-    else if (c === ")" || c === "}" || (c === ">" && rendered[i - 1] !== "=")) depth--
-    else if (c === " " && depth === 0) return true
-  }
-  return false
+const showExpr = (expr: Expr, context: Context): string => {
+  if (expr._tag === "Ref") return context.names.get(expr.scope)?.get(expr.slot) ?? `$${expr.slot}`
+  const object = showExpr(expr.object, context)
+  return Predicate.isString(expr.key) && /^[A-Za-z_$][\w$]*$/.test(expr.key)
+    ? `${object}.${expr.key}`
+    : `${object}[${preview(expr.key)}]`
 }
 
-const showExpr = (e: Expr, names: Map<number, string>): string =>
-  e._tag === "Ref" ? (names.get(e.id) ?? `$${e.id}`) : `${showExpr(e.object, names)}.${e.key}`
-
-const show = (g: Grammar<any>, ctx: Ctx): string => {
-  const n = g.node
-  switch (n._tag) {
+const show = (grammar: GrammarInternal, context: Context): Fragment => {
+  const node = nodeOf(grammar)
+  switch (node._tag) {
     case "Literal":
-      return n.value === "" ? "" : JSON.stringify(n.value)
+      return {
+        precedence: AtomPrecedence,
+        text: node.value === "" ? "" : JSON.stringify(node.value),
+      }
     case "Regex":
-      return `<${n.name}>`
+      return { precedence: AtomPrecedence, text: `<${node.name}>` }
     case "Gen": {
-      nameBindings(n.result, undefined, ctx.names)
-      return words(
-        n.steps.map((step) => {
-          const inner = show(step.grammar, ctx)
-          const name = step._tag === "Bind" ? ctx.names.get(step.id) : undefined
-          if (name === undefined) return inner
-          return isLoose(inner) ? `${name}:(${inner})` : `${name}:${inner}`
+      const names = namesFor(context, node.scope)
+      if (context.includeBindings) nameBindings(node.result, undefined, node.scope, names)
+      return sequence(
+        node.steps.map((step) => {
+          const inner = show(step.grammar, context)
+          const name = step._tag === "Bind" ? names.get(step.slot) : undefined
+          return name === undefined
+            ? inner
+            : {
+                precedence: AtomPrecedence,
+                text: `${name}:${parenthesize(inner, PostfixPrecedence)}`,
+              }
         }),
       )
     }
     case "Wrap":
-      return words([show(n.open, ctx), show(n.inner, ctx), show(n.close, ctx)])
+      return sequence([
+        show(node.open, context),
+        show(node.inner, context),
+        show(node.close, context),
+      ])
     case "Choice":
-      return `(${n.options.map((o) => show(o, ctx)).join(" | ")})`
+      return {
+        precedence: ChoicePrecedence,
+        text: node.options
+          .map((option) => parenthesize(show(option, context), SequencePrecedence))
+          .join(" | "),
+      }
     case "Many": {
-      const inner = show(n.inner, ctx)
-      const sep = show(n.sep, ctx)
-      if (sep === "") return `(${inner})${repetition(n)}`
-      const rest = repetition({ min: Math.max(0, n.min - 1), max: n.max - 1 })
-      const body = `${inner} (${sep} ${inner})${rest}`
-      return n.min === 0 ? `(${body})?` : body
+      const inner = show(node.inner, context)
+      const sep = show(node.sep, context)
+      if (sep.text === "" || node.max === 0) {
+        return {
+          precedence: PostfixPrecedence,
+          text: `(${inner.text})${repetition(node)}`,
+        }
+      }
+      const rest = repetition({
+        min: Math.max(0, node.min - 1),
+        max: node.max === Number.POSITIVE_INFINITY ? node.max : Math.max(0, node.max - 1),
+      })
+      const body = `${parenthesize(inner, SequencePrecedence)} (${parenthesize(sep, SequencePrecedence)} ${parenthesize(inner, SequencePrecedence)})${rest}`
+      return node.min === 0
+        ? { precedence: PostfixPrecedence, text: `(${body})?` }
+        : { precedence: SequencePrecedence, text: body }
     }
     case "Optional":
-      return `(${show(n.inner, ctx)})?`
+      return { precedence: PostfixPrecedence, text: `(${show(node.inner, context).text})?` }
     case "Transform":
     case "Label":
-      return show(n.inner, ctx)
+      return show(node.inner, context)
     case "Skip":
-      return n.show ? show(n.inner, ctx) : ""
+      return node.show ? show(node.inner, context) : { precedence: AtomPrecedence, text: "" }
     case "Suspend": {
-      if (ctx.seen.has(n)) return n.name ?? "…"
-      ctx.seen.add(n)
-      const s = show(resolve(n), ctx)
-      ctx.seen.delete(n)
-      return s
+      if (context.seen.has(node)) {
+        return { precedence: AtomPrecedence, text: node.name ?? "…" }
+      }
+      context.seen.add(node)
+      const fragment = show(resolve(node), context)
+      context.seen.delete(node)
+      return fragment
     }
     case "Match": {
-      const cases = n.cases.map((c) => `${c.key} => ${show(c.grammar, ctx)}`)
-      return `match(${showExpr(n.scrutinee, ctx.names)}){${cases.join(" | ")}}`
-    }
-    case "Dependent":
-      return n.show(
-        n.deps.map((d) => showExpr(d, ctx.names)),
-        (inner) => show(inner, ctx),
+      const cases = node.cases.map(
+        (matchCase) => `${preview(matchCase.key)} => ${show(matchCase.grammar, context).text}`,
       )
+      return {
+        precedence: AtomPrecedence,
+        text: `match(${showExpr(node.scrutinee, context)}){${cases.join(" | ")}}`,
+      }
+    }
+    case "Take":
+      return { precedence: AtomPrecedence, text: `<char>{${showExpr(node.count, context)}}` }
+    case "RepeatExact":
+      return {
+        precedence: PostfixPrecedence,
+        text: `(${show(node.inner, context).text}){${showExpr(node.count, context)}}`,
+      }
   }
 }
 
-export const render = (g: Grammar<any>) => show(g, { seen: new Set(), names: new Map() })
+const context = (includeBindings: boolean): Context => ({
+  seen: new Set(),
+  names: new Map(),
+  includeBindings,
+})
 
-export const describe = (g: Grammar<any>) =>
-  g.node._tag === "Regex" || g.node._tag === "Label" ? g.node.name : render(g)
+export const render = (grammar: GrammarInternal): string =>
+  parenthesize(show(grammar, context(true)), SequencePrecedence)
 
-export const describeStep = (step: Step, index: number) =>
+export const describe = (grammar: GrammarInternal): string => {
+  const node = nodeOf(grammar)
+  return node._tag === "Regex" || node._tag === "Label" ? node.name : render(grammar)
+}
+
+export const describeStep = (step: Step, index: number): string =>
   `step ${index + 1} (${describe(step.grammar)})`

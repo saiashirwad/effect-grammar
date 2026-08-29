@@ -1,35 +1,45 @@
 import { Predicate, type Types } from "effect"
 
 import {
+  type Value,
   type Denote,
   type Expr,
   type Grammar,
+  type GrammarInternal,
   isGrammar,
   isSilent,
   make,
   type Node,
   type Pattern,
+  type Ref,
   type RefBase,
   RefTypeId,
+  type ScopeId,
   type Silent,
   silent,
   type Step,
-  type Value,
 } from "./core.ts"
-import { recoverable } from "./print.ts"
 import { describeStep } from "./render.ts"
 
 export type GenGrammar<R> = [R] extends [void] ? Silent : Grammar<Denote<R>>
 
 interface Scope {
+  readonly id: ScopeId
   open: boolean
 }
 
-class RefImpl {
-  declare readonly [RefTypeId]: Types.Covariant<any>
+interface RefEntry {
+  readonly expr: Expr
+  readonly scope: Scope
 }
 
-const refs = new WeakMap<RefBase<any>, { readonly expr: Expr; readonly scope: Scope }>()
+class RefImpl<A> implements RefBase<A> {
+  declare readonly [RefTypeId]: Types.Covariant<A>
+}
+
+Object.defineProperty(RefImpl.prototype, RefTypeId, { value: RefTypeId })
+
+const refs = new WeakMap<object, RefEntry>()
 
 const escaped = (): never => {
   throw new TypeError(
@@ -38,48 +48,60 @@ const escaped = (): never => {
   )
 }
 
-const refHandler: ProxyHandler<RefImpl> = {
-  get(_target, key, receiver) {
-    if (key === Symbol.toPrimitive || key === "valueOf" || key === "toString") return escaped
-    if (key === "then" || key === "toJSON" || !Predicate.isString(key)) return undefined
-    const { expr, scope } = entryOf(receiver)
-    return refFor({ _tag: "Prop", object: expr, key }, scope)
-  },
-}
-
-const refFor = (expr: Expr, scope: Scope) => {
-  const ref = new Proxy(new RefImpl(), refHandler)
-  refs.set(ref, { expr, scope })
-  return ref
-}
-
-const isRef = (value: Value): value is RefBase<any> => value instanceof RefImpl
-
-const entryOf = (ref: RefBase<any>) => {
+const entryOf = (ref: RefBase<unknown>): RefEntry => {
   const entry = refs.get(ref)
   if (entry === undefined) throw new TypeError("expected a Grammar.Ref")
   return entry
 }
 
-export const assertInScope = (ref: RefBase<any>, where: string) => {
-  const { expr, scope } = entryOf(ref)
-  if (!scope.open) {
+const refHandler: ProxyHandler<RefImpl<unknown>> = {
+  get(_target, key, receiver) {
+    if (key === RefTypeId) return RefTypeId
+    if (key === Symbol.toPrimitive) return escaped
+    if (key === "then" || key === "toJSON") return undefined
+    if (key === "valueOf" || key === "toString") return escaped
+    if (!Predicate.isString(key)) return undefined
+    const entry = entryOf(receiver)
+    return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
+  },
+}
+
+const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
+  const ref = new Proxy(new RefImpl<A>(), refHandler)
+  refs.set(ref, { expr, scope })
+  // SAFETY: refFor creates a proxy that implements the Ref interface for A.
+  return ref as Ref<A>
+}
+
+const isRef = (value: Value): value is RefBase<unknown> =>
+  Predicate.isObject(value) && refs.has(value)
+
+export const assertInScope = (ref: RefBase<unknown>, where: string): Expr => {
+  const entry = entryOf(ref)
+  if (!entry.scope.open) {
     throw new Error(
       `${where}: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built`,
     )
   }
-  return expr
+  return entry.expr
 }
 
-let nextId = 0
+export const get = <A, K extends keyof A>(ref: Ref<A>, key: K): Ref<A[K]> => {
+  const entry = entryOf(ref)
+  if (!entry.scope.open) {
+    throw new Error(
+      "get: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built",
+    )
+  }
+  return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
+}
 
-const isPlainObject = (value: Value): value is object => {
-  if (!Predicate.isObject(value)) return false
+const isPlainObject = <T extends object>(value: T): boolean => {
   const proto = Object.getPrototypeOf(value)
   return proto === Object.prototype || proto === null
 }
 
-const toPattern = (value: Value): Pattern => {
+const toPattern = (value: Value, active: WeakSet<object>): Pattern => {
   if (isRef(value)) {
     const { expr } = entryOf(value)
     if (expr._tag !== "Ref") {
@@ -94,55 +116,96 @@ const toPattern = (value: Value): Pattern => {
       "gen: the return holds a grammar; yield* it to bind its value, then return the ref",
     )
   }
-  if (Array.isArray(value)) return { _tag: "Array", items: value.map(toPattern) }
-  if (isPlainObject(value)) {
-    return { _tag: "Object", fields: Object.entries(value).map(([k, v]) => [k, toPattern(v)]) }
+  if (
+    value === null ||
+    value === undefined ||
+    Predicate.isString(value) ||
+    Predicate.isNumber(value) ||
+    Predicate.isBoolean(value) ||
+    Predicate.isBigInt(value)
+  ) {
+    return { _tag: "Const", value }
   }
-  return { _tag: "Const", value }
+  if (!Predicate.isObjectOrArray(value)) {
+    throw new TypeError("gen: the return pattern contains an unsupported constant")
+  }
+  if (active.has(value)) throw new TypeError("gen: the return pattern is cyclic")
+  if (Object.getOwnPropertySymbols(value).length !== 0) {
+    throw new TypeError("gen: the return pattern contains symbol fields")
+  }
+
+  active.add(value)
+  try {
+    if (Array.isArray(value)) {
+      const names = Object.getOwnPropertyNames(value)
+      if (names.length !== value.length + 1) {
+        throw new TypeError("gen: return arrays must be dense tuples without extra fields")
+      }
+      const items: Array<Pattern> = []
+      for (let index = 0; index < value.length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+        if (descriptor?.enumerable !== true) {
+          throw new TypeError("gen: return arrays must be dense tuples without extra fields")
+        }
+        items.push(toPattern(value[index], active))
+      }
+      return { _tag: "Array", items }
+    }
+
+    if (!isPlainObject(value)) {
+      throw new TypeError("gen: return objects must have Object.prototype or a null prototype")
+    }
+    const fields: Array<readonly [string, Pattern]> = []
+    for (const key of Object.getOwnPropertyNames(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (descriptor?.enumerable !== true) {
+        throw new TypeError("gen: return object fields must be enumerable")
+      }
+      fields.push([key, toPattern(value[key], active)])
+    }
+    return { _tag: "Object", fields }
+  } finally {
+    active.delete(value)
+  }
 }
 
-const validate = (steps: ReadonlyArray<Step>, result: Pattern) => {
+const validate = (scope: ScopeId, steps: ReadonlyArray<Step>, result: Pattern): void => {
   const binds = new Map<number, () => string>()
   steps.forEach((step, index) => {
-    if (step._tag === "Bind") binds.set(step.id, () => describeStep(step, index))
+    if (step._tag === "Bind") binds.set(step.slot, () => describeStep(step, index))
   })
+
   const returned = new Set<number>()
-  const collect = (p: Pattern) => {
-    switch (p._tag) {
+  const collect = (pattern: Pattern): void => {
+    switch (pattern._tag) {
       case "Ref": {
-        const where = binds.get(p.id)
-        if (where === undefined) {
+        if (pattern.scope !== scope || !binds.has(pattern.slot)) {
           throw new Error(
             "gen: the return holds a ref bound by another gen; return it from the gen that bound it",
           )
         }
-        if (returned.has(p.id)) {
+        if (returned.has(pattern.slot)) {
+          const where = binds.get(pattern.slot)
           throw new Error(
-            `gen: ${where()} is returned twice, so printing could not tell which copy to read`,
+            `gen: ${where?.() ?? "a binding"} is returned twice, so printing could not tell which copy to read`,
           )
         }
-        returned.add(p.id)
+        returned.add(pattern.slot)
         return
       }
       case "Const":
         return
       case "Object":
-        for (const [, field] of p.fields) collect(field)
+        for (const [, field] of pattern.fields) collect(field)
         return
       case "Array":
-        for (const item of p.items) collect(item)
-        return
+        for (const item of pattern.items) collect(item)
     }
   }
   collect(result)
-  const known = new Set(returned)
-  for (const step of steps.toReversed()) {
-    if (step._tag === "Bind" && known.has(step.id)) {
-      for (const id of recoverable(step.grammar)) known.add(id)
-    }
-  }
-  for (const [id, where] of binds) {
-    if (!known.has(id)) {
+
+  for (const [slot, where] of binds) {
+    if (!returned.has(slot)) {
       throw new Error(
         `gen: ${where()} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
       )
@@ -150,36 +213,45 @@ const validate = (steps: ReadonlyArray<Step>, result: Pattern) => {
   }
 }
 
-export const gen = <R>(run: () => Generator<Grammar<any>, R, any>): GenGrammar<R> => {
-  const it = run()
+export const gen = <R>(run: () => Generator<GrammarInternal, R, unknown>): GenGrammar<R> => {
+  const iterator = run()
   const steps: Array<Step> = []
-  const scope: Scope = { open: true }
+  const scope: Scope = { id: { _tag: "ScopeId" }, open: true }
+  let slotCount = 0
+
   try {
-    let r = it.next()
-    while (!r.done) {
-      const g = r.value
-      if (!isGrammar(g)) throw new TypeError("gen: only a grammar can be yielded")
-      if (isSilent(g)) {
-        steps.push({ _tag: "Silent", grammar: g })
-        r = it.next()
+    let result = iterator.next()
+    while (!result.done) {
+      const grammar = result.value
+      if (!isGrammar(grammar)) throw new TypeError("gen: only a grammar can be yielded")
+      if (isSilent(grammar)) {
+        steps.push({ _tag: "Silent", grammar })
+        result = iterator.next()
       } else {
-        const id = nextId++
-        steps.push({ _tag: "Bind", id, grammar: g })
-        r = it.next(refFor({ _tag: "Ref", id }, scope))
+        const slot = slotCount++
+        steps.push({ _tag: "Bind", slot, grammar })
+        result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope))
       }
     }
-    const result = toPattern(r.value)
-    validate(steps, result)
-    const node: Node = { _tag: "Gen", steps, result }
-    const bare = result._tag === "Const" && result.value === undefined
-    // SAFETY: a void return with no bindings is the Silent arm of GenGrammar; anything else is Grammar<Denote<R>>.
+
+    const pattern = toPattern(result.value, new WeakSet())
+    validate(scope.id, steps, pattern)
+    const node: Node = {
+      _tag: "Gen",
+      scope: scope.id,
+      slotCount,
+      steps,
+      result: pattern,
+    }
+    const bare = pattern._tag === "Const" && pattern.value === undefined
+    // SAFETY: bare is derived from the Const pattern, and make/silent return the matching GenGrammar shape.
     return (bare ? silent(node) : make(node)) as GenGrammar<R>
   } finally {
     scope.open = false
   }
 }
 
-export const seq = (...parts: ReadonlyArray<Silent>) =>
+export const seq = (...parts: ReadonlyArray<Silent>): Silent =>
   gen(function* () {
     for (const part of parts) yield* part
   })

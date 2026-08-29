@@ -13,10 +13,16 @@ Breaking:
   reads. Every binding must be returned exactly once, or recovered by a later
   step; `gen` throws otherwise.
 - JavaScript control flow on a parsed value (`if (kind === "num")`) no longer
-  works, since there is no value yet. Use `match(ref, cases)`, which the printer
-  inverts. A property of a ref (`header.kind`) is a ref to that property.
+  works, since there is no value yet. Use `match`, `when`, `matchValue`, or
+  `caseOf`. A property of a ref (`header.kind`) is a ref to that property; `get`
+  handles reserved property names.
+- `Grammar<A>` is invariant. The interpreter AST and `.node` are no longer
+  public.
+- `lexeme` consumes trailing trivia and prints none. Use `space` or `spaces` for
+  canonical spacing. `whitespace` is replaced by `trivia`.
 - `seq` takes silent grammars only. `Field`, `Fields`, and `Part` are removed.
 
-Added: `match`, `take`, `repeat`, `dependent`, and the `Ref`, `Denote`,
-`Pattern`, `Step`, `Expr` types. `render` names bindings by their path in the
-return and shows `match` and dependent grammars.
+Added lexical refs, transitive recovery, direct `take` and exact-repeat nodes,
+`transformOrFail`, structured `PrintIssue` errors, `toEBNF`, `defaulted`,
+`between`, `struct`, `tuple`, `taggedChoice`, and data-last delimiter
+combinators.

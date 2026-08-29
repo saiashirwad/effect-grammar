@@ -89,7 +89,7 @@ const quoteExpr = Grammar.prefix("'", expr).pipe(
   }),
 )
 
-const document = Grammar.wrap(Grammar.whitespace, expr, Grammar.whitespace)
+const document = Grammar.wrap(Grammar.trivia, expr, Grammar.trivia)
 
 interface FormSpec {
   readonly min: number
