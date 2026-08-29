@@ -16,16 +16,6 @@ You write the grammar definition once. You get four outputs:
 - **A text renderer.** Formats the grammar as readable text, for documentation
   and schema descriptions.
 
-## Why effect-grammar?
-
-`Schema.transformOrFail` makes you write and maintain both directions by hand.
-`Schema.TemplateLiteralParser` only handles flat `${a}-${b}` patterns.
-`effect-grammar` derives both directions for you. It handles optional parts,
-repetition, alternation, recursion, and parts that depend on earlier parts.
-
-This is for format strings, not documents. The parser backtracks. There is no
-memoization and no left recursion. Printing is canonical, not pretty.
-
 ## Install
 
 ```bash
