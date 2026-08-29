@@ -16,11 +16,12 @@ export interface Frame {
   readonly values: Array<Value>
 }
 
-export const frame = (scope: ScopeId, slotCount: number, parent: Frame | undefined): Frame => ({
-  scope,
-  parent,
-  values: Array.from<Value>({ length: slotCount }).fill(Unbound),
-})
+export const frame = (scope: ScopeId, slotCount: number, parent: Frame | undefined): Frame => {
+  // Push (not `Array.from({ length }).fill()`): the slots array must stay packed.
+  const values: Array<Value> = []
+  for (let slot = 0; slot < slotCount; slot++) values.push(Unbound)
+  return { scope, parent, values }
+}
 
 export const bind = (target: Frame, slot: number, value: Value): void => {
   target.values[slot] = value
