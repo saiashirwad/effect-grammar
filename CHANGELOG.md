@@ -1,5 +1,11 @@
 # effect-grammar
 
+## 0.4.0
+
+### Minor Changes
+
+- Rename the schema integration function from `toSchema` to `codec`.
+
 ## 0.3.0
 
 ### Minor Changes
