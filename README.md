@@ -1,10 +1,10 @@
 # effect-grammar
 
-Invertible grammar combinators and parser-printers for Effect.
+```bash
+pnpm add effect-grammar
+```
 
-Schema models structured data. `effect-grammar` models text formats inside
-strings, such as connection strings, durations, cron expressions, search
-queries, and DSLs.
+Invertible grammar combinators and parser-printers for Effect.
 
 Define a grammar once. You get:
 
@@ -13,29 +13,21 @@ Define a grammar once. You get:
 - a `Schema.Codec<A, string>`
 - a readable text description of the grammar
 
-## Install
-
-```bash
-pnpm add effect-grammar
-```
-
-## Parse and print with one grammar
-
 ```ts
 import { Schema } from "effect"
-import * as Grammar from "effect-grammar"
+import * as G from "effect-grammar"
 
-const frame = Grammar.gen(function* () {
-  const kind = yield* Grammar.choice(
-    Grammar.literal("text").pipe(Grammar.as("text")),
-    Grammar.literal("bits").pipe(Grammar.as("bits")),
+const frame = G.gen(function* () {
+  const kind = yield* G.choice(
+    G.literal("text").pipe(G.as("text")),
+    G.literal("bits").pipe(G.as("bits")),
   )
-  yield* Grammar.literal("/")
-  const size = yield* Grammar.integer
-  yield* Grammar.literal(":")
-  const body = yield* Grammar.match(kind, {
-    text: Grammar.take(size),
-    bits: Grammar.repeat(Grammar.regex(/[01]/, "bit"), size),
+  yield* G.literal("/")
+  const size = yield* G.integer
+  yield* G.literal(":")
+  const body = yield* G.match(kind, {
+    text: G.take(size),
+    bits: G.repeat(G.regex(/[01]/, "bit"), size),
   })
   return { kind, size, body }
 })
@@ -46,7 +38,7 @@ const FrameValue = Schema.Struct({
   body: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 })
 
-const Frame = Grammar.toSchema(frame, FrameValue, { identifier: "Frame" })
+const Frame = G.toSchema(frame, FrameValue, { identifier: "Frame" })
 const decode = Schema.decodeSync(Frame)
 const encode = Schema.encodeSync(Frame)
 ```
@@ -54,12 +46,15 @@ const encode = Schema.encodeSync(Frame)
 The grammar and its Schema codec use the same parser and printer:
 
 ```text
-decode("text/5:hello") → {"kind":"text","size":5,"body":"hello"}
-decode("bits/4:1010") → {"kind":"bits","size":4,"body":["1","0","1","0"]}
-encode({kind:"text",size:2,body:"hi"}) → "text/2:hi"
-encode({kind:"bits",size:4,body:["1","0","1","0"]}) → "bits/4:1010"
+decode("text/5:hello") → { kind: "text", size: 5, body: "hello" }
+decode("bits/4:1010") → { kind: "bits", size: 4, body: ["1", "0", "1", "0"] }
+
+encode({ kind: "text", size: 2, body: "hi" }) → "text/2:hi"
+encode({ kind: "bits", size: 4, body: ["1", "0", "1", "0"] }) → "bits/4:1010"
+
 parse("bits/4:1020") → line 1, column 10: expected bit, found "2"
-print({kind:"text",size:2,body:"hello"}) → .body: expected 2 UTF-16 code units, got "hello"
+print({ kind: "text", size: 2, body: "hello" }) → .body: expected 2 UTF-16 code units, got "hello"
+
 render(frame) → kind:("text" | "bits") "/" size:<integer> ":" body:match(kind){"text" => <char>{size} | "bits" => (<bit>){size}}
 ```
 
