@@ -1,19 +1,26 @@
-import { type Bounds, type Expr, type Grammar, type Node, type Pattern, resolve } from "./core.ts"
+import {
+  type Bounds,
+  type Expr,
+  type Grammar,
+  type Node,
+  type Pattern,
+  resolve,
+  type Step,
+} from "./core.ts"
 
 interface Ctx {
   readonly seen: Set<Node>
-  // Binding id to its name in the enclosing gen's return, when it has one.
   readonly names: Map<number, string>
 }
 
-const repetition = ({ min, max }: Bounds): string => {
+const repetition = ({ min, max }: Bounds) => {
   if (max === Number.POSITIVE_INFINITY) return min === 0 ? "*" : min === 1 ? "+" : `{${min},}`
   return min === max ? `{${min}}` : `{${min},${max}}`
 }
 
-const words = (parts: ReadonlyArray<string>): string => parts.filter((p) => p !== "").join(" ")
+const words = (parts: ReadonlyArray<string>) => parts.filter((p) => p !== "").join(" ")
 
-const nameBindings = (p: Pattern, path: string | undefined, names: Map<number, string>): void => {
+const nameBindings = (p: Pattern, path: string | undefined, names: Map<number, string>) => {
   switch (p._tag) {
     case "Ref":
       if (path !== undefined) names.set(p.id, path)
@@ -29,12 +36,10 @@ const nameBindings = (p: Pattern, path: string | undefined, names: Map<number, s
       p.items.forEach((item, i) => {
         nameBindings(item, path === undefined ? String(i) : `${path}.${i}`, names)
       })
-      return
   }
 }
 
-/** True when the rendering is more than one word at the top level, so a name needs to group it. */
-const isLoose = (rendered: string): boolean => {
+const isLoose = (rendered: string) => {
   let depth = 0
   let quoted = false
   for (let i = 0; i < rendered.length; i++) {
@@ -109,8 +114,10 @@ const show = (g: Grammar<any>, ctx: Ctx): string => {
   }
 }
 
-export const render = (g: Grammar<any>): string => show(g, { seen: new Set(), names: new Map() })
+export const render = (g: Grammar<any>) => show(g, { seen: new Set(), names: new Map() })
 
-/** A short name for error messages: the regex or label name if there is one, else the rendering. */
-export const describe = (g: Grammar<any>): string =>
+export const describe = (g: Grammar<any>) =>
   g.node._tag === "Regex" || g.node._tag === "Label" ? g.node.name : render(g)
+
+export const describeStep = (step: Step, index: number) =>
+  `step ${index + 1} (${describe(step.grammar)})`

@@ -32,8 +32,7 @@ export const printFail = <A>(grammar: Grammar.Grammar<A>, value: A): Grammar.Pri
   return r.failure
 }
 
-/** Round-trip law: print then re-parse must yield an `Equal` value. */
-export const assertRoundTrip = <A>(grammar: Grammar.Grammar<A>, value: A): void => {
+export const assertRoundTrip = <A>(grammar: Grammar.Grammar<A>, value: A) => {
   const printed = printOk(grammar, value)
   const reparsed = parseOk(grammar, printed)
   if (!Equal.equals(reparsed, value)) {

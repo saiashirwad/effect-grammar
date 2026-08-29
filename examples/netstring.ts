@@ -2,7 +2,6 @@ import { Console, Effect, Result } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
-// The length is parsed but not returned: `take` recovers it from the payload when printing.
 const netstring = Grammar.gen(function* () {
   const length = yield* Grammar.integer
   yield* Grammar.literal(":")

@@ -45,6 +45,16 @@ describe("correctness regressions", () => {
     assert.deepEqual(e.expected, ['","', "end of input"])
   })
 
+  it("gen does not force a suspend thunk at construction", () => {
+    const later: Grammar.Grammar<number> = Grammar.suspend(() => target)
+    const g = Grammar.gen(function* () {
+      const n = yield* later
+      return n
+    })
+    const target = Grammar.integer
+    assert.equal(parseOk(g, "7"), 7)
+  })
+
   it("a gen inside a gen keeps its own bindings, and a failed inner gen backtracks", () => {
     const pair = Grammar.gen(function* () {
       const a = yield* Grammar.integer
@@ -63,7 +73,6 @@ describe("correctness regressions", () => {
   })
 })
 
-// A raw node must not be assignable to a Grammar.
 const rawNode: Grammar.Node = { _tag: "Literal", value: "raw" }
 // @ts-expect-error
 const notAGrammar: Grammar.Grammar<number> = rawNode

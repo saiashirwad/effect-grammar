@@ -1,9 +1,8 @@
 import { Option, Predicate } from "effect"
 
-import type { Expr, Pattern, Value } from "./core.ts"
+import type { Case, Expr, Pattern, Value } from "./core.ts"
 import { preview } from "./errors.ts"
 
-/** The values bound so far, one frame per `gen` being parsed or printed. */
 export interface Env {
   readonly parent: Env | undefined
   readonly values: Map<number, Value>
@@ -11,14 +10,13 @@ export interface Env {
 
 export const child = (parent: Env | undefined): Env => ({ parent, values: new Map() })
 
-export const lookup = (env: Env | undefined, id: number): Option.Option<Value> => {
+export const lookup = (env: Env | undefined, id: number) => {
   for (let e = env; e !== undefined; e = e.parent) {
     if (e.values.has(id)) return Option.some(e.values.get(id))
   }
-  return Option.none()
+  return Option.none<Value>()
 }
 
-/** `None` when the root binding is not in `env` or a projection has nothing to read from. */
 export const evaluate = (expr: Expr, env: Env | undefined): Option.Option<Value> => {
   switch (expr._tag) {
     case "Ref":
@@ -32,13 +30,14 @@ export const evaluate = (expr: Expr, env: Env | undefined): Option.Option<Value>
   }
 }
 
-export const evaluateOrThrow = (expr: Expr, env: Env | undefined): Value => {
-  const v = evaluate(expr, env)
-  if (Option.isSome(v)) return v.value
-  throw new Error(
-    "a Grammar.Ref was read before its binding was parsed; a ref can only be used after the yield* that produced it, inside the same gen",
+export const evaluateOrThrow = (expr: Expr, env: Env | undefined) =>
+  Option.getOrThrowWith(
+    evaluate(expr, env),
+    () =>
+      new Error(
+        "a Grammar.Ref was read before its binding was parsed; a ref can only be used after the yield* that produced it, inside the same gen",
+      ),
   )
-}
 
 export const materialize = (pattern: Pattern, env: Env): Value => {
   switch (pattern._tag) {
@@ -53,10 +52,22 @@ export const materialize = (pattern: Pattern, env: Env): Value => {
   }
 }
 
-/** The `match` case key a value selects: literals by their string form. */
-export const keyOf = (value: Value): string =>
+const keyOf = (value: Value) =>
   Predicate.isString(value)
     ? value
     : Predicate.isNumber(value) || Predicate.isBoolean(value)
       ? String(value)
       : preview(value)
+
+export const keyCandidates = (key: string): ReadonlyArray<Value> => {
+  const out: Array<Value> = [key]
+  if (key === "true") out.push(true)
+  if (key === "false") out.push(false)
+  if (String(Number(key)) === key) out.push(Number(key))
+  return out
+}
+
+export const caseFor = (cases: ReadonlyArray<Case>, value: Value) => {
+  const key = keyOf(value)
+  return cases.find((c) => c.key === key)
+}

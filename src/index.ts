@@ -9,6 +9,7 @@ export type {
   Pattern,
   Ref,
   RefBase,
+  RefExpr,
   Silent,
   Step,
   Type,

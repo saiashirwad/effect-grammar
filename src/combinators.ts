@@ -1,7 +1,6 @@
 import { Equal, Function as F, Predicate, Schema } from "effect"
 
 import {
-  assertInScope,
   type Bounds,
   type Grammar,
   isGrammar,
@@ -16,6 +15,7 @@ import {
   type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
+import { assertInScope } from "./gen.ts"
 
 export { gen, type GenGrammar, seq } from "./gen.ts"
 
@@ -23,7 +23,6 @@ export const literal = (value: string) => silent({ _tag: "Literal", value })
 
 export const empty = literal("")
 
-/** The regex is made sticky so the parser can match at a position without slicing. */
 export const regex = (re: RegExp, name: string): Grammar<string> => {
   const flags = re.flags.replace(/[gy]/g, "")
   return make({
@@ -80,12 +79,13 @@ export interface RepeatOptions {
   readonly max?: number
 }
 
+const isCount = (n: Value): n is number =>
+  Predicate.isNumber(n) && Number.isSafeInteger(n) && n >= 0
+
 const bounds = (name: string, opts: RepeatOptions | undefined): Bounds => {
   const min = opts?.min ?? 0
   const max = opts?.max ?? Number.POSITIVE_INFINITY
-  if (!Number.isSafeInteger(min) || min < 0) {
-    throw new RangeError(`${name}: min must be a non-negative safe integer`)
-  }
+  if (!isCount(min)) throw new RangeError(`${name}: min must be a non-negative safe integer`)
   if (max !== Number.POSITIVE_INFINITY && !(Number.isSafeInteger(max) && max >= min)) {
     throw new RangeError(`${name}: max must be a safe integer >= min`)
   }
@@ -108,44 +108,38 @@ export const sepBy: {
   make({ _tag: "Many", inner, sep: _toSilent(sep), ...bounds("sepBy", opts) }),
 )
 
-/** The value types behind a tuple of refs. */
 export type RefValues<Deps extends ReadonlyArray<RefBase<any>>> = {
   -readonly [K in keyof Deps]: Deps[K] extends RefBase<infer A> ? A : never
 }
 
 export interface DependentOptions<Deps extends ReadonlyArray<RefBase<any>>, A> {
-  /** On print, the dependencies' values from this grammar's own value, so they need not be returned. */
   readonly recover?: (value: A) => RefValues<Deps> | undefined
-  /** How `render` shows this grammar, given the rendered dependencies. */
-  readonly show?: (deps: ReadonlyArray<string>) => string
+  readonly show?: (deps: ReadonlyArray<string>, render: (g: Grammar<any>) => string) => string
 }
 
-/**
- * A grammar chosen at parse and print time from the values of earlier bindings.
- * `select` returns `undefined` to reject those values. `match`, `take`, and
- * `repeat` are built on this.
- */
+const _dependent = <const Deps extends ReadonlyArray<RefBase<any>>, A>(
+  where: string,
+  deps: Deps,
+  select: (...values: RefValues<Deps>) => Grammar<A> | undefined,
+  options: DependentOptions<Deps, A> | undefined,
+): Grammar<A> =>
+  make({
+    _tag: "Dependent",
+    deps: deps.map((d) => assertInScope(d, where)),
+    // SAFETY: the interpreters evaluate `deps` in order, so `values` has the shape RefValues<Deps>.
+    select: (values) => select(...(values as RefValues<Deps>)),
+    recover: options?.recover,
+    show: options?.show ?? ((ds) => `${where}(${ds.join(", ")})`),
+  })
+
 export const dependent = <const Deps extends ReadonlyArray<RefBase<any>>, A>(
   deps: Deps,
   select: (...values: RefValues<Deps>) => Grammar<A> | undefined,
   options?: DependentOptions<Deps, A>,
-): Grammar<A> =>
-  make({
-    _tag: "Dependent",
-    deps: deps.map((d) => assertInScope(d, "dependent")),
-    // SAFETY: the interpreters evaluate `deps` in order, so `values` has the shape RefValues<Deps>.
-    select: (values) => select(...(values as RefValues<Deps>)),
-    recover: options?.recover,
-    show: options?.show ?? ((ds) => `dependent(${ds.join(", ")})`),
-  })
+) => _dependent("dependent", deps, select, options)
 
 type Key = string | number | boolean
 
-/**
- * Branch on the value of an earlier binding. Cases are keyed by the literal's
- * string form, so a boolean ref takes `{ true, false }`. If the scrutinee is
- * not returned, printing recovers it by trying each case in order.
- */
 export const match = <K extends Key, const Cases extends Record<`${K}`, Grammar<any>>>(
   scrutinee: Ref<K>,
   cases: Cases,
@@ -156,37 +150,40 @@ export const match = <K extends Key, const Cases extends Record<`${K}`, Grammar<
     cases: Object.entries<Grammar<any>>(cases).map(([key, grammar]) => ({ key, grammar })),
   })
 
-const toCount = (n: Value): number | undefined =>
-  Predicate.isNumber(n) && Number.isSafeInteger(n) && n >= 0 ? n : undefined
+const byCount = <A>(build: (count: number) => Grammar<A>) => {
+  const cache = new Map<number, Grammar<A>>()
+  return (n: number) => {
+    if (!isCount(n)) return undefined
+    let g = cache.get(n)
+    if (g === undefined) cache.set(n, (g = build(n)))
+    return g
+  }
+}
 
-/** Exactly `count` characters, where `count` is an earlier binding. Printing recovers the count. */
-export const take = (count: Ref<number>): Grammar<string> =>
-  make({
-    _tag: "Dependent",
-    deps: [assertInScope(count, "take")],
-    select: ([n]) => {
-      const c = toCount(n)
-      return c === undefined ? undefined : regex(new RegExp(`[\\s\\S]{${c}}`), `${c} chars`)
+export const take = (count: Ref<number>) =>
+  _dependent(
+    "take",
+    [count],
+    byCount((c) => regex(new RegExp(`[\\s\\S]{${c}}`), `${c} chars`)),
+    {
+      recover: (s) => (Predicate.isString(s) ? [s.length] : undefined),
+      show: ([n]) => `<char>{${n}}`,
     },
-    recover: (s) => (Predicate.isString(s) ? [s.length] : undefined),
-    show: ([n]) => `<char>{${n}}`,
-  })
+  )
 
-/** Exactly `count` repetitions, where `count` is an earlier binding. Printing recovers the count. */
 export const repeat: {
   <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
   (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
 } = F.dual(_dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
-  make({
-    _tag: "Dependent",
-    deps: [assertInScope(count, "repeat")],
-    select: ([n]) => {
-      const c = toCount(n)
-      return c === undefined ? undefined : many(inner, { min: c, max: c })
+  _dependent(
+    "repeat",
+    [count],
+    byCount((c) => many(inner, { min: c, max: c })),
+    {
+      recover: (xs) => (Array.isArray(xs) ? [xs.length] : undefined),
+      show: ([n], render) => `(${render(inner)}){${n}}`,
     },
-    recover: (xs) => (Array.isArray(xs) ? [xs.length] : undefined),
-    show: ([n], render) => `(${render(inner)}){${n}}`,
-  }),
+  ),
 )
 
 export interface TransformOptions<A, B> {
@@ -244,7 +241,7 @@ export const label: {
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
   make({ _tag: "Suspend", thunk, name })
 
-const hiddenWhitespace = (printAs: string): Silent =>
+const hiddenWhitespace = (printAs: string) =>
   silent({ _tag: "Skip", inner: regex(/\s*/, "whitespace"), printAs, show: false })
 
 export const whitespace = hiddenWhitespace("")
@@ -257,6 +254,6 @@ export function lexeme(inner: Grammar<any>) {
 
 export const symbol = (s: string) => lexeme(literal(s))
 
-export const integer: Grammar<number> = regex(/-?\d+/, "integer").pipe(
+export const integer = regex(/-?\d+/, "integer").pipe(
   transform({ decode: Number, encode: String, is: Number.isSafeInteger, name: "integer" }),
 )

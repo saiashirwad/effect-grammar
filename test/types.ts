@@ -1,7 +1,3 @@
-/**
- * Type-level guarantees. Every `@ts-expect-error` below must be a real error —
- * `pnpm typecheck` fails on an unused directive.
- */
 import * as G from "../src/index.ts"
 
 const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))

@@ -1,9 +1,9 @@
 import { Equal, Option, Predicate, Result, Schema } from "effect"
 
 import { type Grammar, type Pattern, resolve, type Step, type Value } from "./core.ts"
-import { child, type Env, evaluate, keyOf, lookup } from "./env.ts"
+import { caseFor, child, type Env, evaluate, keyCandidates, lookup } from "./env.ts"
 import { preview, PrintError } from "./errors.ts"
-import { describe, render } from "./render.ts"
+import { describe, describeStep, render } from "./render.ts"
 
 class Failure {
   readonly reason: () => string
@@ -12,9 +12,8 @@ class Failure {
   }
 }
 
-const fail = (reason: () => string): Failure => new Failure(reason)
+const fail = (reason: () => string) => new Failure(reason)
 
-/** Read the bindings out of a value by its pattern. */
 const unify = (p: Pattern, value: Value, values: Map<number, Value>): Failure | undefined => {
   switch (p._tag) {
     case "Ref":
@@ -46,13 +45,20 @@ const unify = (p: Pattern, value: Value, values: Map<number, Value>): Failure | 
   }
 }
 
-/** The values a `match` key may stand for: the key itself, or the boolean or number it spells. */
-const keyCandidates = (key: string): ReadonlyArray<Value> => {
-  const out: Array<Value> = [key]
-  if (key === "true") out.push(true)
-  if (key === "false") out.push(false)
-  if (String(Number(key)) === key) out.push(Number(key))
-  return out
+export const recoverable = (g: Grammar<any>): ReadonlyArray<number> => {
+  const n = g.node
+  switch (n._tag) {
+    case "Label":
+    case "Wrap":
+    case "Transform":
+      return recoverable(n.inner)
+    case "Match":
+      return n.scrutinee._tag === "Ref" ? [n.scrutinee.id] : []
+    case "Dependent":
+      return n.recover === undefined ? [] : n.deps.flatMap((d) => (d._tag === "Ref" ? [d.id] : []))
+    default:
+      return []
+  }
 }
 
 type Candidates = Map<number, ReadonlyArray<Value>>
@@ -60,7 +66,6 @@ type Candidates = Map<number, ReadonlyArray<Value>>
 const hidden = (env: Env, candidates: Candidates, id: number) =>
   Option.isNone(lookup(env, id)) && !candidates.has(id)
 
-/** Recover bindings that the value does not hold from a step whose value it does. */
 const recover = (g: Grammar<any>, value: Value, env: Env, candidates: Candidates): void => {
   const n = g.node
   switch (n._tag) {
@@ -89,10 +94,7 @@ const recover = (g: Grammar<any>, value: Value, env: Env, candidates: Candidates
           candidates.set(d.id, [values[i]])
         }
       })
-      return
     }
-    default:
-      return
   }
 }
 
@@ -101,12 +103,12 @@ const printBind = (
   index: number,
   env: Env,
   candidates: Candidates,
-): string | Failure => {
+) => {
   if (env.values.has(step.id)) return out(step.grammar, env.values.get(step.id), env)
-  const where = () => `step ${index + 1} (${describe(step.grammar)})`
+  const where = describeStep(step, index)
   const cs = candidates.get(step.id)
   if (cs === undefined) {
-    return fail(() => `${where()} is not in the value and no later step recovers it`)
+    return fail(() => `${where} is not in the value and no later step recovers it`)
   }
   const reasons: Array<() => string> = []
   for (const c of cs) {
@@ -119,7 +121,7 @@ const printBind = (
   }
   return fail(
     () =>
-      `${where()} accepts none of the recovered values ${cs.map(preview).join(", ")}:\n  ${reasons.map((r) => r()).join("\n  ")}`,
+      `${where} accepts none of the recovered values ${cs.map(preview).join(", ")}:\n  ${reasons.map((r) => r()).join("\n  ")}`,
   )
 }
 
@@ -142,7 +144,6 @@ const out = <A>(g: Grammar<A>, value: A, env: Env | undefined): string | Failure
       if (u !== undefined) return u
       const candidates: Candidates = new Map()
       if (n.steps.some((step) => step._tag === "Bind" && !local.values.has(step.id))) {
-        // Later steps recover earlier ones, so walk backwards and chains resolve in one pass.
         for (const step of n.steps.toReversed()) {
           if (step._tag === "Bind" && local.values.has(step.id)) {
             recover(step.grammar, local.values.get(step.id), local, candidates)
@@ -214,20 +215,18 @@ const out = <A>(g: Grammar<A>, value: A, env: Env | undefined): string | Failure
     case "Match": {
       const k = evaluate(n.scrutinee, env)
       if (Option.isNone(k)) return fail(() => "match: the ref it branches on is not bound")
-      const c = n.cases.find((c) => c.key === keyOf(k.value))
+      const c = caseFor(n.cases, k.value)
       if (c === undefined) return fail(() => `match: no case for ${preview(k.value)}`)
       return out(c.grammar, value, env)
     }
     case "Dependent": {
-      const values: Array<Value> = []
-      for (const d of n.deps) {
-        const v = evaluate(d, env)
-        if (Option.isNone(v)) return fail(() => "a ref this grammar depends on is not bound")
-        values.push(v.value)
-      }
-      const chosen = n.select(values)
+      const values = Option.all(n.deps.map((d) => evaluate(d, env)))
+      if (Option.isNone(values)) return fail(() => "a ref this grammar depends on is not bound")
+      const chosen = n.select(values.value)
       if (chosen === undefined) {
-        return fail(() => `expected ${n.show(values.map(preview), render)}, got ${preview(value)}`)
+        return fail(
+          () => `expected ${n.show(values.value.map(preview), render)}, got ${preview(value)}`,
+        )
       }
       return out(chosen, value, env)
     }

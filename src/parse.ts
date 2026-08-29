@@ -1,7 +1,7 @@
 import { Result } from "effect"
 
 import { type Grammar, resolve, type Value } from "./core.ts"
-import { child, type Env, evaluateOrThrow, keyOf, materialize } from "./env.ts"
+import { caseFor, child, type Env, evaluateOrThrow, materialize } from "./env.ts"
 import { ParseError, preview } from "./errors.ts"
 import { describe, render } from "./render.ts"
 
@@ -14,7 +14,7 @@ interface State {
 
 const FAIL = Symbol.for("effect-grammar/fail")
 
-const failAt = (s: State, expected: string): typeof FAIL => {
+const failAt = (s: State, expected: string) => {
   if (s.pos > s.furthest) {
     s.furthest = s.pos
     s.expected = new Set([expected])
@@ -99,7 +99,6 @@ const go = (g: Grammar<any>, s: State, env: Env | undefined): Value | typeof FAI
       return go(n.inner, s, env) === FAIL ? FAIL : undefined
     case "Label": {
       const start = s.pos
-      // Expectations already recorded here belong to sibling branches; only the inner ones collapse.
       const siblings = s.furthest === start ? [...s.expected] : []
       const v = go(n.inner, s, env)
       if (v === FAIL && s.furthest === start) s.expected = new Set([...siblings, n.name])
@@ -109,7 +108,7 @@ const go = (g: Grammar<any>, s: State, env: Env | undefined): Value | typeof FAI
       return go(resolve(n), s, env)
     case "Match": {
       const k = evaluateOrThrow(n.scrutinee, env)
-      const c = n.cases.find((c) => c.key === keyOf(k))
+      const c = caseFor(n.cases, k)
       if (c === undefined) return failAt(s, `a match case for ${preview(k)}`)
       return go(c.grammar, s, env)
     }

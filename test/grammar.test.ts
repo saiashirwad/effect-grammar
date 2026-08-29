@@ -615,7 +615,7 @@ describe("transform / decodeTo", () => {
       yield* G.literal(":")
       const chars = yield* G.take(n).pipe(
         G.transform({
-          decode: (s: string): ReadonlyArray<string> => s.split(""),
+          decode: (s: string) => s.split(""),
           encode: (cs) => cs.join(""),
         }),
       )
