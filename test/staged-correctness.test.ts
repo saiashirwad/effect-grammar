@@ -6,26 +6,29 @@ import { describe, it } from "vitest"
 import * as Grammar from "../src/index.ts"
 import { parseFail, parseOk, printFail, printOk } from "./helpers.ts"
 
-const next = (n: Grammar.Ref<number>) =>
-  Grammar.dependent([n], (value) => Grammar.literal(`+${value}`).pipe(Grammar.as(value + 1)), {
-    recover: (value) => [value - 1],
-    show: ([value]) => `<next ${value}>`,
-  })
-
 describe("staged correctness", () => {
-  it("recovers transitive hidden bindings", () => {
-    const chain = Grammar.gen(function* () {
+  it("keeps sibling gens' slots isolated", () => {
+    const inner = Grammar.gen(function* () {
       const a = yield* Grammar.integer
-      const b = yield* next(a)
-      const c = yield* next(b)
-      return c
+      yield* Grammar.literal("+")
+      const b = yield* Grammar.integer
+      return { a, b }
+    })
+    const outer = Grammar.gen(function* () {
+      const first = yield* inner
+      yield* Grammar.literal(";")
+      const second = yield* inner
+      return { first, second }
     })
 
-    assert.equal(printOk(chain, 3), "1+1+2")
-    assert.equal(parseOk(chain, "1+1+2"), 3)
+    assert.deepEqual(parseOk(outer, "1+2;3+4"), {
+      first: { a: 1, b: 2 },
+      second: { a: 3, b: 4 },
+    })
+    assert.equal(printOk(outer, { first: { a: 1, b: 2 }, second: { a: 3, b: 4 } }), "1+2;3+4")
   })
 
-  it("rejects a grammar with an escaped free ref before interpretation", () => {
+  it("fails a grammar whose ref escaped its gen, at use time", () => {
     let escaped: Grammar.Grammar<string> | undefined
 
     Grammar.gen(function* () {
@@ -36,9 +39,9 @@ describe("staged correctness", () => {
 
     if (escaped === undefined) assert.fail("expected escaped grammar")
     const grammar = escaped
-    assert.throws(() => Grammar.parse(grammar, "abc"), /unresolved ref/)
-    assert.throws(() => Grammar.print(grammar, "abc"), /unresolved ref/)
-    assert.throws(() => Grammar.render(grammar), /unresolved ref/)
+    assert.deepEqual(parseFail(grammar, "abc").expected, ["a bound take count"])
+    const printed = Grammar.print(grammar, "abc")
+    assert.ok(Result.isFailure(printed))
   })
 
   it("validates regex printing with the parser matcher", () => {
@@ -123,13 +126,13 @@ describe("staged correctness", () => {
         [1, Grammar.literal("one").pipe(Grammar.as(10))],
         ["1", Grammar.literal("string-one").pipe(Grammar.as(20))],
       ] as const)
-      return value
+      return { kind, value }
     })
 
-    assert.equal(parseOk(grammar, "n:one"), 10)
-    assert.equal(parseOk(grammar, "s:string-one"), 20)
-    assert.equal(printOk(grammar, 10), "n:one")
-    assert.equal(printOk(grammar, 20), "s:string-one")
+    assert.deepEqual(parseOk(grammar, "n:one"), { kind: 1, value: 10 })
+    assert.deepEqual(parseOk(grammar, "s:string-one"), { kind: "1", value: 20 })
+    assert.equal(printOk(grammar, { kind: 1, value: 10 }), "n:one")
+    assert.equal(printOk(grammar, { kind: "1", value: 20 }), "s:string-one")
   })
 
   it("contains callback failures in Result", () => {
@@ -182,17 +185,5 @@ describe("staged correctness", () => {
     const error = printFail(grammar, { address: { port: 1.5 } })
     assert.match(error.message, /^\.address\.port: expected integer/)
     assert.equal(error.issue._tag, "AtPath")
-  })
-
-  it("rejects context-dependent EBNF rendering", () => {
-    const grammar = Grammar.gen(function* () {
-      const length = yield* Grammar.integer
-      const value = yield* Grammar.take(length)
-      return { length, value }
-    })
-    const result = Grammar.toEBNF(grammar)
-
-    assert.ok(Result.isFailure(result))
-    if (Result.isFailure(result)) assert.match(result.failure.message, /context-dependent/)
   })
 })

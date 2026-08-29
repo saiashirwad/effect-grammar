@@ -10,16 +10,14 @@ import {
   make,
   type MatchKey,
   type Node,
-  nodeOf,
   type Ref,
-  type RefBase,
   type ScopeId,
   type Silent,
   silent,
   type Type,
 } from "./core.ts"
 import { isCount } from "./env.ts"
-import { preview } from "./errors.ts"
+import { exceptionMessage, preview } from "./errors.ts"
 import { assertInScope } from "./gen.ts"
 
 export { gen, type GenGrammar, get, seq } from "./gen.ts"
@@ -139,74 +137,6 @@ const bounds = (name: string, options: RepeatOptions | undefined): Bounds => {
   return { min, max }
 }
 
-const nullable = (grammar: GrammarInternal, seen: Set<Node>): boolean | undefined => {
-  const node = nodeOf(grammar)
-  if (seen.has(node)) return undefined
-  seen.add(node)
-
-  let result: boolean | undefined
-  switch (node._tag) {
-    case "Literal":
-      result = node.value.length === 0
-      break
-    case "Regex": {
-      node.re.lastIndex = 0
-      result = node.re.exec("")?.[0].length === 0
-      break
-    }
-    case "Gen":
-      result = node.steps.every((step) => nullable(step.grammar, seen) === true)
-      break
-    case "Wrap":
-      result =
-        nullable(node.open, seen) === true &&
-        nullable(node.inner, seen) === true &&
-        nullable(node.close, seen) === true
-      break
-    case "Choice": {
-      const options = node.options.map((option) => nullable(option, seen))
-      result = options.some((value) => value === true)
-        ? true
-        : options.every((value) => value === false)
-          ? false
-          : undefined
-      break
-    }
-    case "Many":
-      result = node.min === 0 ? true : nullable(node.inner, seen)
-      break
-    case "Optional":
-      result = true
-      break
-    case "Transform":
-    case "TransformOrFail":
-    case "Skip":
-    case "Label":
-      result = nullable(node.inner, seen)
-      break
-    case "Suspend":
-      result = node.resolved === undefined ? undefined : nullable(node.resolved, seen)
-      break
-    case "Match": {
-      const cases = node.cases.map((matchCase) => nullable(matchCase.grammar, seen))
-      result = cases.every((value) => value === true)
-        ? true
-        : cases.every((value) => value === false)
-          ? false
-          : undefined
-      break
-    }
-    case "Dependent":
-    case "Take":
-    case "RepeatExact":
-      result = undefined
-      break
-  }
-
-  seen.delete(node)
-  return result
-}
-
 const dataFirst = (args: IArguments): boolean => isGrammar(args[0])
 
 const repeatNode = <A>(
@@ -214,13 +144,8 @@ const repeatNode = <A>(
   inner: Grammar<A>,
   separator: Silent,
   options: RepeatOptions | undefined,
-): Grammar<ReadonlyArray<A>> => {
-  const range = bounds(name, options)
-  if (range.max > 0 && nullable(inner, new Set()) === true) {
-    throw new RangeError(`${name}: element must consume input`)
-  }
-  return make({ _tag: "Many", inner, sep: separator, ...range })
-}
+): Grammar<ReadonlyArray<A>> =>
+  make({ _tag: "Many", inner, sep: separator, ...bounds(name, options) })
 
 export const many: {
   <A>(inner: Grammar<A>, options?: RepeatOptions): Grammar<ReadonlyArray<A>>
@@ -242,39 +167,6 @@ export const sepBy: {
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, separator: Silent | string, options?: RepeatOptions) =>
   repeatNode("sepBy", inner, toSilent(separator), options),
 )
-
-export type RefValues<Deps extends ReadonlyArray<RefBase<unknown>>> = {
-  -readonly [K in keyof Deps]: Deps[K] extends RefBase<infer A> ? A : never
-}
-
-export interface DependentOptions<Deps extends ReadonlyArray<RefBase<unknown>>, A> {
-  readonly recover?: (value: A) => RefValues<Deps> | undefined
-  readonly show?: (
-    deps: ReadonlyArray<string>,
-    render: <B>(grammar: Grammar<B>) => string,
-  ) => string
-}
-
-const dependentNode = <const Deps extends ReadonlyArray<RefBase<unknown>>, A>(
-  where: string,
-  deps: Deps,
-  select: (...values: RefValues<Deps>) => Grammar<A> | undefined,
-  options: DependentOptions<Deps, A> | undefined,
-): Grammar<A> =>
-  make({
-    _tag: "Dependent",
-    deps: deps.map((dep) => assertInScope(dep, where)),
-    // SAFETY: runtime dependency values preserve the tuple order and element types of Deps.
-    select: (values) => select(...(values as RefValues<Deps>)),
-    recover: options?.recover,
-    show: options?.show ?? ((values) => `${where}(${values.join(", ")})`),
-  })
-
-export const dependent = <const Deps extends ReadonlyArray<RefBase<unknown>>, A>(
-  deps: Deps,
-  select: (...values: RefValues<Deps>) => Grammar<A> | undefined,
-  options?: DependentOptions<Deps, A>,
-): Grammar<A> => dependentNode("dependent", deps, select, options)
 
 type FiniteString<K extends string> = string extends K ? never : K
 
@@ -314,43 +206,15 @@ export const matchValue = <
     cases: entries.map(([key, grammar]) => ({ key, grammar })),
   })
 
-export const caseOf = <
-  K extends MatchKey,
-  const Entries extends ReadonlyArray<readonly [K, GrammarInternal]>,
->(
-  scrutinee: Ref<K>,
-  entries: Entries,
-): Grammar<EntryOutput<Entries>> =>
-  make({
-    _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "caseOf"),
-    cases: entries.map(([key, grammar]) => ({ key, grammar })),
-  })
-
-export const when = <A, B>(
-  scrutinee: Ref<boolean>,
-  options: { readonly onTrue: Grammar<A>; readonly onFalse: Grammar<B> },
-): Grammar<A | B> =>
-  make({
-    _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "when"),
-    cases: [
-      { key: true, grammar: options.onTrue },
-      { key: false, grammar: options.onFalse },
-    ],
-  })
-
 export const take = (count: Ref<number>): Grammar<string> =>
   make({ _tag: "Take", count: assertInScope(count, "take") })
 
 export const repeat: {
   <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
   (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
-} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) => {
-  if (nullable(inner, new Set()) === true)
-    throw new RangeError("repeat: element must consume input")
-  return make({ _tag: "RepeatExact", count: assertInScope(count, "repeat"), inner })
-})
+} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
+  make({ _tag: "RepeatExact", count: assertInScope(count, "repeat"), inner }),
+)
 
 export interface TransformOptions<A, B> {
   readonly decode: (a: A) => B
@@ -359,11 +223,28 @@ export interface TransformOptions<A, B> {
   readonly name?: string
 }
 
+const attempt =
+  <A, B>(decode: (a: A) => B) =>
+  (a: A): Result.Result<B, GrammarIssue> => {
+    try {
+      return Result.succeed(decode(a))
+    } catch (error) {
+      return Result.fail({ message: exceptionMessage(error) })
+    }
+  }
+
 export const transform: {
   <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
 } = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>) =>
-  make({ _tag: "Transform", inner, ...options }),
+  make({
+    _tag: "Transform",
+    inner,
+    decode: attempt(options.decode),
+    encode: attempt(options.encode),
+    is: options.is,
+    name: options.name,
+  }),
 )
 
 export interface TransformOrFailOptions<A, B> {
@@ -377,7 +258,7 @@ export const transformOrFail: {
   <A, B>(options: TransformOrFailOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
 } = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>) =>
-  make({ _tag: "TransformOrFail", inner, ...options }),
+  make({ _tag: "Transform", inner, ...options }),
 )
 
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
@@ -495,8 +376,8 @@ export const taggedChoice = <
     make({
       _tag: "Transform",
       inner: grammar,
-      decode: (value) => ({ [tag]: key, value }),
-      encode: (value) => Object(value).value,
+      decode: (value) => Result.succeed({ [tag]: key, value }),
+      encode: (value) => Result.succeed(Object(value).value),
       is: (value) => {
         if (!Predicate.isObject(value) || !Object.hasOwn(value, tag)) return false
         return Object.is(value[tag], key) && Object.hasOwn(value, "value")

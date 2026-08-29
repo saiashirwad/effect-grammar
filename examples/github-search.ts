@@ -140,11 +140,7 @@ const qualifier = Grammar.gen(function* () {
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group = Grammar.wrap(
-  "(",
-  Grammar.wrap(Grammar.trivia, query, Grammar.trivia),
-  ")",
-).pipe(
+const group = Grammar.wrap("(", Grammar.wrap(Grammar.trivia, query, Grammar.trivia), ")").pipe(
   Grammar.decodeTo(GroupSchema)({
     decode: (inner) => ({ kind: "group", inner }),
     encode: (g) => g.inner,

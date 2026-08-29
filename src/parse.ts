@@ -1,18 +1,16 @@
-import { Option, Result } from "effect"
+import { Result } from "effect"
 
 import {
-  assertClosed,
-  freeScopesOf,
   type Grammar,
   type GrammarInternal,
   nodeOf,
   resolve,
-  type ScopeId,
+  unsafeToNever,
   type Value,
 } from "./core.ts"
-import { bind, caseFor, evaluate, frame, type Frame, isCount, materialize } from "./env.ts"
+import { bind, caseFor, evaluate, type Frame, frame, isCount, materialize, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
-import { describe, render } from "./render.ts"
+import { describe } from "./render.ts"
 
 interface State {
   readonly input: string
@@ -22,11 +20,6 @@ interface State {
 }
 
 const Fail = Symbol("effect-grammar/ParseFail")
-
-const unsafeToNever = (value: Value): never => {
-  // SAFETY: erased Node callbacks accept the runtime value produced for that node.
-  return value as never
-}
 
 const failAt = (state: State, expected: string): typeof Fail => {
   if (state.pos > state.furthest) {
@@ -38,42 +31,24 @@ const failAt = (state: State, expected: string): typeof Fail => {
   return Fail
 }
 
-const hasScope = (env: Frame | undefined, scope: ScopeId): boolean => {
-  for (let current = env; current !== undefined; current = current.parent) {
-    if (current.scope === scope) return true
-  }
-  return false
-}
-
-const refsAvailable = (grammar: GrammarInternal, env: Frame | undefined): boolean => {
-  for (const scope of freeScopesOf(grammar)) if (!hasScope(env, scope)) return false
-  return true
-}
-
 const go = (
   grammar: GrammarInternal,
   state: State,
   env: Frame | undefined,
 ): Value | typeof Fail => {
-  if (!refsAvailable(grammar, env)) return failAt(state, "a grammar without unresolved refs")
-
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal": {
-      let offset = 0
-      while (
-        offset < node.value.length &&
-        state.pos + offset < state.input.length &&
-        state.input[state.pos + offset] === node.value[offset]
-      ) {
-        offset++
+      if (state.input.startsWith(node.value, state.pos)) {
+        state.pos += node.value.length
+        return undefined
       }
-      if (offset !== node.value.length) {
-        state.pos += offset
-        return failAt(state, JSON.stringify(node.value))
-      }
-      state.pos += node.value.length
-      return undefined
+      // Failure path only: report at the first mismatching character.
+      const end = state.pos + node.value.length
+      let current = state.pos
+      while (current < end && state.input[current] === node.value[current - state.pos]) current++
+      state.pos = current
+      return failAt(state, JSON.stringify(node.value))
     }
     case "Regex": {
       node.re.lastIndex = state.pos
@@ -90,7 +65,7 @@ const go = (
         if (step._tag === "Bind") bind(local, step.slot, value)
       }
       const value = materialize(node.result, local)
-      return Option.isNone(value) ? failAt(state, "a bound generator result") : value.value
+      return value === Unbound ? failAt(state, "a bound generator result") : value
     }
     case "Wrap": {
       if (go(node.open, state, env) === Fail) return Fail
@@ -134,22 +109,6 @@ const go = (
       if (value === Fail) return Fail
       try {
         const decoded = node.decode(unsafeToNever(value))
-        if (node.is?.(unsafeToNever(decoded)) === false) {
-          state.pos = start
-          return failAt(state, node.name ?? describe(node.inner))
-        }
-        return decoded
-      } catch (error) {
-        state.pos = start
-        return failAt(state, `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`)
-      }
-    }
-    case "TransformOrFail": {
-      const start = state.pos
-      const value = go(node.inner, state, env)
-      if (value === Fail) return Fail
-      try {
-        const decoded = node.decode(unsafeToNever(value))
         if (Result.isFailure(decoded)) {
           state.pos = start
           return failAt(state, decoded.failure.message)
@@ -179,39 +138,28 @@ const go = (
       return go(resolve(node), state, env)
     case "Match": {
       const key = evaluate(node.scrutinee, env)
-      if (Option.isNone(key)) return failAt(state, "a bound match ref")
-      const matchCase = caseFor(node.cases, key.value)
-      if (matchCase === undefined) return failAt(state, `a match case for ${preview(key.value)}`)
+      if (key === Unbound) return failAt(state, "a bound match ref")
+      const matchCase = caseFor(node.cases, key)
+      if (matchCase === undefined) return failAt(state, `a match case for ${preview(key)}`)
       return go(matchCase.grammar, state, env)
-    }
-    case "Dependent": {
-      const values = Option.all(node.deps.map((dep) => evaluate(dep, env)))
-      if (Option.isNone(values)) return failAt(state, "bound dependency refs")
-      try {
-        const chosen = node.select(values.value.map(unsafeToNever))
-        if (chosen !== undefined) return go(chosen, state, env)
-        return failAt(state, node.show(values.value.map(preview), render))
-      } catch (error) {
-        return failAt(state, `dependent: ${exceptionMessage(error)}`)
-      }
     }
     case "Take": {
       const count = evaluate(node.count, env)
-      if (Option.isNone(count)) return failAt(state, "a bound take count")
-      if (!isCount(count.value)) return failAt(state, `<char>{${preview(count.value)}}`)
-      if (state.input.length - state.pos < count.value) {
-        return failAt(state, `${count.value} chars`)
+      if (count === Unbound) return failAt(state, "a bound take count")
+      if (!isCount(count)) return failAt(state, `<char>{${preview(count)}}`)
+      if (state.input.length - state.pos < count) {
+        return failAt(state, `${count} chars`)
       }
-      const value = state.input.slice(state.pos, state.pos + count.value)
-      state.pos += count.value
+      const value = state.input.slice(state.pos, state.pos + count)
+      state.pos += count
       return value
     }
     case "RepeatExact": {
       const count = evaluate(node.count, env)
-      if (Option.isNone(count)) return failAt(state, "a bound repeat count")
-      if (!isCount(count.value)) return failAt(state, `a non-negative repeat count`)
+      if (count === Unbound) return failAt(state, "a bound repeat count")
+      if (!isCount(count)) return failAt(state, `a non-negative repeat count`)
       const values: Array<Value> = []
-      for (let index = 0; index < count.value; index++) {
+      for (let index = 0; index < count; index++) {
         const mark = state.pos
         const value = go(node.inner, state, env)
         if (value === Fail) return Fail
@@ -225,18 +173,17 @@ const go = (
 
 const toError = (state: State): ParseError => {
   const before = state.input.slice(0, state.furthest)
-  const found = state.input.slice(state.furthest)[Symbol.iterator]().next()
+  const code = state.input.codePointAt(state.furthest)
   return new ParseError({
     pos: state.furthest,
     line: before.split("\n").length,
     column: before.length - before.lastIndexOf("\n"),
     expected: [...state.expected],
-    found: found.done ? undefined : found.value,
+    found: code === undefined ? undefined : String.fromCodePoint(code),
   })
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
-  assertClosed(grammar, "parse")
   const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
   const value = go(grammar, state, undefined)
   if (value !== Fail && state.pos === input.length) {

@@ -1,7 +1,6 @@
-import { Predicate, Result } from "effect"
+import { Predicate } from "effect"
 
 import {
-  assertClosed,
   type Bounds,
   type Expr,
   type GrammarInternal,
@@ -12,7 +11,7 @@ import {
   type ScopeId,
   type Step,
 } from "./core.ts"
-import { preview, UnsupportedGrammar } from "./errors.ts"
+import { preview } from "./errors.ts"
 
 const ChoicePrecedence = 1
 const SequencePrecedence = 2
@@ -146,7 +145,6 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
     case "Optional":
       return { precedence: PostfixPrecedence, text: `(${show(node.inner, context).text})?` }
     case "Transform":
-    case "TransformOrFail":
     case "Label":
       return show(node.inner, context)
     case "Skip":
@@ -169,13 +167,6 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
         text: `match(${showExpr(node.scrutinee, context)}){${cases.join(" | ")}}`,
       }
     }
-    case "Dependent": {
-      const text = node.show(
-        node.deps.map((dep) => showExpr(dep, context)),
-        (inner) => show(inner, context).text,
-      )
-      return { precedence: AtomPrecedence, text }
-    }
     case "Take":
       return { precedence: AtomPrecedence, text: `<char>{${showExpr(node.count, context)}}` }
     case "RepeatExact":
@@ -192,79 +183,13 @@ const context = (includeBindings: boolean): Context => ({
   includeBindings,
 })
 
-export const renderInternal = (grammar: GrammarInternal): string =>
+export const render = (grammar: GrammarInternal): string =>
   parenthesize(show(grammar, context(true)), SequencePrecedence)
-
-export const render = (grammar: GrammarInternal): string => {
-  assertClosed(grammar, "render")
-  return renderInternal(grammar)
-}
 
 export const describe = (grammar: GrammarInternal): string => {
   const node = nodeOf(grammar)
-  return node._tag === "Regex" || node._tag === "Label" ? node.name : renderInternal(grammar)
+  return node._tag === "Regex" || node._tag === "Label" ? node.name : render(grammar)
 }
 
 export const describeStep = (step: Step, index: number): string =>
   `step ${index + 1} (${describe(step.grammar)})`
-
-const unsupported = (grammar: GrammarInternal, seen: Set<Node>): string | undefined => {
-  const node = nodeOf(grammar)
-  if (seen.has(node)) return undefined
-  seen.add(node)
-
-  let reason: string | undefined
-  switch (node._tag) {
-    case "Match":
-    case "Dependent":
-    case "Take":
-    case "RepeatExact":
-      reason = `${node._tag} is context-dependent and cannot be represented as EBNF`
-      break
-    case "Gen":
-      for (const step of node.steps) {
-        reason = unsupported(step.grammar, seen)
-        if (reason !== undefined) break
-      }
-      break
-    case "Wrap":
-      reason =
-        unsupported(node.open, seen) ??
-        unsupported(node.inner, seen) ??
-        unsupported(node.close, seen)
-      break
-    case "Choice":
-      for (const option of node.options) {
-        reason = unsupported(option, seen)
-        if (reason !== undefined) break
-      }
-      break
-    case "Many":
-      reason = unsupported(node.inner, seen) ?? unsupported(node.sep, seen)
-      break
-    case "Optional":
-    case "Transform":
-    case "TransformOrFail":
-    case "Skip":
-    case "Label":
-      reason = unsupported(node.inner, seen)
-      break
-    case "Suspend":
-      reason = unsupported(resolve(node), seen)
-      break
-    case "Literal":
-    case "Regex":
-      break
-  }
-
-  seen.delete(node)
-  return reason
-}
-
-export const toEBNF = (grammar: GrammarInternal): Result.Result<string, UnsupportedGrammar> => {
-  assertClosed(grammar, "toEBNF")
-  const reason = unsupported(grammar, new Set())
-  return reason === undefined
-    ? Result.succeed(parenthesize(show(grammar, context(false)), SequencePrecedence))
-    : Result.fail(new UnsupportedGrammar({ reason }))
-}

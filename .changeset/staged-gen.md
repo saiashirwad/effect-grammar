@@ -14,12 +14,12 @@ Breaking:
   step; `gen` throws otherwise.
 - JavaScript control flow on a parsed value (`if (kind === "num")`) no longer
   works, since there is no value yet. Use `match`, `when`, `matchValue`, or
-  `caseOf`. A property of a ref (`header.kind`) is a ref to that property;
-  `get` handles reserved property names.
+  `caseOf`. A property of a ref (`header.kind`) is a ref to that property; `get`
+  handles reserved property names.
 - `Grammar<A>` is invariant. The interpreter AST and `.node` are no longer
   public.
-- `lexeme` consumes trailing trivia and prints none. Use `space` or `spaces`
-  for canonical spacing. `whitespace` is replaced by `trivia`.
+- `lexeme` consumes trailing trivia and prints none. Use `space` or `spaces` for
+  canonical spacing. `whitespace` is replaced by `trivia`.
 - `seq` takes silent grammars only. `Field`, `Fields`, and `Part` are removed.
 
 Added lexical refs, transitive recovery, direct `take` and exact-repeat nodes,

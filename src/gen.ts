@@ -19,7 +19,6 @@ import {
   silent,
   type Step,
 } from "./core.ts"
-import { recoverableRefs } from "./recovery.ts"
 import { describeStep } from "./render.ts"
 
 export type GenGrammar<R> = [R] extends [void] ? Silent : Grammar<Denote<R>>
@@ -55,19 +54,20 @@ const entryOf = (ref: RefBase<unknown>): RefEntry => {
   return entry
 }
 
+const refHandler: ProxyHandler<RefImpl<unknown>> = {
+  get(_target, key, receiver) {
+    if (key === RefTypeId) return RefTypeId
+    if (key === Symbol.toPrimitive) return escaped
+    if (key === "then" || key === "toJSON") return undefined
+    if (key === "valueOf" || key === "toString") return escaped
+    if (!Predicate.isString(key)) return undefined
+    const entry = entryOf(receiver)
+    return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
+  },
+}
+
 const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
-  const target = new RefImpl<A>()
-  const ref = new Proxy(target, {
-    get(_target, key, receiver) {
-      if (key === RefTypeId) return RefTypeId
-      if (key === Symbol.toPrimitive) return escaped
-      if (key === "then" || key === "toJSON") return undefined
-      if (key === "valueOf" || key === "toString") return escaped
-      if (!Predicate.isString(key)) return undefined
-      const entry = entryOf(receiver)
-      return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
-    },
-  })
+  const ref = new Proxy(new RefImpl<A>(), refHandler)
   refs.set(ref, { expr, scope })
   // SAFETY: refFor creates a proxy that implements the Ref interface for A.
   return ref as Ref<A>
@@ -204,17 +204,8 @@ const validate = (scope: ScopeId, steps: ReadonlyArray<Step>, result: Pattern): 
   }
   collect(result)
 
-  const known = new Set(returned)
-  for (let index = steps.length - 1; index >= 0; index--) {
-    const step = steps[index]
-    if (step?._tag !== "Bind" || !known.has(step.slot)) continue
-    for (const ref of recoverableRefs(step.grammar)) {
-      if (ref.scope === scope) known.add(ref.slot)
-    }
-  }
-
   for (const [slot, where] of binds) {
-    if (!known.has(slot)) {
+    if (!returned.has(slot)) {
       throw new Error(
         `gen: ${where()} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
       )

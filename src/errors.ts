@@ -17,15 +17,6 @@ export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   }
 }
 
-export class UnsupportedGrammar extends Schema.TaggedError<UnsupportedGrammar>()(
-  "UnsupportedGrammar",
-  { reason: Schema.String },
-) {
-  override get message(): string {
-    return this.reason
-  }
-}
-
 export type PrintIssue =
   | {
       readonly _tag: "TypeMismatch"
@@ -79,7 +70,7 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
         ? `.${issue.field}: missing field`
         : `${pathText(path)}: missing field`
     case "MissingBinding":
-      return `${prefix}${issue.binding} is not in the value and no later step recovers it`
+      return `${prefix}${issue.binding} is not in the value`
     case "InvalidValue":
       return issue.detail === undefined
         ? `${prefix}expected ${issue.expected}, got ${preview(issue.actual)}`

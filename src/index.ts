@@ -1,20 +1,12 @@
-export {
-  ParseError,
-  PrintError,
-  type PrintIssue,
-  UnsupportedGrammar,
-} from "./errors.ts"
+export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
 export type { Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
 export {
   as,
   between,
-  caseOf,
   choice,
   decodeTo,
   type DecodeToOptions,
   defaulted,
-  dependent,
-  type DependentOptions,
   empty,
   flag,
   gen,
@@ -29,7 +21,6 @@ export {
   matchValue,
   optional,
   prefix,
-  type RefValues,
   regex,
   repeat,
   type RepeatOptions,
@@ -50,10 +41,9 @@ export {
   type TransformOrFailOptions,
   trivia,
   tuple,
-  when,
   wrap,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
 export { print } from "./print.ts"
-export { describe, render, toEBNF } from "./render.ts"
+export { describe, render } from "./render.ts"
 export { toSchema } from "./schema.ts"

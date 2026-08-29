@@ -89,18 +89,17 @@ print. To parse something and drop it, `skip` it: the grammar then prints its
 canonical form.
 
 A ref is not a value, so JavaScript cannot look at it. `kind === "num"` is a
-type error and interpolating a ref throws. Use `defaulted` for omitted values
-and `match` for finite string literals. Use `when` for booleans, `matchValue`
-for number or mixed literal keys, and `caseOf` for a partial runtime table.
-Keys in `matchValue` retain their type, so `1` and `"1"` are distinct.
+type error and interpolating a ref throws. Use `defaulted` for omitted values,
+`match` for finite string literals, and `matchValue` for number or mixed literal
+keys. Keys in `matchValue` retain their type, so `1` and `"1"` are distinct.
 
 Property access is convenient for ordinary names. `get(ref, key)` also handles
 reserved names such as `then`, `toJSON`, and `valueOf`.
 
 ## Depending on an earlier part
 
-`match` picks a grammar from an exhaustive finite string union. The printer
-runs the same choice backwards.
+`match` picks a grammar from an exhaustive finite string union. The printer runs
+the same choice backwards.
 
 ```ts
 const tagged = Grammar.gen(function* () {
@@ -133,8 +132,8 @@ const frame = Grammar.gen(function* () {
 ```
 
 `take(n)` reads exactly `n` UTF-16 code units and `repeat(g, n)` exactly `n`
-repetitions. Both recover `n` from the value when printing, so the count need
-not be returned. A netstring is:
+repetitions. The count is a value like any other: it must be returned, and
+printing reads it back. A netstring is:
 
 ```ts
 const netstring = Grammar.gen(function* () {
@@ -142,18 +141,14 @@ const netstring = Grammar.gen(function* () {
   yield* Grammar.literal(":")
   const payload = yield* Grammar.take(length)
   yield* Grammar.literal(",")
-  return payload
+  return { length, payload }
 })
-// "5:hello," ⇄ "hello"
+// "5:hello," ⇄ { length: 5, payload: "hello" }
 ```
 
-A `match` whose scrutinee is not returned recovers it by trying each case in
-order. Recovery continues through earlier recovered bindings until it reaches a
-fixed point. Candidate assignments are isolated until the whole printer path
-succeeds.
-
-`dependent(refs, select, { recover, show })` handles other context-sensitive
-grammars. `seq(...silents)` builds a silent sequence.
+A value a grammar cannot print — a missing field, a count that is not in the
+value — fails `print` with a structured error naming the exact path.
+`seq(...silents)` builds a silent sequence.
 
 ## The Schema
 
@@ -187,10 +182,11 @@ either direction can reject:
 ```ts
 const jsonString = Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
   Grammar.transformOrFail({
-    decode: (text) => Result.try({
-      try: () => JSON.parse(text),
-      catch: (error) => ({ message: String(error) }),
-    }),
+    decode: (text) =>
+      Result.try({
+        try: () => JSON.parse(text),
+        catch: (error) => ({ message: String(error) }),
+      }),
     encode: (value) => Result.succeed(JSON.stringify(value)),
   }),
 )
@@ -259,9 +255,7 @@ whitespace characters and prints one canonical space.
 ## Rendering
 
 `describe` returns a short name. `render` walks the static grammar and includes
-binding paths. Recovered refs use local deterministic names such as `$0`.
-`toEBNF` returns `Result.fail(UnsupportedGrammar)` for context-sensitive nodes
-instead of presenting them as context-free syntax.
+binding paths.
 
 The interpreter AST is private. Public grammars expose only the stable
 `Grammar<A>`, `Ref<A>`, and combinator APIs.

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 
-import { Result } from "effect"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
@@ -71,12 +70,9 @@ describe("trivia APIs", () => {
     assert.equal(printOk(canonical, 4), " 4 ")
   })
 
-  it("renders context-free grammars as EBNF", () => {
+  it("renders context-free grammars", () => {
     const grammar = Grammar.tuple(word, Grammar.integer.pipe(Grammar.prefix(":")))
-    const rendered = Grammar.toEBNF(grammar)
-
-    assert.ok(Result.isSuccess(rendered))
-    if (Result.isSuccess(rendered)) assert.equal(rendered.success, '<word> ":" <integer>')
+    assert.equal(Grammar.render(grammar), '0:<word> 1:(":" <integer>)')
     assert.equal(Grammar.describe(word), "word")
   })
 })

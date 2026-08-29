@@ -1,13 +1,23 @@
-import { Pipeable, Predicate, type Result, type Types, Utils } from "effect"
+import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const SilentTypeId: unique symbol = Symbol.for("effect-grammar/Silent")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
-const FreeScopesTypeId: unique symbol = Symbol("effect-grammar/FreeScopes")
 export const RefTypeId: unique symbol = Symbol.for("effect-grammar/Ref")
 
 /** Every JavaScript value; `{}` is TypeScript's non-nullish top type. */
 export type Value = {} | null | undefined
+
+/**
+ * Bridges an erased node callback with the runtime value produced for that
+ * node. Node callbacks are stored as `never`-argument functions so the
+ * public combinator types stay precise; this is the single choke point where
+ * the runtime value is passed to them.
+ */
+export const unsafeToNever = (value: Value): never => {
+  // SAFETY: erased Node callbacks accept the runtime value produced for that node.
+  return value as never
+}
 
 export interface ScopeId {
   readonly _tag: "ScopeId"
@@ -42,7 +52,6 @@ export interface GrammarIssue {
 
 export interface GrammarInternal extends Pipeable.Pipeable {
   readonly [NodeTypeId]: Node
-  readonly [FreeScopesTypeId]: ReadonlySet<ScopeId>
 }
 
 export interface Case {
@@ -76,14 +85,6 @@ export type Node =
   | {
       readonly _tag: "Transform"
       readonly inner: GrammarInternal
-      readonly decode: (a: never) => Value
-      readonly encode: (b: never) => Value
-      readonly is?: ((value: never) => boolean) | undefined
-      readonly name?: string | undefined
-    }
-  | {
-      readonly _tag: "TransformOrFail"
-      readonly inner: GrammarInternal
       readonly decode: (a: never) => Result.Result<Value, GrammarIssue>
       readonly encode: (b: never) => Result.Result<Value, GrammarIssue>
       readonly is?: ((value: never) => boolean) | undefined
@@ -103,16 +104,6 @@ export type Node =
       resolved?: GrammarInternal | undefined
     }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | {
-      readonly _tag: "Dependent"
-      readonly deps: ReadonlyArray<Expr>
-      readonly select: (values: ReadonlyArray<never>) => GrammarInternal | undefined
-      readonly recover: ((value: never) => ReadonlyArray<Value> | undefined) | undefined
-      readonly show: (
-        deps: ReadonlyArray<string>,
-        render: <A>(grammar: Grammar<A>) => string,
-      ) => string
-    }
   | { readonly _tag: "Take"; readonly count: Expr }
   | { readonly _tag: "RepeatExact"; readonly count: Expr; readonly inner: GrammarInternal }
 
@@ -157,11 +148,9 @@ export type Type<G> = G extends Grammar<infer A> ? A : never
 class GrammarImpl<A> implements Grammar<A> {
   declare readonly [GrammarTypeId]: Types.Invariant<A>
   readonly [NodeTypeId]: Node
-  readonly [FreeScopesTypeId]: ReadonlySet<ScopeId>
 
-  constructor(node: Node, freeScopes: ReadonlySet<ScopeId>) {
+  constructor(node: Node) {
     this[NodeTypeId] = node
-    this[FreeScopesTypeId] = freeScopes
   }
 
   pipe() {
@@ -181,102 +170,17 @@ class SilentImpl extends GrammarImpl<void> implements Silent {
 
 Object.defineProperty(SilentImpl.prototype, SilentTypeId, { value: true })
 
-const addExprScopes = (target: Set<ScopeId>, expr: Expr): void => {
-  if (expr._tag === "Ref") {
-    target.add(expr.scope)
-    return
-  }
-  addExprScopes(target, expr.object)
-}
-
-const addPatternScopes = (target: Set<ScopeId>, pattern: Pattern): void => {
-  switch (pattern._tag) {
-    case "Ref":
-      target.add(pattern.scope)
-      return
-    case "Const":
-      return
-    case "Object":
-      for (const [, field] of pattern.fields) addPatternScopes(target, field)
-      return
-    case "Array":
-      for (const item of pattern.items) addPatternScopes(target, item)
-  }
-}
-
-const addGrammarScopes = (target: Set<ScopeId>, grammar: GrammarInternal): void => {
-  for (const scope of freeScopesOf(grammar)) target.add(scope)
-}
-
-const scopesInNode = (node: Node): ReadonlySet<ScopeId> => {
-  const scopes = new Set<ScopeId>()
-  switch (node._tag) {
-    case "Literal":
-    case "Regex":
-    case "Suspend":
-      break
-    case "Gen":
-      for (const step of node.steps) addGrammarScopes(scopes, step.grammar)
-      addPatternScopes(scopes, node.result)
-      scopes.delete(node.scope)
-      break
-    case "Wrap":
-      addGrammarScopes(scopes, node.open)
-      addGrammarScopes(scopes, node.inner)
-      addGrammarScopes(scopes, node.close)
-      break
-    case "Choice":
-      for (const option of node.options) addGrammarScopes(scopes, option)
-      break
-    case "Many":
-      addGrammarScopes(scopes, node.inner)
-      addGrammarScopes(scopes, node.sep)
-      break
-    case "Optional":
-    case "Transform":
-    case "TransformOrFail":
-    case "Skip":
-    case "Label":
-      addGrammarScopes(scopes, node.inner)
-      break
-    case "Match":
-      addExprScopes(scopes, node.scrutinee)
-      for (const matchCase of node.cases) addGrammarScopes(scopes, matchCase.grammar)
-      break
-    case "Dependent":
-      for (const dep of node.deps) addExprScopes(scopes, dep)
-      break
-    case "Take":
-      addExprScopes(scopes, node.count)
-      break
-    case "RepeatExact":
-      addExprScopes(scopes, node.count)
-      addGrammarScopes(scopes, node.inner)
-      break
-  }
-  return scopes
-}
-
 export const nodeOf = (grammar: GrammarInternal): Node => grammar[NodeTypeId]
 
-export const freeScopesOf = (grammar: GrammarInternal): ReadonlySet<ScopeId> =>
-  grammar[FreeScopesTypeId]
+export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
 
-export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node, scopesInNode(node))
-
-export const silent = (node: Node): Silent => new SilentImpl(node, scopesInNode(node))
+export const silent = (node: Node): Silent => new SilentImpl(node)
 
 export const isGrammar = <T>(value: T): value is T & GrammarInternal =>
   Predicate.hasProperty(value, GrammarTypeId)
 
 export const isSilent = (grammar: GrammarInternal): grammar is Silent =>
   Predicate.hasProperty(grammar, SilentTypeId)
-
-export const assertClosed = (grammar: GrammarInternal, where: string): void => {
-  if (freeScopesOf(grammar).size !== 0) {
-    throw new TypeError(`${where}: grammar contains an unresolved ref from a surrounding gen`)
-  }
-}
 
 export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal =>
   (node.resolved ??= node.thunk())
