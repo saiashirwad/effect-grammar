@@ -8,25 +8,22 @@ expressions, search queries, or DSLs.
 
 You write the grammar definition once. You get four outputs:
 
-- **A Parser**: Reads text and outputs structured data with line and column
+- **A parser.** Reads text and outputs structured data, with line and column
   error messages.
-- **A Printer**: Converts structured data back to canonical text.
-- **A `Schema.Codec<A, string>`**: Integrates directly with Effect Schema
-  (`decode` parses, `encode` prints, and Schema refinements compose).
-- **A Text Renderer**: Formats the grammar as readable text for documentation
+- **A printer.** Converts structured data back to canonical text.
+- **A `Schema.Codec<A, string>`.** Decoding parses, encoding prints, and Schema
+  refinements compose.
+- **A text renderer.** Formats the grammar as readable text, for documentation
   and schema descriptions.
 
 ## Why effect-grammar?
 
-- **`Schema.transformOrFail`**: Requires you to write and maintain both `decode`
-  and `encode` functions manually.
-- **`Schema.TemplateLiteralParser`**: Supports only flat `${a}-${b}` string
-  patterns.
-- **`effect-grammar`**: Automatically derives the parser and printer for formats
-  with optional parts, repetition, alternation, recursion, and parts that depend
-  on earlier parts.
+`Schema.transformOrFail` makes you write and maintain both directions by hand.
+`Schema.TemplateLiteralParser` only handles flat `${a}-${b}` patterns.
+`effect-grammar` derives both directions for you. It handles optional parts,
+repetition, alternation, recursion, and parts that depend on earlier parts.
 
-This is for format strings, not documents. The parser backtracks with no
+This is for format strings, not documents. The parser backtracks. There is no
 memoization and no left recursion. Printing is canonical, not pretty.
 
 ## Install
@@ -40,7 +37,6 @@ Requires Effect `4.0.0-rc.112` or newer in the Effect 4 line.
 ## A grammar
 
 ```ts
-import { Result, Schema } from "effect"
 import * as Grammar from "effect-grammar"
 
 const endpoint = Grammar.gen(function* () {
@@ -52,24 +48,29 @@ const endpoint = Grammar.gen(function* () {
 
 Grammar.parse(endpoint, "https://effect.website:8080")
 // Result.succeed({ host: "effect.website", port: 8080 })
+
 Grammar.parse(endpoint, "https://effect.website:abc")
 // Result.fail(ParseError: line 1, column 24: expected integer, found "a")
+
 Grammar.print(endpoint, { host: "effect.website", port: 443 })
 // Result.succeed("https://effect.website:443")
+
 Grammar.render(endpoint)
 // "https://" host:<host> port:(":" <integer>)?
 ```
 
 `gen` runs the generator once, when you build the grammar. Nothing is parsed
-yet, so `yield*` on a value grammar does not return a value. It returns a
-`Ref<A>`: a name for the value that will be there at parse and print time. A
-silent grammar (`literal`, `symbol`, `trivia`, anything under `skip`) carries no
-value and returns nothing.
+yet.
 
-The generator's return is a pattern over those refs: a bare ref, a plain object,
-an array, or constants around them. Parsing fills the pattern in. Printing reads
-each ref back out of the value you give it. That is what makes the grammar
-invertible without a `field` name for every part.
+Inside the generator, `yield*` on a value grammar does not give you a value. It
+gives you a `Ref<A>`: a stand-in for the value that will exist at parse and
+print time. `yield*` on a silent grammar, such as `literal` or `symbol`, gives
+nothing back. Silent grammars carry no value.
+
+The generator's return value is a pattern over those refs. It can be a bare ref,
+an object, an array, or constants around them. Parsing fills the pattern in.
+Printing reads each ref back out of the value you hand it. That is what makes
+the grammar invertible.
 
 ```ts
 const nested = Grammar.gen(function* () {
@@ -81,25 +82,29 @@ const nested = Grammar.gen(function* () {
 // Grammar<{ kind: "endpoint"; address: { host: string; port: number } }>
 ```
 
-Write `as const` for a tuple or a literal, as you would anywhere else.
+## The one rule
 
-Every binding must appear in the return exactly once, or `gen` throws when you
-build it. A binding the return does not hold is a value the printer could not
-print. To parse something and drop it, `skip` it: the grammar then prints its
-canonical form.
+Every binding must appear in the return pattern exactly once. `gen` throws at
+build time if one does not. A binding the return does not hold is a value the
+printer could not print.
 
-A ref is not a value, so JavaScript cannot look at it. `kind === "num"` is a
-type error and interpolating a ref throws. Use `defaulted` for omitted values,
-`match` for finite string literals, and `matchValue` for number or mixed literal
-keys. Keys in `matchValue` retain their type, so `1` and `"1"` are distinct.
+To parse something and then drop it, wrap it with `skip`. The grammar prints its
+canonical form instead.
 
-Property access is convenient for ordinary names. `get(ref, key)` also handles
-reserved names such as `then`, `toJSON`, and `valueOf`.
+## Refs are not values
+
+A ref is a stand-in, so JavaScript cannot look inside it. Comparing a ref with
+`===` is a type error. Interpolating one into a string throws.
+
+Branching on a ref is `match`, described below. For everything else there are
+small helpers: `defaulted` supplies a value when a part is absent.
+`get(ref, key)` reads a property of a ref, including reserved names such as
+`then` and `toJSON`.
 
 ## Depending on an earlier part
 
-`match` picks a grammar from an exhaustive finite string union. The printer runs
-the same choice backwards.
+`match` picks a grammar based on an earlier binding. The printer runs the same
+choice backwards.
 
 ```ts
 const tagged = Grammar.gen(function* () {
@@ -113,26 +118,30 @@ const tagged = Grammar.gen(function* () {
   })
   return { kind, value }
 })
-// n:12 → { kind: "num", value: 12 }
+// parses "n:12"  →  { kind: "num", value: 12 }
 ```
 
-A property of a ref is a ref to that property, so a header parsed by one grammar
-can steer the body in another:
+`match` requires the cases to cover every literal of the selector's type.
+`matchValue` is the same idea with number or mixed literal keys. Keys keep their
+type, so `1` and `"1"` are distinct cases.
+
+A property of a ref is a ref to that property. A header parsed by one grammar
+can steer the body of another:
 
 ```ts
 const frame = Grammar.gen(function* () {
-  const header = yield* headerGrammar // Ref<{ kind: "text" | "bin"; size: number }>
+  const header = yield* headerGrammar // { kind: "text" | "bin"; size: number }
   yield* Grammar.literal(":")
   const body = yield* Grammar.match(header.kind, {
     text: Grammar.take(header.size),
-    bin: Grammar.repeat(byte, header.size),
+    bin: Grammar.repeat(Grammar.regex(/[01]/, "bit"), header.size),
   })
   return { header, body }
 })
 ```
 
-`take(n)` reads exactly `n` UTF-16 code units and `repeat(g, n)` exactly `n`
-repetitions. The count is a value like any other: it must be returned, and
+`take(n)` reads exactly `n` characters (UTF-16 code units). `repeat(g, n)` reads
+exactly `n` repetitions. The count is a value like any other: return it, and
 printing reads it back. A netstring is:
 
 ```ts
@@ -143,41 +152,16 @@ const netstring = Grammar.gen(function* () {
   yield* Grammar.literal(",")
   return { length, payload }
 })
-// "5:hello," ⇄ { length: 5, payload: "hello" }
+// "5:hello,"  ⇄  { length: 5, payload: "hello" }
 ```
 
-A value a grammar cannot print — a missing field, a count that is not in the
-value — fails `print` with a structured error naming the exact path.
 `seq(...silents)` builds a silent sequence.
-
-## The Schema
-
-`toSchema` takes the grammar and the Schema it should decode to. Parsing happens
-first, then the target's refinements. Encoding prints.
-
-```ts
-const Endpoint = Grammar.toSchema(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.UndefinedOr(
-      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
-    ),
-  }),
-  { identifier: "Endpoint" },
-)
-
-Schema.decodeUnknownSync(Endpoint)("https://effect.website:443")
-// { host: "effect.website", port: 443 }
-Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
-// "https://effect.website:443"
-```
 
 ## Values and alternatives
 
-`transform` is for total partial isomorphisms. Its callbacks must not throw and
-must satisfy both directions on accepted values. Use `transformOrFail` when
-either direction can reject:
+`transform` maps between two types, in both directions. Write plain functions.
+If a callback throws, the grammar fails cleanly. Use `transformOrFail` when a
+direction should return a `Result` instead:
 
 ```ts
 const jsonString = Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
@@ -192,19 +176,20 @@ const jsonString = Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
 )
 ```
 
-`decodeTo` takes a Schema that types `decode` and `encode` and checks the value
-on parse and print. `as` turns a silent grammar into a constant. `flag` turns
-presence into a boolean.
+`decodeTo` checks the value against a Schema on parse and on print. `as` turns a
+silent grammar into a constant. `flag` turns presence into a boolean.
 
-General ordered `choice` has one round-trip law: text printed for a branch must
-not parse through an earlier branch as a different value. Use `taggedChoice`
-when the semantic result should record the chosen branch.
+`choice` tries its options in order and backtracks. It has one round-trip rule:
+the text printed for a branch must not parse as a different value through an
+earlier branch. `taggedChoice` records the chosen branch in the result.
 
 ```ts
 const value = Grammar.taggedChoice("kind", {
   number: Grammar.integer,
   word: Grammar.regex(/[a-z]+/, "word"),
 })
+// parses "12"      →  { kind: "number", value: 12 }
+// prints the same  →  "12"
 ```
 
 Recursion uses `suspend`:
@@ -224,13 +209,13 @@ const jsonValue: Grammar.Grammar<Json> = Grammar.suspend(
 )
 ```
 
-See `examples/` for JSON, Scheme, a Postgres DSN, netstrings, and GitHub's
-search syntax.
+See `examples/` for JSON, Scheme, a Postgres DSN, netstrings, a wire protocol,
+and GitHub's search syntax.
 
 ## Products, delimiters, and trivia
 
-`struct` and `tuple` build explicit products. Their staged form is the same
-static sequence and output pattern that `gen` builds.
+`struct` and `tuple` build products without a generator. Their staged form is
+the same as what `gen` builds.
 
 Delimiter combinators work data-first and data-last:
 
@@ -247,22 +232,24 @@ const pair = Grammar.tuple(
 )
 ```
 
-`between` is the primary two-sided delimiter. `wrap` is its compatibility name.
-`lexeme` consumes trailing `trivia` while printing no trivia. `symbol` is a
-literal lexeme. `space` is one exact space; `spaces` accepts one or more
-whitespace characters and prints one canonical space.
+`between` is the two-sided delimiter. `wrap` is another name for it. `lexeme`
+skips trailing whitespace after a token, and prints none. `symbol` is a literal
+lexeme. `space` is one exact space. `spaces` accepts one or more whitespace
+characters and prints one canonical space.
 
 ## Rendering
 
-`describe` returns a short name. `render` walks the static grammar and includes
-binding paths.
+`render` formats a grammar as readable text, including binding paths. `describe`
+returns a short name for a grammar.
 
-The interpreter AST is private. Public grammars expose only the stable
-`Grammar<A>`, `Ref<A>`, and combinator APIs.
+The interpreter AST is private. Public grammars expose only `Grammar<A>`,
+`Ref<A>`, and the combinators.
 
 ## Errors
 
-`choice` backtracks. Parse errors report the furthest position and every
-expected form there. Print errors carry a `PrintIssue` tree with structural
-paths, missing fields, branch failures, and mismatches. `PrintError.format`
-renders that tree.
+Parse errors report the furthest position reached, with every expected form at
+that position, plus line and column.
+
+Print errors carry a `PrintIssue` tree. It records structural paths, missing
+fields, branch failures, and value mismatches. `PrintError.format` renders the
+tree as text.
