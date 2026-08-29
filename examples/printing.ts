@@ -10,8 +10,6 @@ const show = <A>(label: string, result: Result.Result<A, { readonly message: str
     onFailure: (error) => `${label}\n  → ✗ ${error.message}`,
   })
 
-// The count is part of the value: parse reads it, print reads it back.
-
 const netstring = Grammar.gen(function* () {
   const length = yield* Grammar.integer
   yield* Grammar.literal(":")
@@ -19,9 +17,6 @@ const netstring = Grammar.gen(function* () {
   yield* Grammar.literal(",")
   return { length, payload }
 })
-
-// A parsed header steers the body grammar; printing re-runs the same dispatch
-// backwards from the value alone.
 
 const header = Grammar.gen(function* () {
   const kind = yield* Grammar.choice(
@@ -43,16 +38,12 @@ const frame = Grammar.gen(function* () {
   return { header: parsedHeader, body }
 })
 
-// Optional bindings print as nothing when absent.
-
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
   const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
   return { host, port }
 })
-
-// A gen of key/value pairs, lifted into a plain record both ways.
 
 const param = Grammar.gen(function* () {
   const key = yield* Grammar.regex(/[a-z]+/, "key")
