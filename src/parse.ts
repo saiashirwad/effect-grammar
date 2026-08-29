@@ -1,8 +1,17 @@
-import { Result } from "effect"
+import { Option, Result } from "effect"
 
-import { type Grammar, resolve, type Value } from "./core.ts"
-import { caseFor, child, type Env, evaluateOrThrow, materialize } from "./env.ts"
-import { ParseError, preview } from "./errors.ts"
+import {
+  assertClosed,
+  freeScopesOf,
+  type Grammar,
+  type GrammarInternal,
+  nodeOf,
+  resolve,
+  type ScopeId,
+  type Value,
+} from "./core.ts"
+import { bind, caseFor, evaluate, frame, type Frame, isCount, materialize } from "./env.ts"
+import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe, render } from "./render.ts"
 
 interface State {
@@ -12,133 +21,228 @@ interface State {
   expected: Set<string>
 }
 
-const FAIL = Symbol.for("effect-grammar/fail")
+const Fail = Symbol("effect-grammar/ParseFail")
 
-const failAt = (s: State, expected: string) => {
-  if (s.pos > s.furthest) {
-    s.furthest = s.pos
-    s.expected = new Set([expected])
-  } else if (s.pos === s.furthest) {
-    s.expected.add(expected)
-  }
-  return FAIL
+const unsafeToNever = (value: Value): never => {
+  // SAFETY: erased Node callbacks accept the runtime value produced for that node.
+  return value as never
 }
 
-const go = (g: Grammar<any>, s: State, env: Env | undefined): Value | typeof FAIL => {
-  const n = g.node
-  switch (n._tag) {
+const failAt = (state: State, expected: string): typeof Fail => {
+  if (state.pos > state.furthest) {
+    state.furthest = state.pos
+    state.expected = new Set([expected])
+  } else if (state.pos === state.furthest) {
+    state.expected.add(expected)
+  }
+  return Fail
+}
+
+const hasScope = (env: Frame | undefined, scope: ScopeId): boolean => {
+  for (let current = env; current !== undefined; current = current.parent) {
+    if (current.scope === scope) return true
+  }
+  return false
+}
+
+const refsAvailable = (grammar: GrammarInternal, env: Frame | undefined): boolean => {
+  for (const scope of freeScopesOf(grammar)) if (!hasScope(env, scope)) return false
+  return true
+}
+
+const go = (
+  grammar: GrammarInternal,
+  state: State,
+  env: Frame | undefined,
+): Value | typeof Fail => {
+  if (!refsAvailable(grammar, env)) return failAt(state, "a grammar without unresolved refs")
+
+  const node = nodeOf(grammar)
+  switch (node._tag) {
     case "Literal": {
-      if (!s.input.startsWith(n.value, s.pos)) return failAt(s, JSON.stringify(n.value))
-      s.pos += n.value.length
+      let offset = 0
+      while (
+        offset < node.value.length &&
+        state.pos + offset < state.input.length &&
+        state.input[state.pos + offset] === node.value[offset]
+      ) {
+        offset++
+      }
+      if (offset !== node.value.length) {
+        state.pos += offset
+        return failAt(state, JSON.stringify(node.value))
+      }
+      state.pos += node.value.length
       return undefined
     }
     case "Regex": {
-      n.re.lastIndex = s.pos
-      const m = n.re.exec(s.input)
-      if (m === null) return failAt(s, n.name)
-      s.pos += m[0].length
-      return m[0]
+      node.re.lastIndex = state.pos
+      const match = node.re.exec(state.input)
+      if (match === null) return failAt(state, node.name)
+      state.pos += match[0].length
+      return match[0]
     }
     case "Gen": {
-      const local = child(env)
-      for (const step of n.steps) {
-        const v = go(step.grammar, s, local)
-        if (v === FAIL) return FAIL
-        if (step._tag === "Bind") local.values.set(step.id, v)
+      const local = frame(node.scope, node.slotCount, env)
+      for (const step of node.steps) {
+        const value = go(step.grammar, state, local)
+        if (value === Fail) return Fail
+        if (step._tag === "Bind") bind(local, step.slot, value)
       }
-      return materialize(n.result, local)
+      const value = materialize(node.result, local)
+      return Option.isNone(value) ? failAt(state, "a bound generator result") : value.value
     }
     case "Wrap": {
-      if (go(n.open, s, env) === FAIL) return FAIL
-      const v = go(n.inner, s, env)
-      if (v === FAIL) return FAIL
-      return go(n.close, s, env) === FAIL ? FAIL : v
+      if (go(node.open, state, env) === Fail) return Fail
+      const value = go(node.inner, state, env)
+      if (value === Fail) return Fail
+      return go(node.close, state, env) === Fail ? Fail : value
     }
     case "Choice": {
-      const start = s.pos
-      for (const o of n.options) {
-        const v = go(o, s, env)
-        if (v !== FAIL) return v
-        s.pos = start
+      const start = state.pos
+      for (const option of node.options) {
+        const value = go(option, state, env)
+        if (value !== Fail) return value
+        state.pos = start
       }
-      return FAIL
+      return Fail
     }
     case "Many": {
-      const out: Array<Value> = []
-      let mark = s.pos
-      while (out.length < n.max) {
-        const v = go(n.inner, s, env)
-        if (v === FAIL) break
-        if (s.pos === mark) throw new Error("many: element matched without consuming input")
-        out.push(v)
-        mark = s.pos
-        if (go(n.sep, s, env) === FAIL) break
+      const values: Array<Value> = []
+      let mark = state.pos
+      while (values.length < node.max) {
+        const value = go(node.inner, state, env)
+        if (value === Fail) break
+        if (state.pos === mark) return failAt(state, "a repetition element that consumes input")
+        values.push(value)
+        mark = state.pos
+        if (go(node.sep, state, env) === Fail) break
       }
-      s.pos = mark
-      return out.length < n.min ? FAIL : out
+      state.pos = mark
+      return values.length < node.min ? Fail : values
     }
     case "Optional": {
-      const mark = s.pos
-      const v = go(n.inner, s, env)
-      if (v !== FAIL) return v
-      s.pos = mark
+      const mark = state.pos
+      const value = go(node.inner, state, env)
+      if (value !== Fail) return value
+      state.pos = mark
       return undefined
     }
     case "Transform": {
-      const start = s.pos
-      const v = go(n.inner, s, env)
-      if (v === FAIL) return FAIL
-      const b = n.decode(v)
-      if (n.is?.(b) === false) {
-        s.pos = start
-        return failAt(s, n.name ?? describe(n.inner))
+      const start = state.pos
+      const value = go(node.inner, state, env)
+      if (value === Fail) return Fail
+      try {
+        const decoded = node.decode(unsafeToNever(value))
+        if (node.is?.(unsafeToNever(decoded)) === false) {
+          state.pos = start
+          return failAt(state, node.name ?? describe(node.inner))
+        }
+        return decoded
+      } catch (error) {
+        state.pos = start
+        return failAt(state, `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`)
       }
-      return b
+    }
+    case "TransformOrFail": {
+      const start = state.pos
+      const value = go(node.inner, state, env)
+      if (value === Fail) return Fail
+      try {
+        const decoded = node.decode(unsafeToNever(value))
+        if (Result.isFailure(decoded)) {
+          state.pos = start
+          return failAt(state, decoded.failure.message)
+        }
+        if (node.is?.(unsafeToNever(decoded.success)) === false) {
+          state.pos = start
+          return failAt(state, node.name ?? describe(node.inner))
+        }
+        return decoded.success
+      } catch (error) {
+        state.pos = start
+        return failAt(state, `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`)
+      }
     }
     case "Skip":
-      return go(n.inner, s, env) === FAIL ? FAIL : undefined
+      return go(node.inner, state, env) === Fail ? Fail : undefined
     case "Label": {
-      const start = s.pos
-      const siblings = s.furthest === start ? [...s.expected] : []
-      const v = go(n.inner, s, env)
-      if (v === FAIL && s.furthest === start) s.expected = new Set([...siblings, n.name])
-      return v
+      const start = state.pos
+      const siblings = state.furthest === start ? [...state.expected] : []
+      const value = go(node.inner, state, env)
+      if (value === Fail && state.furthest === start) {
+        state.expected = new Set([...siblings, node.name])
+      }
+      return value
     }
     case "Suspend":
-      return go(resolve(n), s, env)
+      return go(resolve(node), state, env)
     case "Match": {
-      const k = evaluateOrThrow(n.scrutinee, env)
-      const c = caseFor(n.cases, k)
-      if (c === undefined) return failAt(s, `a match case for ${preview(k)}`)
-      return go(c.grammar, s, env)
+      const key = evaluate(node.scrutinee, env)
+      if (Option.isNone(key)) return failAt(state, "a bound match ref")
+      const matchCase = caseFor(node.cases, key.value)
+      if (matchCase === undefined) return failAt(state, `a match case for ${preview(key.value)}`)
+      return go(matchCase.grammar, state, env)
     }
     case "Dependent": {
-      const values = n.deps.map((d) => evaluateOrThrow(d, env))
-      const chosen = n.select(values)
-      if (chosen === undefined) return failAt(s, n.show(values.map(preview), render))
-      return go(chosen, s, env)
+      const values = Option.all(node.deps.map((dep) => evaluate(dep, env)))
+      if (Option.isNone(values)) return failAt(state, "bound dependency refs")
+      try {
+        const chosen = node.select(values.value.map(unsafeToNever))
+        if (chosen !== undefined) return go(chosen, state, env)
+        return failAt(state, node.show(values.value.map(preview), render))
+      } catch (error) {
+        return failAt(state, `dependent: ${exceptionMessage(error)}`)
+      }
+    }
+    case "Take": {
+      const count = evaluate(node.count, env)
+      if (Option.isNone(count)) return failAt(state, "a bound take count")
+      if (!isCount(count.value)) return failAt(state, `<char>{${preview(count.value)}}`)
+      if (state.input.length - state.pos < count.value) {
+        return failAt(state, `${count.value} chars`)
+      }
+      const value = state.input.slice(state.pos, state.pos + count.value)
+      state.pos += count.value
+      return value
+    }
+    case "RepeatExact": {
+      const count = evaluate(node.count, env)
+      if (Option.isNone(count)) return failAt(state, "a bound repeat count")
+      if (!isCount(count.value)) return failAt(state, `a non-negative repeat count`)
+      const values: Array<Value> = []
+      for (let index = 0; index < count.value; index++) {
+        const mark = state.pos
+        const value = go(node.inner, state, env)
+        if (value === Fail) return Fail
+        if (state.pos === mark) return failAt(state, "a repetition element that consumes input")
+        values.push(value)
+      }
+      return values
     }
   }
 }
 
-const toError = (s: State) => {
-  const before = s.input.slice(0, s.furthest)
+const toError = (state: State): ParseError => {
+  const before = state.input.slice(0, state.furthest)
+  const found = state.input.slice(state.furthest)[Symbol.iterator]().next()
   return new ParseError({
-    pos: s.furthest,
+    pos: state.furthest,
     line: before.split("\n").length,
     column: before.length - before.lastIndexOf("\n"),
-    expected: [...s.expected],
-    found: s.input[s.furthest],
+    expected: [...state.expected],
+    found: found.done ? undefined : found.value,
   })
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
-  const s: State = { input, pos: 0, furthest: 0, expected: new Set() }
-  const v = go(grammar, s, undefined)
-  if (v !== FAIL && s.pos === input.length) {
-    // SAFETY: go only returns the grammar's parsed value when it reaches the end successfully.
-    return Result.succeed(v as A)
+  assertClosed(grammar, "parse")
+  const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
+  const value = go(grammar, state, undefined)
+  if (value !== Fail && state.pos === input.length) {
+    // SAFETY: interpreting Grammar<A> preserves its output type across every node.
+    return Result.succeed(value as A)
   }
-  if (v !== FAIL) failAt(s, "end of input")
-  return Result.fail(toError(s))
+  if (value !== Fail) failAt(state, "end of input")
+  return Result.fail(toError(state))
 }

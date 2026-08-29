@@ -118,6 +118,28 @@ const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.wrap("<", G.symbol("b"),
 // @ts-expect-error
 const notSilent: G.Silent = G.choice(G.literal("a"), G.literal("b"))
 
+const wordGrammar = G.regex(/[a-z]+/, "word")
+// @ts-expect-error Grammar is invariant because printing consumes its value
+const widenedGrammar: G.Grammar<unknown> = wordGrammar
+// @ts-expect-error the interpreter node is private
+void wordGrammar.node
+
+// eslint-disable-next-line unicorn/no-thenable -- Verifies reserved then property typing.
+const reservedHeader = G.literal("h").pipe(G.as({ then: "a" as const }))
+G.gen(function* () {
+  const value = yield* reservedHeader
+  const body = yield* G.match(G.get(value, "then"), { a: G.integer })
+  return { value, body }
+})
+
+const mixedKind = G.choice(G.literal("n").pipe(G.as(1)), G.literal("s").pipe(G.as("1")))
+G.gen(function* () {
+  const kind = yield* mixedKind
+  // @ts-expect-error matchValue must cover every selector literal
+  const value = yield* G.matchValue(kind, [[1, G.integer]] as const)
+  return { kind, value }
+})
+
 void [
   ok,
   bad,
@@ -132,4 +154,5 @@ void [
   s,
   s2,
   notSilent,
+  widenedGrammar,
 ]

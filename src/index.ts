@@ -1,37 +1,32 @@
-export { ParseError, PrintError } from "./errors.ts"
-export type {
-  Bound,
-  Case,
-  Denote,
-  Expr,
-  Grammar,
-  Node,
-  Pattern,
-  Ref,
-  RefBase,
-  RefExpr,
-  Silent,
-  Step,
-  Type,
-  Value,
-} from "./core.ts"
+export {
+  ParseError,
+  PrintError,
+  type PrintIssue,
+  UnsupportedGrammar,
+} from "./errors.ts"
+export type { Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
 export {
   as,
+  between,
+  caseOf,
   choice,
   decodeTo,
   type DecodeToOptions,
+  defaulted,
   dependent,
   type DependentOptions,
   empty,
   flag,
   gen,
   type GenGrammar,
+  get,
   integer,
   label,
   lexeme,
   literal,
   many,
   match,
+  matchValue,
   optional,
   prefix,
   type RefValues,
@@ -41,16 +36,24 @@ export {
   sepBy,
   seq,
   skip,
+  space,
+  spaces,
+  struct,
   suffix,
   suspend,
   symbol,
+  taggedChoice,
   take,
   transform,
+  transformOrFail,
   type TransformOptions,
-  whitespace,
+  type TransformOrFailOptions,
+  trivia,
+  tuple,
+  when,
   wrap,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
 export { print } from "./print.ts"
-export { render } from "./render.ts"
+export { describe, render, toEBNF } from "./render.ts"
 export { toSchema } from "./schema.ts"

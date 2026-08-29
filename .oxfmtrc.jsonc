@@ -2,7 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "semi": false,
   "sortPackageJson": {},
-  "ignorePatterns": ["repos/**", "**/*.gen.ts"],
+  "ignorePatterns": [".repos/**", "tools/oxlint/anti-slop/**", "**/*.gen.ts"],
   "sortImports": {},
   "sortTailwindcss": { "functions": ["cn"] },
   "proseWrap": "always",

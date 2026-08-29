@@ -142,7 +142,7 @@ const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
 const group = Grammar.wrap(
   "(",
-  Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace),
+  Grammar.wrap(Grammar.trivia, query, Grammar.trivia),
   ")",
 ).pipe(
   Grammar.decodeTo(GroupSchema)({
@@ -169,7 +169,19 @@ const termQuoted = doubleQuoted.pipe(
 const atom = Grammar.choice(qualifier, group, termQuoted, termWord)
 
 const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
-  () => Grammar.choice(notBranch, atom),
+  () =>
+    Grammar.choice(notBranch, atom).pipe(
+      Grammar.transform({
+        decode: (value): Query => value,
+        encode: (value) => {
+          if (value.kind === "and" || value.kind === "or") {
+            throw new TypeError("expected an atomic query")
+          }
+          return value
+        },
+        is: (value) => value.kind !== "and" && value.kind !== "or",
+      }),
+    ),
   "not",
 )
 
@@ -196,7 +208,7 @@ const andExpr = nary("and", andSep, notExpr)
 const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
 const orExpr = nary("or", orSep, andExpr)
 
-const whole = Grammar.wrap(Grammar.whitespace, query, Grammar.whitespace)
+const whole = Grammar.wrap(Grammar.trivia, query, Grammar.trivia)
 
 const pattern = (re: RegExp, identifier: string, message: string) =>
   Schema.String.check(Schema.isPattern(re, { identifier, message }))
