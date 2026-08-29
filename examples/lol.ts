@@ -20,21 +20,24 @@ const attempt = (run: () => string): string => {
 
 const header = G.gen(function* () {
   const kind = yield* G.choice(
-    G.literal("t:").pipe(G.as("text")),
-    G.literal("b:").pipe(G.as("bits")),
+    G.literal("raw:").pipe(G.as("raw")),
+    G.literal("pair:").pipe(G.as("pair")),
   )
   const size = yield* G.integer
   return { kind, size }
 })
 
-const bit = G.regex(/[01]/, "bit")
-
 const frame = G.gen(function* () {
   const h = yield* header
   yield* G.literal("#")
   const body = yield* G.match(h.kind, {
-    text: G.take(h.size),
-    bits: G.repeat(bit, h.size),
+    raw: G.take(h.size),
+    pair: G.gen(function* () {
+      const name = yield* G.regex(/[a-z]+/, "name")
+      yield* G.literal("=")
+      const value = yield* G.take(h.size)
+      return { name, value }
+    }),
   })
   return { h, body }
 })
@@ -43,24 +46,31 @@ const Frame = G.toSchema(
   frame,
   Schema.Struct({
     h: Schema.Struct({
-      kind: Schema.Union([Schema.Literal("text"), Schema.Literal("bits")]),
-      size: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 3 })),
+      kind: Schema.Union([Schema.Literal("raw"), Schema.Literal("pair")]),
+      size: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 16 })),
     }),
-    body: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
+    body: Schema.Union([
+      Schema.String,
+      Schema.Struct({ name: Schema.String, value: Schema.String }),
+    ]),
   }),
   { identifier: "Frame" },
 )
 
 Effect.gen(function* () {
-  yield* Console.log("parse  :", show(G.parse(frame, "t:3#abc")))
-  yield* Console.log("decode :", json(yield* Schema.decodeEffect(Frame)("t:3#abc")))
-  yield* Console.log("parse ", show(G.parse(frame, "t:x#abc")))
+  yield* Console.log("grammar :", G.render(frame))
+
+  yield* Console.log("parse   :", show(G.parse(frame, "raw:5#hello")))
+  yield* Console.log("parse   :", show(G.parse(frame, "pair:5#user=alice")))
   yield* Console.log(
-    "decode ",
-    attempt(() => json(Schema.decodeSync(Frame)("t:x#abc"))),
+    "print   :",
+    show(G.print(frame, { h: { kind: "pair", size: 5 }, body: { name: "user", value: "alice" } })),
   )
+  yield* Console.log("parse ✗ ", show(G.parse(frame, "raw:x#hello")))
+
+  yield* Console.log("decode  :", json(yield* Schema.decodeEffect(Frame)("pair:5#user=alice")))
   yield* Console.log(
-    "refine ",
-    attempt(() => json(Schema.decodeSync(Frame)("b:4#1010"))),
+    "refine ✗",
+    attempt(() => json(Schema.decodeSync(Frame)(`raw:99#${"x".repeat(99)}`))),
   )
 }).pipe(Effect.runFork)
