@@ -19,13 +19,7 @@ Define a grammar once. You get:
 pnpm add effect-grammar
 ```
 
-Requires Effect `4.0.0-rc.112` or newer in the Effect 4 line.
-
 ## Parse and print with one grammar
-
-This grammar reads two frame types. A text frame contains a string. A bits frame
-contains a list of bits. The `kind` field selects the grammar for the body, and
-the `size` field controls its length.
 
 ```ts
 import { Schema } from "effect"
