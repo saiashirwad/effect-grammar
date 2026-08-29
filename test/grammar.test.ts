@@ -820,3 +820,66 @@ describe("toSchema", () => {
     assert.equal(Grammar.render(pair), 'name:<name> "=" n:<integer>')
   })
 })
+
+describe("AST reflection", () => {
+  it("renders one line per node", () => {
+    const grammar = G.tuple(word, G.integer.pipe(G.prefix(":")))
+    assert.equal(
+      G.renderAst(grammar),
+      [
+        "Gen scope0 → [0, 1]",
+        "├─ 0 Regex word /[a-z]+/y",
+        "└─ 1 Wrap",
+        '   ├─ Literal ":"',
+        "   ├─ Transform integer",
+        "   │  └─ Regex integer /-?\\d+/y",
+        '   └─ Literal ""',
+      ].join("\n"),
+    )
+  })
+
+  it("names bindings and resolves refs through them", () => {
+    const frame = G.gen(function* () {
+      const h = yield* G.struct({ kind: G.literal("raw").pipe(G.as("raw")), size: G.integer })
+      yield* G.literal("#")
+      const body = yield* G.match(h.kind, { raw: G.take(h.size) })
+      return { h, body }
+    })
+
+    const ast = G.toAst(frame)
+    assert.ok(ast._tag === "Gen")
+    assert.deepEqual(
+      ast.steps.map((step) => (step._tag === "Bind" ? step.name : undefined)),
+      ["h", undefined, "body"],
+    )
+    const tree = G.renderAst(frame)
+    assert.match(tree, /Match h\.kind/)
+    assert.match(tree, /Take h\.size/)
+  })
+
+  it("stays JSON-shaped", () => {
+    const frame = G.gen(function* () {
+      const h = yield* G.struct({ kind: G.literal("raw"), size: G.integer })
+      const items = yield* G.many(G.integer, { min: 1 })
+      const body = yield* G.optional(G.sepBy(word, ","))
+      return { h, items, body }
+    })
+
+    const ast = G.toAst(frame)
+    assert.deepEqual(JSON.parse(JSON.stringify(ast)), ast)
+  })
+
+  it("defines a recursive grammar once and references it at the recursion points", () => {
+    type Nested = number | ReadonlyArray<Nested>
+    const nested: Grammar.Grammar<Nested> = G.suspend(
+      () => G.choice(G.integer, G.wrap("[", G.sepBy(nested, ","), "]")),
+      "nested",
+    )
+
+    const ast = G.toAst(nested)
+    assert.ok(ast._tag === "Suspend")
+    const text = JSON.stringify(ast) ?? ""
+    assert.equal(text.split("SuspendRef").length - 1, 1)
+    assert.match(G.renderAst(nested), /SuspendRef #0 nested/)
+  })
+})

@@ -45,15 +45,18 @@ const sequence = (fragments: ReadonlyArray<Fragment>): Fragment => ({
     .join(" "),
 })
 
-const namesFor = (context: Context, scope: ScopeId): Map<number, string> => {
-  const existing = context.names.get(scope)
+export const namesFor = (
+  names: Map<ScopeId, Map<number, string>>,
+  scope: ScopeId,
+): Map<number, string> => {
+  const existing = names.get(scope)
   if (existing !== undefined) return existing
-  const names = new Map<number, string>()
-  context.names.set(scope, names)
-  return names
+  const created = new Map<number, string>()
+  names.set(scope, created)
+  return created
 }
 
-const nameBindings = (
+export const nameBindings = (
   pattern: Pattern,
   path: string | undefined,
   scope: ScopeId,
@@ -96,7 +99,7 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
     case "Regex":
       return { precedence: AtomPrecedence, text: `<${node.name}>` }
     case "Gen": {
-      const names = namesFor(context, node.scope)
+      const names = namesFor(context.names, node.scope)
       if (context.includeBindings) nameBindings(node.result, undefined, node.scope, names)
       return sequence(
         node.steps.map((step) => {

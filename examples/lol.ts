@@ -60,6 +60,8 @@ const Frame = G.toSchema(
 Effect.gen(function* () {
   yield* Console.log("grammar :", G.render(frame))
   yield* Console.log()
+  yield* Console.log(G.renderAst(frame))
+  yield* Console.log()
   yield* Console.log("parse   :", show(G.parse(frame, "raw:5#hello")))
   yield* Console.log()
   yield* Console.log("parse   :", show(G.parse(frame, "pair:5#user=alice")))

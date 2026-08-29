@@ -242,8 +242,14 @@ characters and prints one canonical space.
 `render` formats a grammar as readable text, including binding paths. `describe`
 returns a short name for a grammar.
 
-The interpreter AST is private. Public grammars expose only `Grammar<A>`,
-`Ref<A>`, and the combinators.
+`toAst` reflects a grammar into a plain JSON-shaped tree, and `renderAst`
+formats that tree with one line per node. Scopes get stable names (`scope0`,
+`scope1`, …), bindings keep their paths (`h.size`), and a recursive grammar is
+defined once with references at the recursion points. Functions inside the tree
+are described by name.
+
+Beyond `toAst`, the interpreter AST is private. Public grammars expose only
+`Grammar<A>`, `Ref<A>`, and the combinators.
 
 ## Errors
 

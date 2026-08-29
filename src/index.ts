@@ -46,4 +46,14 @@ export {
 export { parse } from "./parse.ts"
 export { print } from "./print.ts"
 export { describe, render } from "./render.ts"
+export {
+  type ExprAst,
+  type GrammarAst,
+  type MatchCaseAst,
+  type PatternAst,
+  renderAst,
+  type RefAst,
+  type StepAst,
+  toAst,
+} from "./ast.ts"
 export { toSchema } from "./schema.ts"
