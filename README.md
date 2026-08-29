@@ -28,6 +28,7 @@ contains a list of bits. The `kind` field selects the grammar for the body, and
 the `size` field controls its length.
 
 ```ts
+import { Schema } from "effect"
 import * as Grammar from "effect-grammar"
 
 const frame = Grammar.gen(function* () {
@@ -44,51 +45,6 @@ const frame = Grammar.gen(function* () {
   })
   return { kind, size, body }
 })
-```
-
-The same grammar parses both branches:
-
-```text
-parse "text/5:hello"
-  → { "kind": "text", "size": 5, "body": "hello" }
-
-parse "bits/4:1010"
-  → { "kind": "bits", "size": 4, "body": ["1", "0", "1", "0"] }
-```
-
-It prints each value with the correct branch:
-
-```text
-print { kind: "text", size: 2, body: "hi" }
-  → "text/2:hi"
-
-print { kind: "bits", size: 4, body: ["1", "0", "1", "0"] }
-  → "bits/4:1010"
-```
-
-Parse and print errors identify the failed text position or value path:
-
-```text
-parse "bits/4:1020"
-  → line 1, column 10: expected bit, found "2"
-
-print { kind: "text", size: 2, body: "hello" }
-  → .body: expected 2 UTF-16 code units, got "hello"
-```
-
-`render` produces a description for documentation and Schema annotations:
-
-```text
-kind:("text" | "bits") "/" size:<integer> ":" body:match(kind){"text" => <char>{size} | "bits" => (<bit>){size}}
-```
-
-## Schema integration
-
-`toSchema` combines a grammar with an Effect Schema. Decoding parses the text
-and then checks the value. Encoding checks the value and then prints it.
-
-```ts
-import { Schema } from "effect"
 
 const FrameValue = Schema.Struct({
   kind: Schema.Literals(["text", "bits"]),
@@ -96,13 +52,28 @@ const FrameValue = Schema.Struct({
   body: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 })
 
-const Frame = Grammar.toSchema(frame, FrameValue, {
-  identifier: "Frame",
-})
-
-const decode = Schema.decodeEffect(Frame)
-const encode = Schema.encodeEffect(Frame)
+const Frame = Grammar.toSchema(frame, FrameValue, { identifier: "Frame" })
+const decode = Schema.decodeSync(Frame)
+const encode = Schema.encodeSync(Frame)
 ```
+
+The grammar and its Schema codec use the same parser and printer:
+
+```text
+decode("text/5:hello") → {"kind":"text","size":5,"body":"hello"}
+decode("bits/4:1010") → {"kind":"bits","size":4,"body":["1","0","1","0"]}
+encode({kind:"text",size:2,body:"hi"}) → "text/2:hi"
+encode({kind:"bits",size:4,body:["1","0","1","0"]}) → "bits/4:1010"
+parse("bits/4:1020") → line 1, column 10: expected bit, found "2"
+print({kind:"text",size:2,body:"hello"}) → .body: expected 2 UTF-16 code units, got "hello"
+render(frame) → kind:("text" | "bits") "/" size:<integer> ":" body:match(kind){"text" => <char>{size} | "bits" => (<bit>){size}}
+```
+
+## Schema integration
+
+`toSchema` combines a grammar with an Effect Schema. Decoding parses the text
+and then checks the value. Encoding checks the value and then prints it. The
+example above shows the full integration in one code block.
 
 See the [endpoint example](./examples/endpoint.ts) for a complete Schema.
 
