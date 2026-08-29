@@ -6,12 +6,13 @@ pnpm add effect-grammar
 
 Invertible grammar combinators and parser-printers for Effect.
 
-Define a grammar once. You get:
+A `Grammar<A>` supports four operations:
 
-- a parser from text to structured data
-- a printer from structured data to canonical text
-- a `Schema.Codec<A, string>`
-- a readable text description of the grammar
+- `parse`: read a string and return a `Result<A, ParseError>`
+- `print`: write an `A` as canonical text and return a
+  `Result<string, PrintError>`
+- `toSchema`: combine the grammar with an Effect Schema to make a string codec
+- `render`: return a readable description of the grammar
 
 ```ts
 import { Schema } from "effect"
