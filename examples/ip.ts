@@ -14,7 +14,7 @@ const ip = Grammar.regex(/\d{1,3}/, "octet").pipe(
   }),
 )
 
-const Ip = Grammar.toSchema(ip, IpAddress, { identifier: "IpAddress" })
+const Ip = Grammar.codec(ip, IpAddress, { identifier: "IpAddress" })
 
 const decode = Schema.decodeEffect(Ip)
 const encode = Schema.encodeEffect(Ip)

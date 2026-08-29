@@ -14,7 +14,7 @@ const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue
   return new SchemaIssue.InvalidValue({ message: PrintError.format(issue) }, actual)
 }
 
-export const toSchema = <S extends Schema.Top, A extends S["Encoded"]>(
+export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,
   options?: { readonly identifier?: string },

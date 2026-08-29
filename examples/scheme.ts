@@ -161,7 +161,7 @@ const catalogIssues = Schema.makeFilter((e: Expr) =>
   Array.from(Iterable.filterMap(walkLists(e), arityIssue)),
 )
 
-const ValidScheme = Grammar.toSchema(document, ExprSchema, { identifier: "Scheme" }).check(
+const ValidScheme = Grammar.codec(document, ExprSchema, { identifier: "Scheme" }).check(
   catalogIssues,
 )
 

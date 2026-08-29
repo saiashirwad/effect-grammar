@@ -11,7 +11,7 @@ A `Grammar<A>` supports four operations:
 - `parse`: read a string and return a `Result<A, ParseError>`
 - `print`: write an `A` as canonical text and return a
   `Result<string, PrintError>`
-- `toSchema`: combine the grammar with an Effect Schema to make a string codec
+- `codec`: combine the grammar with an Effect Schema to make a string codec
 - `render`: return a readable description of the grammar
 
 ```ts
@@ -39,7 +39,7 @@ const FrameValue = Schema.Struct({
   body: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 })
 
-const Frame = G.toSchema(frame, FrameValue, { identifier: "Frame" })
+const Frame = G.codec(frame, FrameValue, { identifier: "Frame" })
 const decode = Schema.decodeSync(Frame)
 const encode = Schema.encodeSync(Frame)
 ```
@@ -61,9 +61,9 @@ render(frame) → kind:("text" | "bits") "/" size:<integer> ":" body:match(kind)
 
 ## Schema integration
 
-`toSchema` combines a grammar with an Effect Schema. Decoding parses the text
-and then checks the value. Encoding checks the value and then prints it. The
-example above shows the full integration in one code block.
+`codec` combines a grammar with an Effect Schema. Decoding parses the text and
+then checks the value. Encoding checks the value and then prints it. The example
+above shows the full integration in one code block.
 
 See the [endpoint example](./examples/endpoint.ts) for a complete Schema.
 

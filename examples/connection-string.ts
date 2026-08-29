@@ -42,7 +42,7 @@ const ConnectionInfo = Schema.Struct({
   database: Schema.NonEmptyString,
   params: Schema.Record(Schema.String, Schema.String),
 })
-const Dsn = Grammar.toSchema(dsn, ConnectionInfo, { identifier: "Dsn" })
+const Dsn = Grammar.codec(dsn, ConnectionInfo, { identifier: "Dsn" })
 
 const decode = Schema.decodeEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)

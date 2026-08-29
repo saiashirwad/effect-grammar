@@ -9,7 +9,7 @@ const endpoint = Grammar.gen(function* () {
   return { host, port }
 })
 
-const Endpoint = Grammar.toSchema(
+const Endpoint = Grammar.codec(
   endpoint,
   Schema.Struct({
     host: Schema.NonEmptyString,

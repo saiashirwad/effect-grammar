@@ -9,7 +9,7 @@ const person = Grammar.gen(function* () {
   return { name, age }
 })
 
-const Person = Grammar.toSchema(
+const Person = Grammar.codec(
   person,
   Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(3)),

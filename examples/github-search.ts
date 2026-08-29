@@ -346,7 +346,7 @@ const qualifierIssues = (node: Qualifier): ReadonlyArray<Schema.FilterIssue> => 
 const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> =>
   Array.from(Iterable.flatMap(walkQualifiers(q), qualifierIssues))
 
-const ValidGithubQuery = Grammar.toSchema(whole, QuerySchema, { identifier: "GithubQuery" }).check(
+const ValidGithubQuery = Grammar.codec(whole, QuerySchema, { identifier: "GithubQuery" }).check(
   Schema.makeFilter(catalogIssues),
 )
 

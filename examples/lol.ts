@@ -42,7 +42,7 @@ const frame = G.gen(function* () {
   return { h, body }
 })
 
-const Frame = G.toSchema(
+const Frame = G.codec(
   frame,
   Schema.Struct({
     h: Schema.Struct({

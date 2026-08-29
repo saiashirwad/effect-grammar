@@ -46,4 +46,4 @@ export {
 export { parse } from "./parse.ts"
 export { print } from "./print.ts"
 export { describe, render } from "./render.ts"
-export { toSchema } from "./schema.ts"
+export { codec } from "./schema.ts"

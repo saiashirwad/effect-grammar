@@ -779,14 +779,14 @@ describe("render", () => {
   })
 })
 
-describe("toSchema", () => {
+describe("codec", () => {
   const pair = G.gen(function* () {
     const name = yield* G.regex(/[a-z]+/, "name")
     yield* G.literal("=")
     const n = yield* G.integer
     return { name, n }
   })
-  const Pair = G.toSchema(
+  const Pair = G.codec(
     pair,
     Schema.Struct({
       name: Schema.String,
