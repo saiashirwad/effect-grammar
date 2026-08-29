@@ -142,4 +142,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-void program.pipe(Effect.runSync)
+program.pipe(Effect.runSync)
