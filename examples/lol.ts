@@ -59,16 +59,20 @@ const Frame = G.toSchema(
 
 Effect.gen(function* () {
   yield* Console.log("grammar :", G.render(frame))
-
+  yield* Console.log()
   yield* Console.log("parse   :", show(G.parse(frame, "raw:5#hello")))
+  yield* Console.log()
   yield* Console.log("parse   :", show(G.parse(frame, "pair:5#user=alice")))
+  yield* Console.log()
   yield* Console.log(
     "print   :",
     show(G.print(frame, { h: { kind: "pair", size: 5 }, body: { name: "user", value: "alice" } })),
   )
+  yield* Console.log()
   yield* Console.log("parse ✗ ", show(G.parse(frame, "raw:x#hello")))
-
+  yield* Console.log()
   yield* Console.log("decode  :", json(yield* Schema.decodeEffect(Frame)("pair:5#user=alice")))
+  yield* Console.log()
   yield* Console.log(
     "refine ✗",
     attempt(() => json(Schema.decodeSync(Frame)(`raw:99#${"x".repeat(99)}`))),
