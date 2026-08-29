@@ -20,15 +20,14 @@ const netstring = Grammar.gen(function* () {
 const show = (r: Result.Result<string, { readonly message: string }>) =>
   Result.match(r, { onSuccess: JSON.stringify, onFailure: (e) => `✗ ${e.message}` })
 
+const samples = ["12:hello world!,", "5:hello world!,"]
+
 Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)
-  yield* Console.log(
-    `parse "12:hello world!,"  →  ${show(Grammar.parse(netstring, "12:hello world!,"))}`,
-  )
-  yield* Console.log(
-    `parse "5:hello world!,"   →  ${show(Grammar.parse(netstring, "5:hello world!,"))}`,
-  )
-  yield* Console.log(
-    `print "round trip ✓"     →  ${show(Grammar.print(netstring, "round trip ✓"))}`,
-  )
+  for (const source of samples) {
+    yield* Console.log(
+      `parse ${JSON.stringify(source)}  →  ${show(Grammar.parse(netstring, source))}`,
+    )
+  }
+  yield* Console.log(`print "round trip ✓"  →  ${show(Grammar.print(netstring, "round trip ✓"))}`)
 }).pipe(Effect.runSync)

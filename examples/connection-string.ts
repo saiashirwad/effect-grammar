@@ -45,7 +45,7 @@ const ConnectionInfo = Schema.Struct({
 })
 const Dsn = Grammar.toSchema(dsn, ConnectionInfo, { identifier: "Dsn" })
 
-const decode = Schema.decodeUnknownEffect(Dsn)
+const decode = Schema.decodeEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const formatIssue = SchemaIssue.makeFormatterDefault()
@@ -77,7 +77,7 @@ const check = (source: string) =>
   )
 
 Effect.gen(function* () {
-  yield* Console.log(`grammar: ${Grammar.render(dsn)}\n`)
+  yield* Console.log(`grammar ${Grammar.render(dsn)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
 
   const encoded = yield* encode(value)
