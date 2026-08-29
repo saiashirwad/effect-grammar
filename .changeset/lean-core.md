@@ -17,6 +17,6 @@ Removed: print-time recovery (`recoverableRefs`, transitive recovery), the
 
 Performance: printing no longer runs a recovery search per `gen` step, literal
 parsing uses `String.prototype.startsWith` on the fast path, slot reads no
-longer allocate `Option`s, `gen` frames are packed arrays, and ref proxies
-share one handler. On identical workloads: parsing is ~1.4x faster and
-printing ~1.8x faster than the previous release.
+longer allocate `Option`s, `gen` frames are packed arrays, and ref proxies share
+one handler. On identical workloads: parsing is ~1.4x faster and printing ~1.8x
+faster than the previous release.
