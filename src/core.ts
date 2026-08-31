@@ -79,7 +79,11 @@ export type Node =
       readonly inner: GrammarInternal
       readonly close: Silent
     }
-  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<GrammarInternal> }
+  | {
+      readonly _tag: "Choice"
+      readonly options: ReadonlyArray<GrammarInternal>
+      readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
+    }
   | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
   | { readonly _tag: "Optional"; readonly inner: GrammarInternal }
   | {

@@ -4,6 +4,7 @@ export {
   as,
   between,
   choice,
+  choiceOn,
   decodeTo,
   type DecodeToOptions,
   defaulted,
@@ -44,6 +45,6 @@ export {
   wrap,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
-export { print } from "./print.ts"
+export { print, type PrintOptions } from "./print.ts"
 export { describe, render } from "./render.ts"
 export { codec } from "./schema.ts"

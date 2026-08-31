@@ -359,6 +359,37 @@ export const tuple = <const Elements extends ReadonlyArray<GrammarInternal>>(
   })
 }
 
+type OnCases<Tag extends string, Cases extends Readonly<Record<string, GrammarInternal>>> = {
+  readonly [K in keyof Cases & string]: Type<Cases[K]> extends Readonly<Record<Tag, K>>
+    ? Cases[K]
+    : Grammar<Readonly<Record<Tag, K>>>
+}
+
+const isIntegerKey = (key: string): boolean => String(Number.parseInt(key, 10)) === key
+
+export const choiceOn = <
+  const Tag extends string,
+  const Cases extends Readonly<Record<string, GrammarInternal>>,
+>(
+  tag: Tag,
+  cases: Cases & OnCases<Tag, Cases>,
+): Grammar<Type<Cases[keyof Cases]>> => {
+  const keys = Object.keys(cases)
+  if (keys.length === 0) throw new RangeError("choiceOn: at least one case is required")
+  for (const key of keys) {
+    if (isIntegerKey(key)) {
+      throw new RangeError(
+        `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source`,
+      )
+    }
+  }
+  return make({
+    _tag: "Choice",
+    options: keys.map((key) => cases[key]!),
+    on: { tag, keys },
+  })
+}
+
 type TaggedValue<Tag extends string, Cases extends Readonly<Record<string, GrammarInternal>>> = {
   readonly [K in keyof Cases & string]: Readonly<Record<Tag, K>> & {
     readonly value: Type<Cases[K]>
@@ -372,21 +403,18 @@ export const taggedChoice = <
   tag: Tag,
   cases: Cases,
 ): Grammar<TaggedValue<Tag, Cases>> => {
-  const branches = Object.entries(cases).map(([key, grammar]) =>
+  const keys = Object.keys(cases)
+  if (keys.length === 0) throw new RangeError("taggedChoice: at least one case is required")
+  const branches = keys.map((key) =>
     make({
       _tag: "Transform",
-      inner: grammar,
+      inner: cases[key]!,
       decode: (value) => Result.succeed({ [tag]: key, value }),
       encode: (value) => Result.succeed(Object(value).value),
-      is: (value) => {
-        if (!Predicate.isObject(value) || !Object.hasOwn(value, tag)) return false
-        return Object.is(value[tag], key) && Object.hasOwn(value, "value")
-      },
       name: `${tag}=${preview(key)}`,
     }),
   )
-  if (branches.length === 0) throw new RangeError("taggedChoice: at least one case is required")
-  return make({ _tag: "Choice", options: branches })
+  return make({ _tag: "Choice", options: branches, on: { tag, keys } })
 }
 
 const hiddenWhitespace = (expression: RegExp, name: string, printAs: string): Silent =>

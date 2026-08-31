@@ -156,3 +156,23 @@ void [
   notSilent,
   widenedGrammar,
 ]
+
+// choiceOn: every case must yield a value whose tag field is its key.
+const plainTagged = G.regex(/a/, "a").pipe(
+  G.transform({ decode: (v) => ({ kind: "plain" as const, v }), encode: (x) => x.v }),
+)
+const untagged = G.regex(/b/, "b").pipe(G.transform({ decode: (v) => ({ v }), encode: (x) => x.v }))
+const misTagged = G.regex(/c/, "c").pipe(
+  G.transform({ decode: (v) => ({ kind: "other" as const, v }), encode: (x) => x.v }),
+)
+G.choiceOn("kind", { plain: plainTagged })
+// @ts-expect-error case "b" has no kind field
+G.choiceOn("kind", { plain: plainTagged, b: untagged })
+// @ts-expect-error case "c" has kind "other", not "c"
+G.choiceOn("kind", { plain: plainTagged, c: misTagged })
+// The parsed type is the union of the case types.
+const onValue: G.Type<ReturnType<typeof G.choiceOn<"kind", { plain: typeof plainTagged }>>> = {
+  kind: "plain",
+  v: "a",
+}
+void onValue

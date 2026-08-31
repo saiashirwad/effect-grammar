@@ -183,6 +183,20 @@ const toError = (state: State): ParseError => {
   })
 }
 
+export const reparse = (
+  grammar: GrammarInternal,
+  text: string,
+  env: Frame | undefined,
+):
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: ParseError } => {
+  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set() }
+  const value = go(grammar, state, env)
+  if (value !== Fail && state.pos === text.length) return { ok: true, value }
+  if (value !== Fail) failAt(state, "end of input")
+  return { ok: false, error: toError(state) }
+}
+
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
   const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
   const value = go(grammar, state, undefined)

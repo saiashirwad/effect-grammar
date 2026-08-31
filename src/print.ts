@@ -1,4 +1,4 @@
-import { Predicate, Result } from "effect"
+import { Equal, Predicate, Result } from "effect"
 
 import {
   type Grammar,
@@ -13,6 +13,7 @@ import {
 } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
 import { exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import { reparse } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
 
@@ -25,6 +26,14 @@ class Failure {
 }
 
 const fail = (issue: PrintIssue): Failure => new Failure(issue)
+
+export interface PrintOptions {
+  readonly verify?: boolean | undefined
+}
+
+interface Context {
+  readonly verify: boolean
+}
 
 const bindingPath = (
   pattern: Pattern,
@@ -64,6 +73,7 @@ const outputGen = (
   node: Extract<Node, { _tag: "Gen" }>,
   value: Value,
   env: Frame | undefined,
+  ctx: Context,
 ): string | Failure => {
   const local = frame(node.scope, node.slotCount, env)
   const issue = unifyPattern(node.result, value, local)
@@ -73,10 +83,10 @@ const outputGen = (
   for (const [index, step] of node.steps.entries()) {
     const result =
       step._tag === "Silent"
-        ? out(step.grammar, undefined, local)
+        ? out(step.grammar, undefined, local, ctx)
         : local.values[step.slot] === Unbound
           ? fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
-          : out(step.grammar, local.values[step.slot], local)
+          : out(step.grammar, local.values[step.slot], local, ctx)
     if (result instanceof Failure) {
       const path =
         step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
@@ -87,7 +97,12 @@ const outputGen = (
   return text
 }
 
-const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): string | Failure => {
+const out = (
+  grammar: GrammarInternal,
+  value: Value,
+  env: Frame | undefined,
+  ctx: Context,
+): string | Failure => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
@@ -108,21 +123,54 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       return value
     }
     case "Gen":
-      return outputGen(node, value, env)
+      return outputGen(node, value, env, ctx)
     case "Wrap": {
-      const open = out(node.open, undefined, env)
+      const open = out(node.open, undefined, env, ctx)
       if (open instanceof Failure) return open
-      const inner = out(node.inner, value, env)
+      const inner = out(node.inner, value, env, ctx)
       if (inner instanceof Failure) return inner
-      const close = out(node.close, undefined, env)
+      const close = out(node.close, undefined, env, ctx)
       return close instanceof Failure ? close : open + inner + close
     }
     case "Choice": {
+      if (node.on !== undefined) {
+        const { tag, keys } = node.on
+        if (!Predicate.isObject(value) || !Object.hasOwn(value, tag)) {
+          return fail({
+            _tag: "TypeMismatch",
+            expected: `an object with a ${tag} field`,
+            actual: value,
+          })
+        }
+        const key = value[tag]
+        const index = keys.findIndex((candidate) => Object.is(candidate, key))
+        if (index === -1) {
+          return fail({
+            _tag: "InvalidValue",
+            expected: `${tag} to be one of ${keys.map(preview).join(", ")}`,
+            actual: key,
+          })
+        }
+        return out(node.options[index]!, value, env, ctx)
+      }
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
-        const result = out(option, value, env)
-        if (!(result instanceof Failure)) return result
-        issues.push(result.issue)
+        const result = out(option, value, env, ctx)
+        if (result instanceof Failure) {
+          issues.push(result.issue)
+          continue
+        }
+        if (!ctx.verify) return result
+        const back = reparse(grammar, result, env)
+        if (back.ok && Equal.equals(back.value, value)) return result
+        issues.push({
+          _tag: "InvalidValue",
+          expected: describe(option),
+          actual: value,
+          detail: back.ok
+            ? `prints as ${JSON.stringify(result)}, which reads back as ${preview(back.value)}`
+            : `prints as ${JSON.stringify(result)}, which does not parse: ${back.error.message}`,
+        })
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
     }
@@ -141,11 +189,11 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           detail: `expected ${expected} items, got ${value.length}`,
         })
       }
-      const separator = out(node.sep, undefined, env)
+      const separator = out(node.sep, undefined, env, ctx)
       if (separator instanceof Failure) return separator
       let text = ""
       for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env)
+        const result = out(node.inner, item, env, ctx)
         if (result instanceof Failure) {
           return fail({ _tag: "AtPath", path: index, issue: result.issue })
         }
@@ -154,7 +202,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       return text
     }
     case "Optional":
-      return value === undefined ? "" : out(node.inner, value, env)
+      return value === undefined ? "" : out(node.inner, value, env, ctx)
     case "Transform": {
       try {
         if (node.is?.(unsafeToNever(value)) === false) {
@@ -172,7 +220,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
               actual: value,
               detail: encoded.failure.message,
             })
-          : out(node.inner, encoded.success, env)
+          : out(node.inner, encoded.success, env, ctx)
       } catch (error) {
         return fail({
           _tag: "InvalidValue",
@@ -183,11 +231,11 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       }
     }
     case "Skip":
-      return out(node.inner, node.printAs, env)
+      return out(node.inner, node.printAs, env, ctx)
     case "Label":
-      return out(node.inner, value, env)
+      return out(node.inner, value, env, ctx)
     case "Suspend":
-      return out(resolve(node), value, env)
+      return out(resolve(node), value, env, ctx)
     case "Match": {
       const key = evaluate(node.scrutinee, env)
       if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
@@ -198,7 +246,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
             expected: `a match case for ${preview(key)}`,
             actual: value,
           })
-        : out(matchCase.grammar, value, env)
+        : out(matchCase.grammar, value, env, ctx)
     }
     case "Take": {
       const count = evaluate(node.count, env)
@@ -233,7 +281,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       }
       let text = ""
       for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env)
+        const result = out(node.inner, item, env, ctx)
         if (result instanceof Failure) {
           return fail({ _tag: "AtPath", path: index, issue: result.issue })
         }
@@ -247,12 +295,16 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
 export const printUnknown = (
   grammar: GrammarInternal,
   value: Value,
+  options?: PrintOptions,
 ): Result.Result<string, PrintError> => {
-  const result = out(grammar, value, undefined)
+  const result = out(grammar, value, undefined, { verify: options?.verify === true })
   return result instanceof Failure
     ? Result.fail(new PrintError({ issue: result.issue }))
     : Result.succeed(result)
 }
 
-export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
-  printUnknown(grammar, value)
+export const print = <A>(
+  grammar: Grammar<A>,
+  value: A,
+  options?: PrintOptions,
+): Result.Result<string, PrintError> => printUnknown(grammar, value, options)
