@@ -46,11 +46,6 @@ describe("checkedChoice selects a branch that reads back", () => {
     assert.equal(printOk(g, { kind: "plain", value: "x" } as const), "x")
   })
 
-  it("printSelection: roundTrip is the explicit form", () => {
-    const explicit = G.choice(plain, hashed, { printSelection: "roundTrip" })
-    assert.equal(printOk(explicit, wrong), "#x")
-  })
-
   it("explains a value no branch can print faithfully", () => {
     const atom = G.checkedChoice(number, symbol)
     const r = G.print(atom, { kind: "symbol", value: "42" })

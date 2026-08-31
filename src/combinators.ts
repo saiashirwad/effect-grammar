@@ -109,45 +109,27 @@ export function suffix<A>(innerOrClose: Grammar<A> | Silent | string, close?: Si
   return between(empty, innerOrClose as Grammar<A>, close)
 }
 
-/** How a `choice` printer picks among branches that accept the value. */
-export interface ChoiceOptions {
-  /**
-   * - `first` (default): print with the first branch whose printer accepts.
-   * - `roundTrip`: print with the first branch whose text also parses back to
-   *   an equal value. Reparses at every nested `choice`; keep it off hot paths.
-   */
-  readonly printSelection: "first" | "roundTrip"
-}
-
 /**
  * Ordered alternatives. Parsing tries each branch in order and keeps the
  * first that matches. Printing keeps the first branch whose printer accepts
- * the value; pass `{ printSelection: "roundTrip" }` (or use `checkedChoice`)
- * to keep the first branch whose text also parses back.
+ * the value; use `checkedChoice` to keep the first branch whose text also
+ * parses back.
  */
-export function choice<
+export const choice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
->(...options: Grammars): Grammar<Type<Grammars[number]>>
-export function choice<
-  const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
->(...optionsAndSettings: [...Grammars, ChoiceOptions]): Grammar<Type<Grammars[number]>>
-export function choice(...args: ReadonlyArray<GrammarInternal | ChoiceOptions>): GrammarInternal {
-  const last = args.at(-1)
-  const settings = last !== undefined && !isGrammar(last) ? last : undefined
-  // SAFETY: dropping the trailing settings object leaves only grammar branches.
-  const options = (
-    settings === undefined ? args : args.slice(0, -1)
-  ) as ReadonlyArray<GrammarInternal>
-  if (options.length === 0) throw new RangeError("choice: at least one branch is required")
-  return make({ _tag: "Choice", options, printSelection: settings?.printSelection })
-}
+>(
+  ...options: Grammars
+): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options })
 
-/** {@link choice} whose printer selects the first branch that reads back to an equal value. */
+/**
+ * {@link choice} whose printer selects the first branch that reads back to an
+ * equal value. Reparses at every nested `choice`; keep it off hot paths.
+ */
 export const checkedChoice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
 >(
   ...options: Grammars
-): Grammar<Type<Grammars[number]>> => choice(...options, { printSelection: "roundTrip" })
+): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options, checked: true })
 
 export function optional(): <G extends GrammarInternal>(inner: G) => OptionalGrammar<G>
 export function optional(inner: Silent): Silent

@@ -92,7 +92,8 @@ export type Node =
       readonly _tag: "Choice"
       readonly options: ReadonlyArray<GrammarInternal>
       readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
-      readonly printSelection?: "first" | "roundTrip" | undefined
+      /** Print with the first branch whose text parses back, not just the first that accepts. */
+      readonly checked?: boolean | undefined
     }
   | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
   | { readonly _tag: "Optional"; readonly inner: GrammarInternal }

@@ -9,9 +9,8 @@ packaging around it.
   unless it reads as an equal value. This is the whole-grammar round-trip
   guarantee. `print` stays unchecked.
 - Replace `print(grammar, value, { verify: true })` with per-choice printer
-  selection: `checkedChoice(...branches)` or
-  `choice(..., { printSelection: "roundTrip" })` picks the first branch whose
-  text parses back. The old `verify` option, which never checked dispatched
+  selection: `checkedChoice(...branches)` picks the first branch whose text
+  parses back. The old `verify` option, which never checked dispatched
   (`choiceOn`) choices, is gone.
 - `codec` verifies the round trip on encode by default; pass
   `{ roundTrip: "off" }` to skip it.

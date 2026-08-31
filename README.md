@@ -167,10 +167,9 @@ Three ways out, from most to least specific:
   `choiceOn` fixes printer dispatch; it does not remove parse ambiguity, so two
   branches may still parse the same text.
 
-- `checkedChoice(...branches)` (equivalently
-  `choice(..., { printSelection: "roundTrip" })`) prints with the first branch
-  whose text parses back to an equal value. It reparses at every nested choice,
-  so keep it off hot paths.
+- `checkedChoice(...branches)` prints with the first branch whose text parses
+  back to an equal value. It reparses at every nested choice, so keep it off hot
+  paths.
 
 - `printChecked(grammar, value)` gives the whole-grammar guarantee: it prints,
   parses the output back, and fails unless the result equals the original. It

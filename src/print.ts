@@ -161,7 +161,6 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
         }
         return out(node.options[index]!, value, env)
       }
-      const roundTrip = node.printSelection === "roundTrip"
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
         const result = out(option, value, env)
@@ -169,7 +168,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           issues.push(result.issue)
           continue
         }
-        if (!roundTrip) return result
+        if (node.checked !== true) return result
         const issue = roundTripIssue(grammar, value, result, env)
         if (issue === undefined) return result
         issues.push({

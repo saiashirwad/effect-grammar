@@ -6,7 +6,6 @@ export {
   between,
   checkedChoice,
   choice,
-  type ChoiceOptions,
   choiceOn,
   decodeTo,
   type DecodeToOptions,
