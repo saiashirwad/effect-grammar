@@ -4,6 +4,7 @@ import {
   type Bounds,
   type Grammar,
   type GrammarInternal,
+  type Fidelity,
   type GrammarIssue,
   isGrammar,
   isSilent,
@@ -108,11 +109,45 @@ export function suffix<A>(innerOrClose: Grammar<A> | Silent | string, close?: Si
   return between(empty, innerOrClose as Grammar<A>, close)
 }
 
-export const choice = <
+/** How a `choice` printer picks among branches that accept the value. */
+export interface ChoiceOptions {
+  /**
+   * - `first` (default): print with the first branch whose printer accepts.
+   * - `roundTrip`: print with the first branch whose text also parses back to
+   *   an equal value. Reparses at every nested `choice`; keep it off hot paths.
+   */
+  readonly printSelection: "first" | "roundTrip"
+}
+
+/**
+ * Ordered alternatives. Parsing tries each branch in order and keeps the
+ * first that matches. Printing keeps the first branch whose printer accepts
+ * the value; pass `{ printSelection: "roundTrip" }` (or use `checkedChoice`)
+ * to keep the first branch whose text also parses back.
+ */
+export function choice<
+  const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
+>(...options: Grammars): Grammar<Type<Grammars[number]>>
+export function choice<
+  const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
+>(...optionsAndSettings: [...Grammars, ChoiceOptions]): Grammar<Type<Grammars[number]>>
+export function choice(...args: ReadonlyArray<GrammarInternal | ChoiceOptions>): GrammarInternal {
+  const last = args.at(-1)
+  const settings = last !== undefined && !isGrammar(last) ? last : undefined
+  // SAFETY: dropping the trailing settings object leaves only grammar branches.
+  const options = (
+    settings === undefined ? args : args.slice(0, -1)
+  ) as ReadonlyArray<GrammarInternal>
+  if (options.length === 0) throw new RangeError("choice: at least one branch is required")
+  return make({ _tag: "Choice", options, printSelection: settings?.printSelection })
+}
+
+/** {@link choice} whose printer selects the first branch that reads back to an equal value. */
+export const checkedChoice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
 >(
   ...options: Grammars
-): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options })
+): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options, printSelection: "roundTrip" })
 
 export function optional(): <G extends GrammarInternal>(inner: G) => OptionalGrammar<G>
 export function optional(inner: Silent): Silent
@@ -233,10 +268,11 @@ const attempt =
     }
   }
 
-export const transform: {
-  <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
-  <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
-} = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>) =>
+const plainTransform = <A, B>(
+  inner: Grammar<A>,
+  options: TransformOptions<A, B>,
+  fidelity: Fidelity,
+): Grammar<B> =>
   make({
     _tag: "Transform",
     inner,
@@ -244,7 +280,25 @@ export const transform: {
     encode: attempt(options.encode),
     is: options.is,
     name: options.name,
-  }),
+    fidelity,
+  })
+
+const resultTransform = <A, B>(
+  inner: Grammar<A>,
+  options: TransformOrFailOptions<A, B>,
+  fidelity: Fidelity,
+): Grammar<B> => make({ _tag: "Transform", inner, ...options, fidelity })
+
+/**
+ * Map a grammar's value with a pair of functions. No law is claimed: the
+ * two directions need not be inverse, so a value may print as text that
+ * parses back to something else. Use `iso` when you mean to claim inverses.
+ */
+export const transform: {
+  <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
+  <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
+} = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>) =>
+  plainTransform(inner, options, "unchecked"),
 )
 
 export interface TransformOrFailOptions<A, B> {
@@ -254,11 +308,32 @@ export interface TransformOrFailOptions<A, B> {
   readonly name?: string
 }
 
+/** {@link transform} with directions that return a `Result`. No law is claimed. */
 export const transformOrFail: {
   <A, B>(options: TransformOrFailOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
 } = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>) =>
-  make({ _tag: "Transform", inner, ...options }),
+  resultTransform(inner, options, "unchecked"),
+)
+
+/**
+ * Like {@link transform}, but the author claims the two directions are
+ * inverse. The claim is recorded, not proved; `Grammar.auditFidelity` reports
+ * only the transforms that make no such claim.
+ */
+export const iso: {
+  <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
+  <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
+} = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>) =>
+  plainTransform(inner, options, "claimed-iso"),
+)
+
+/** An {@link iso} whose two directions may each fail; they must agree where both succeed. */
+export const partialIso: {
+  <A, B>(options: TransformOrFailOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
+  <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
+} = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>) =>
+  resultTransform(inner, options, "partial"),
 )
 
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
@@ -270,22 +345,30 @@ export const decodeTo =
   <A>(options: DecodeToOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> => {
     let guard: ((value: T) => boolean) | undefined
-    return transform(inner, {
-      ...options,
-      is: options.is ?? ((value) => (guard ??= Schema.is(schema))(value)),
-    })
+    return plainTransform(
+      inner,
+      {
+        ...options,
+        is: options.is ?? ((value) => (guard ??= Schema.is(schema))(value)),
+      },
+      "claimed-iso",
+    )
   }
 
 export const as: {
   <const V>(value: V): (inner: Silent) => Grammar<V>
   <const V>(inner: Silent, value: V): Grammar<V>
 } = F.dual(2, <const V>(inner: Silent, value: V) =>
-  transform(inner, {
-    decode: () => value,
-    encode: () => undefined,
-    is: (input) => Equal.equals(input, value),
-    name: preview(value),
-  }),
+  plainTransform(
+    inner,
+    {
+      decode: () => value,
+      encode: () => undefined,
+      is: (input) => Equal.equals(input, value),
+      name: preview(value),
+    },
+    "claimed-iso",
+  ),
 )
 
 export const flag = (value: Silent | string): Grammar<boolean> =>
@@ -310,10 +393,14 @@ export const defaulted: {
   <A>(value: A): (inner: Grammar<A | undefined>) => Grammar<A>
   <A>(inner: Grammar<A | undefined>, value: A): Grammar<A>
 } = F.dual(dataFirst, <A>(inner: Grammar<A | undefined>, value: A) =>
-  transform(inner, {
-    decode: (input) => input ?? value,
-    encode: (input) => (Equal.equals(input, value) ? undefined : input),
-  }),
+  plainTransform(
+    inner,
+    {
+      decode: (input) => input ?? value,
+      encode: (input) => (Equal.equals(input, value) ? undefined : input),
+    },
+    "claimed-iso",
+  ),
 )
 
 type StructFields = Readonly<Record<string, GrammarInternal>>
@@ -365,27 +452,64 @@ type OnCases<Tag extends string, Cases extends Readonly<Record<string, GrammarIn
     : Grammar<Readonly<Record<Tag, K>>>
 }
 
+type OnEntries<
+  Tag extends string,
+  Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+> = {
+  readonly [I in keyof Entries]: Entries[I] extends readonly [infer K extends MatchKey, unknown]
+    ? Type<Entries[I][1]> extends Readonly<Record<Tag, K>>
+      ? Entries[I]
+      : readonly [K, Grammar<Readonly<Record<Tag, K>>>]
+    : never
+}
+
 const isIntegerKey = (key: string): boolean => String(Number.parseInt(key, 10)) === key
 
-export const choiceOn = <
+/**
+ * Alternatives dispatched by a discriminant field. Parsing tries the branches
+ * in order; printing reads `value[tag]` and prints with the branch of that key,
+ * so it never picks the wrong printer. It does not remove parse ambiguity: two
+ * branches may still parse the same text.
+ *
+ * Pass an object for string keys, or an array of `[key, grammar]` entries for
+ * an explicit order and number or boolean discriminants. The object form
+ * rejects integer-like keys, which JavaScript reorders.
+ */
+export function choiceOn<
   const Tag extends string,
   const Cases extends Readonly<Record<string, GrammarInternal>>,
->(
-  tag: Tag,
-  cases: Cases & OnCases<Tag, Cases>,
-): Grammar<Type<Cases[keyof Cases]>> => {
-  const keys = Object.keys(cases)
-  if (keys.length === 0) throw new RangeError("choiceOn: at least one case is required")
+>(tag: Tag, cases: Cases & OnCases<Tag, Cases>): Grammar<Type<Cases[keyof Cases]>>
+export function choiceOn<
+  const Tag extends string,
+  const Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+>(tag: Tag, entries: Entries & OnEntries<Tag, Entries>): Grammar<Type<Entries[number][1]>>
+export function choiceOn(
+  tag: string,
+  cases:
+    | Readonly<Record<string, GrammarInternal>>
+    | ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+): GrammarInternal {
+  const entries: ReadonlyArray<readonly [MatchKey, GrammarInternal]> = Array.isArray(cases)
+    ? cases
+    : Object.keys(cases).map((key) => {
+        if (isIntegerKey(key)) {
+          throw new RangeError(
+            `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source. Pass an array of [key, grammar] entries instead.`,
+          )
+        }
+        // SAFETY: Array.isArray ruled out the entries form, so cases is the record here.
+        return [key, (cases as Readonly<Record<string, GrammarInternal>>)[key]!] as const
+      })
+  if (entries.length === 0) throw new RangeError("choiceOn: at least one case is required")
+  const keys = entries.map(([key]) => key)
+  const seen = new Set<MatchKey>()
   for (const key of keys) {
-    if (isIntegerKey(key)) {
-      throw new RangeError(
-        `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source`,
-      )
-    }
+    if (seen.has(key)) throw new RangeError(`choiceOn: duplicate key ${preview(key)}`)
+    seen.add(key)
   }
   return make({
     _tag: "Choice",
-    options: keys.map((key) => cases[key]!),
+    options: entries.map(([, grammar]) => grammar),
     on: { tag, keys },
   })
 }
@@ -412,6 +536,7 @@ export const taggedChoice = <
       decode: (value) => Result.succeed({ [tag]: key, value }),
       encode: (value) => Result.succeed(Object(value).value),
       name: `${tag}=${preview(key)}`,
+      fidelity: "claimed-iso",
     }),
   )
   return make({ _tag: "Choice", options: branches, on: { tag, keys } })
@@ -433,7 +558,7 @@ export function lexeme<A>(inner: Grammar<A>) {
 export const symbol = (value: string): Silent => lexeme(literal(value))
 
 export const integer = regex(/-?\d+/, "integer").pipe(
-  transform({
+  iso({
     decode: (text) => {
       const value = Number(text)
       return Object.is(value, -0) ? 0 : value

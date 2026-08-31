@@ -46,6 +46,15 @@ export type Pattern =
 
 export type MatchKey = string | number | boolean
 
+/**
+ * How much a `Transform` promises about its two directions.
+ *
+ * - `unchecked`: no law claimed (`transform`, `transformOrFail`).
+ * - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
+ * - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
+ */
+export type Fidelity = "unchecked" | "partial" | "claimed-iso"
+
 export interface GrammarIssue {
   readonly message: string
 }
@@ -83,6 +92,7 @@ export type Node =
       readonly _tag: "Choice"
       readonly options: ReadonlyArray<GrammarInternal>
       readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
+      readonly printSelection?: "first" | "roundTrip" | undefined
     }
   | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
   | { readonly _tag: "Optional"; readonly inner: GrammarInternal }
@@ -93,6 +103,7 @@ export type Node =
       readonly encode: (b: never) => Result.Result<Value, GrammarIssue>
       readonly is?: ((value: never) => boolean) | undefined
       readonly name?: string | undefined
+      readonly fidelity: Fidelity
     }
   | {
       readonly _tag: "Skip"

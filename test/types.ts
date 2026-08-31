@@ -171,8 +171,13 @@ G.choiceOn("kind", { plain: plainTagged, b: untagged })
 // @ts-expect-error case "c" has kind "other", not "c"
 G.choiceOn("kind", { plain: plainTagged, c: misTagged })
 // The parsed type is the union of the case types.
-const onValue: G.Type<ReturnType<typeof G.choiceOn<"kind", { plain: typeof plainTagged }>>> = {
+const onGrammar = G.choiceOn("kind", { plain: plainTagged })
+const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
   v: "a",
 }
+// choiceOn also accepts ordered [key, grammar] entries.
+const onEntries = G.choiceOn("kind", [["plain", plainTagged]] as const)
+const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
+void onEntriesValue
 void onValue

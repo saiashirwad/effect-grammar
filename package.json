@@ -45,7 +45,8 @@
   },
   "scripts": {
     "bench": "vitest bench --dir bench",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",

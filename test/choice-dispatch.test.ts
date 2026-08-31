@@ -24,6 +24,19 @@ const hashed = G.prefix("#", word).pipe(
 )
 const wrong = { kind: "hashed", value: "x" } as const
 
+const number = G.regex(/\d+/, "number").pipe(
+  G.transform({
+    decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),
+    encode: (n) => String(n.value),
+  }),
+)
+const symbol = G.regex(/[^\s()]+/, "symbol").pipe(
+  G.transform({
+    decode: (value) => ({ kind: "symbol" as const, value }),
+    encode: (s) => s.value,
+  }),
+)
+
 describe("positional choice picks the first branch whose printer accepts", () => {
   const g = G.choice(plain, hashed)
 
@@ -32,35 +45,36 @@ describe("positional choice picks the first branch whose printer accepts", () =>
     assert.deepEqual(parseOk(g, "x"), { kind: "plain", value: "x" })
   })
 
-  it("verify: true rejects the branch that does not read back", () => {
-    const r = G.print(g, wrong, { verify: true })
-    assert.ok(Result.isSuccess(r))
-    assert.equal(r.success, "#x")
+  it("printChecked rejects output that reads back as another value", () => {
+    const r = G.printChecked(g, wrong)
+    assert.ok(Result.isFailure(r))
+    assert.equal(
+      r.failure.message,
+      '{"kind":"hashed","value":"x"} prints as "x", which reads back as {"kind":"plain","value":"x"}',
+    )
   })
 
-  it("verify: true explains a value no branch can print faithfully", () => {
-    const g2 = G.choice(hashed, plain)
-    // "#x" reads back as hashed, and "x" reads back as plain, so both agree
-    // with their own value; only a genuinely ambiguous grammar fails.
-    assert.equal(
-      Result.getOrThrow(G.print(g2, { kind: "plain", value: "x" } as const, { verify: true })),
-      "x",
-    )
+  it("plain print stays unchecked", () => {
+    assert.equal(printOk(g, wrong), "x")
+  })
+})
 
-    const number = G.regex(/\d+/, "number").pipe(
-      G.transform({
-        decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),
-        encode: (n) => String(n.value),
-      }),
-    )
-    const symbol = G.regex(/[^\s()]+/, "symbol").pipe(
-      G.transform({
-        decode: (value) => ({ kind: "symbol" as const, value }),
-        encode: (s) => s.value,
-      }),
-    )
-    const atom = G.choice(number, symbol)
-    const r = G.print(atom, { kind: "symbol", value: "42" }, { verify: true })
+describe("checkedChoice selects a branch that reads back", () => {
+  const g = G.checkedChoice(plain, hashed)
+
+  it("prints with the branch whose text round-trips", () => {
+    assert.equal(printOk(g, wrong), "#x")
+    assert.equal(printOk(g, { kind: "plain", value: "x" } as const), "x")
+  })
+
+  it("printSelection: roundTrip is the explicit form", () => {
+    const explicit = G.choice(plain, hashed, { printSelection: "roundTrip" })
+    assert.equal(printOk(explicit, wrong), "#x")
+  })
+
+  it("explains a value no branch can print faithfully", () => {
+    const atom = G.checkedChoice(number, symbol)
+    const r = G.print(atom, { kind: "symbol", value: "42" })
     assert.ok(Result.isFailure(r))
     assert.equal(
       r.failure.message,
@@ -70,6 +84,23 @@ describe("positional choice picks the first branch whose printer accepts", () =>
         '  <symbol>: prints as "42", which reads back as {"kind":"number","value":42}',
       ].join("\n"),
     )
+  })
+})
+
+describe("printChecked is the whole-grammar round-trip guarantee", () => {
+  it("catches an ambiguous plain choice that no branch selection fixes", () => {
+    const atom = G.choice(number, symbol)
+    const r = G.printChecked(atom, { kind: "symbol", value: "42" })
+    assert.ok(Result.isFailure(r))
+    assert.equal(
+      r.failure.message,
+      '{"kind":"symbol","value":"42"} prints as "42", which reads back as {"kind":"number","value":42}',
+    )
+  })
+
+  it("succeeds when the round trip holds", () => {
+    const atom = G.choice(number, symbol)
+    assert.equal(Result.getOrThrow(G.printChecked(atom, { kind: "number", value: 42 })), "42")
   })
 })
 
@@ -85,6 +116,16 @@ describe("choiceOn prints by reading the tag", () => {
   it("parses in key order", () => {
     assert.deepEqual(parseOk(g, "#abc"), { kind: "hashed", value: "abc" })
     assert.deepEqual(parseOk(g, "abc"), { kind: "plain", value: "abc" })
+  })
+
+  it("accepts ordered [key, grammar] entries", () => {
+    const entries = G.choiceOn("kind", [
+      ["plain", plain],
+      ["hashed", hashed],
+    ] as const)
+    assert.equal(printOk(entries, wrong), "#x")
+    assert.deepEqual(parseOk(entries, "#abc"), { kind: "hashed", value: "abc" })
+    assert.deepEqual(parseOk(entries, "abc"), { kind: "plain", value: "abc" })
   })
 
   it("rejects a value without the tag or with an unknown tag", () => {
@@ -105,33 +146,19 @@ describe("choiceOn prints by reading the tag", () => {
     assert.equal(G.render(g), 'on(kind){"plain" => <word> | "hashed" => "#" <word>}')
   })
 
-  it("refuses integer-like keys", () => {
+  it("refuses integer-like object keys", () => {
     // SAFETY: the integer key is rejected at runtime before types matter.
     assert.throws(() => G.choiceOn("kind", { 1: plain } as never), /looks like an integer/)
   })
 
   it("does not detect an ambiguous grammar on its own", () => {
-    const number = G.regex(/\d+/, "number").pipe(
-      G.transform({
-        decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),
-        encode: (n) => String(n.value),
-      }),
-    )
-    const symbol = G.regex(/[^\s()]+/, "symbol").pipe(
-      G.transform({
-        decode: (value) => ({ kind: "symbol" as const, value }),
-        encode: (s) => s.value,
-      }),
-    )
     const atom = G.choiceOn("kind", { number, symbol })
     // The tag says symbol, so choiceOn prints "42"; the grammar reads it as a number.
     assert.equal(printOk(atom, { kind: "symbol", value: "42" }), "42")
     assert.deepEqual(parseOk(atom, "42"), { kind: "number", value: 42 })
-    // verify has nothing to check here: the dispatch is not a trial.
-    assert.equal(
-      Result.getOrThrow(G.print(atom, { kind: "symbol", value: "42" }, { verify: true })),
-      "42",
-    )
+    // printChecked exposes the ambiguity the tag dispatch hides.
+    const r = G.printChecked(atom, { kind: "symbol", value: "42" })
+    assert.ok(Result.isFailure(r))
   })
 })
 

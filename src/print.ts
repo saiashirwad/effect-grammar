@@ -27,14 +27,6 @@ class Failure {
 
 const fail = (issue: PrintIssue): Failure => new Failure(issue)
 
-export interface PrintOptions {
-  readonly verify?: boolean | undefined
-}
-
-interface Context {
-  readonly verify: boolean
-}
-
 const bindingPath = (
   pattern: Pattern,
   scope: ScopeId,
@@ -73,7 +65,6 @@ const outputGen = (
   node: Extract<Node, { _tag: "Gen" }>,
   value: Value,
   env: Frame | undefined,
-  ctx: Context,
 ): string | Failure => {
   const local = frame(node.scope, node.slotCount, env)
   const issue = unifyPattern(node.result, value, local)
@@ -83,10 +74,10 @@ const outputGen = (
   for (const [index, step] of node.steps.entries()) {
     const result =
       step._tag === "Silent"
-        ? out(step.grammar, undefined, local, ctx)
+        ? out(step.grammar, undefined, local)
         : local.values[step.slot] === Unbound
           ? fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
-          : out(step.grammar, local.values[step.slot], local, ctx)
+          : out(step.grammar, local.values[step.slot], local)
     if (result instanceof Failure) {
       const path =
         step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
@@ -97,12 +88,7 @@ const outputGen = (
   return text
 }
 
-const out = (
-  grammar: GrammarInternal,
-  value: Value,
-  env: Frame | undefined,
-  ctx: Context,
-): string | Failure => {
+const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): string | Failure => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
@@ -123,13 +109,13 @@ const out = (
       return value
     }
     case "Gen":
-      return outputGen(node, value, env, ctx)
+      return outputGen(node, value, env)
     case "Wrap": {
-      const open = out(node.open, undefined, env, ctx)
+      const open = out(node.open, undefined, env)
       if (open instanceof Failure) return open
-      const inner = out(node.inner, value, env, ctx)
+      const inner = out(node.inner, value, env)
       if (inner instanceof Failure) return inner
-      const close = out(node.close, undefined, env, ctx)
+      const close = out(node.close, undefined, env)
       return close instanceof Failure ? close : open + inner + close
     }
     case "Choice": {
@@ -151,16 +137,17 @@ const out = (
             actual: key,
           })
         }
-        return out(node.options[index]!, value, env, ctx)
+        return out(node.options[index]!, value, env)
       }
+      const roundTrip = node.printSelection === "roundTrip"
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
-        const result = out(option, value, env, ctx)
+        const result = out(option, value, env)
         if (result instanceof Failure) {
           issues.push(result.issue)
           continue
         }
-        if (!ctx.verify) return result
+        if (!roundTrip) return result
         const back = reparse(grammar, result, env)
         if (back.ok && Equal.equals(back.value, value)) return result
         issues.push({
@@ -189,11 +176,11 @@ const out = (
           detail: `expected ${expected} items, got ${value.length}`,
         })
       }
-      const separator = out(node.sep, undefined, env, ctx)
+      const separator = out(node.sep, undefined, env)
       if (separator instanceof Failure) return separator
       let text = ""
       for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env, ctx)
+        const result = out(node.inner, item, env)
         if (result instanceof Failure) {
           return fail({ _tag: "AtPath", path: index, issue: result.issue })
         }
@@ -202,7 +189,7 @@ const out = (
       return text
     }
     case "Optional":
-      return value === undefined ? "" : out(node.inner, value, env, ctx)
+      return value === undefined ? "" : out(node.inner, value, env)
     case "Transform": {
       try {
         if (node.is?.(unsafeToNever(value)) === false) {
@@ -220,7 +207,7 @@ const out = (
               actual: value,
               detail: encoded.failure.message,
             })
-          : out(node.inner, encoded.success, env, ctx)
+          : out(node.inner, encoded.success, env)
       } catch (error) {
         return fail({
           _tag: "InvalidValue",
@@ -231,11 +218,11 @@ const out = (
       }
     }
     case "Skip":
-      return out(node.inner, node.printAs, env, ctx)
+      return out(node.inner, node.printAs, env)
     case "Label":
-      return out(node.inner, value, env, ctx)
+      return out(node.inner, value, env)
     case "Suspend":
-      return out(resolve(node), value, env, ctx)
+      return out(resolve(node), value, env)
     case "Match": {
       const key = evaluate(node.scrutinee, env)
       if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
@@ -246,7 +233,7 @@ const out = (
             expected: `a match case for ${preview(key)}`,
             actual: value,
           })
-        : out(matchCase.grammar, value, env, ctx)
+        : out(matchCase.grammar, value, env)
     }
     case "Take": {
       const count = evaluate(node.count, env)
@@ -281,7 +268,7 @@ const out = (
       }
       let text = ""
       for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env, ctx)
+        const result = out(node.inner, item, env)
         if (result instanceof Failure) {
           return fail({ _tag: "AtPath", path: index, issue: result.issue })
         }
@@ -295,16 +282,45 @@ const out = (
 export const printUnknown = (
   grammar: GrammarInternal,
   value: Value,
-  options?: PrintOptions,
 ): Result.Result<string, PrintError> => {
-  const result = out(grammar, value, undefined, { verify: options?.verify === true })
+  const result = out(grammar, value, undefined)
   return result instanceof Failure
     ? Result.fail(new PrintError({ issue: result.issue }))
     : Result.succeed(result)
 }
 
-export const print = <A>(
-  grammar: Grammar<A>,
-  value: A,
-  options?: PrintOptions,
-): Result.Result<string, PrintError> => printUnknown(grammar, value, options)
+/** Write a value as canonical text. No round-trip guarantee; see {@link printCheckedUnknown}. */
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  printUnknown(grammar, value)
+
+export const printCheckedUnknown = (
+  grammar: GrammarInternal,
+  value: Value,
+): Result.Result<string, PrintError> => {
+  const printed = printUnknown(grammar, value)
+  if (Result.isFailure(printed)) return printed
+  const back = reparse(grammar, printed.success, undefined)
+  if (!back.ok) {
+    return Result.fail(
+      new PrintError({
+        issue: { _tag: "RoundTrip", value, printed: printed.success, error: back.error.message },
+      }),
+    )
+  }
+  if (!Equal.equals(back.value, value)) {
+    return Result.fail(
+      new PrintError({
+        issue: { _tag: "RoundTrip", value, printed: printed.success, parsed: back.value },
+      }),
+    )
+  }
+  return printed
+}
+
+/**
+ * Print a value, then parse the whole output back and confirm it equals the
+ * original. Fails if the text would decode to a different value, so a checked
+ * print never hides a broken round trip.
+ */
+export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  printCheckedUnknown(grammar, value)
