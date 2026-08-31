@@ -5,36 +5,21 @@ import { describe, it } from "vitest"
 import type { Node } from "../src/core.ts"
 import * as G from "../src/index.ts"
 import { assertPrintParse } from "../src/testing.ts"
-import { parseOk, printOk } from "./helpers.ts"
+import { parseOk } from "./helpers.ts"
 
 // One row per Node variant, exercising parse, print, and render together so a
 // behavior that drifts between the three interpreters is caught. The `satisfies`
 // clause makes a new Node variant a compile error until it gains a row here.
 
-interface Row {
-  readonly grammar: G.Grammar<unknown>
+interface Row<A = unknown> {
+  readonly grammar: G.Grammar<A>
   readonly text: string
-  readonly value: unknown
+  readonly value: A
   readonly render?: string | undefined
   readonly renderIncludes?: string | undefined
-  readonly deps: boolean
 }
-const row = <A>(spec: {
-  grammar: G.Grammar<A>
-  text: string
-  value: A
-  render?: string
-  renderIncludes?: string
-  deps?: boolean
-}): Row => ({
-  // SAFETY: the table erases the value type; each row pairs a grammar with a value of its own type.
-  grammar: spec.grammar as G.Grammar<unknown>,
-  text: spec.text,
-  value: spec.value,
-  render: spec.render,
-  renderIncludes: spec.renderIncludes,
-  deps: spec.deps ?? false,
-})
+// SAFETY: the table erases the value type; each row pairs a grammar with a value of its own type.
+const row = <A>(spec: Row<A>): Row => spec as Row
 
 const word = G.regex(/[a-z]+/, "word")
 
@@ -120,21 +105,18 @@ const table = {
     text: "n5",
     value: { kind: "n", value: 5 },
     renderIncludes: "match(",
-    deps: true,
   }),
   Take: row({
     grammar: takeGrammar,
     text: "2:ab",
     value: { length: 2, payload: "ab" },
     renderIncludes: "<char>{",
-    deps: true,
   }),
   RepeatExact: row({
     grammar: repeatGrammar,
     text: "3:101",
     value: { count: 3, bits: ["1", "0", "1"] },
     renderIncludes: "){",
-    deps: true,
   }),
 } satisfies Record<Node["_tag"], Row>
 
@@ -143,11 +125,6 @@ describe("interpreter table (parse / print / render / law per Node)", () => {
     describe(tag, () => {
       it("parses the sample text", () => {
         assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
-      })
-
-      it("prints a form that parses back to the value", () => {
-        const printed = printOk(entry.grammar, entry.value)
-        assert.deepEqual(parseOk(entry.grammar, printed), entry.value)
       })
 
       it("renders", () => {

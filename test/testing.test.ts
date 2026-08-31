@@ -10,8 +10,8 @@ import {
   checkCanonicalization,
   checkPrintParse,
 } from "../src/testing.ts"
+import { hashed, plain, wrong } from "./helpers.ts"
 
-const word = G.regex(/[a-z]+/, "word")
 const canonical = G.between(G.spaces, G.integer, G.spaces)
 
 describe("assertPrintParse", () => {
@@ -20,23 +20,7 @@ describe("assertPrintParse", () => {
   })
 
   it("throws when print produces text that reads back differently", () => {
-    const plain = word.pipe(
-      G.transform({
-        decode: (value) => ({ kind: "plain" as const, value }),
-        encode: (v) => v.value,
-      }),
-    )
-    const hashed = G.prefix("#", word).pipe(
-      G.transform({
-        decode: (value) => ({ kind: "hashed" as const, value }),
-        encode: (v) => v.value,
-      }),
-    )
-    const g = G.choice(plain, hashed)
-    assert.throws(
-      () => assertPrintParse(g, { kind: "hashed", value: "x" } as const),
-      /changed the value/,
-    )
+    assert.throws(() => assertPrintParse(G.choice(plain, hashed), wrong), /reads back as/)
   })
 })
 

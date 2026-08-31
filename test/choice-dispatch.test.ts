@@ -4,38 +4,17 @@ import { Result } from "effect"
 import { describe, it } from "vitest"
 
 import * as G from "../src/index.ts"
-import { assertRoundTrip, parseOk, printOk } from "./helpers.ts"
-
-// Two branches whose encoders ignore the discriminant. `plain` accepts any
-// value with a `value` field, so a trial-based printer picks it for a `hashed`
-// value and prints "x" instead of "#x".
-const word = G.regex(/[a-z]+/, "word")
-const plain = word.pipe(
-  G.transform({
-    decode: (value) => ({ kind: "plain" as const, value }),
-    encode: (v) => v.value,
-  }),
-)
-const hashed = G.prefix("#", word).pipe(
-  G.transform({
-    decode: (value) => ({ kind: "hashed" as const, value }),
-    encode: (v) => v.value,
-  }),
-)
-const wrong = { kind: "hashed", value: "x" } as const
-
-const number = G.regex(/\d+/, "number").pipe(
-  G.transform({
-    decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),
-    encode: (n) => String(n.value),
-  }),
-)
-const symbol = G.regex(/[^\s()]+/, "symbol").pipe(
-  G.transform({
-    decode: (value) => ({ kind: "symbol" as const, value }),
-    encode: (s) => s.value,
-  }),
-)
+import {
+  assertRoundTrip,
+  hashed,
+  number,
+  parseOk,
+  plain,
+  printOk,
+  symbol,
+  word,
+  wrong,
+} from "./helpers.ts"
 
 describe("positional choice picks the first branch whose printer accepts", () => {
   const g = G.choice(plain, hashed)

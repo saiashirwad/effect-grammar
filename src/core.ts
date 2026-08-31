@@ -199,3 +199,31 @@ export const isSilent = (grammar: GrammarInternal): grammar is Silent =>
 
 export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal =>
   (node.resolved ??= node.thunk())
+
+/** The grammars a node refers to directly. A `Suspend` yields its resolved target. */
+export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
+  switch (node._tag) {
+    case "Literal":
+    case "Regex":
+    case "Take":
+      return []
+    case "Gen":
+      return node.steps.map((step) => step.grammar)
+    case "Wrap":
+      return [node.open, node.inner, node.close]
+    case "Choice":
+      return node.options
+    case "Many":
+      return [node.inner, node.sep]
+    case "Optional":
+    case "Transform":
+    case "Label":
+    case "Skip":
+    case "RepeatExact":
+      return [node.inner]
+    case "Suspend":
+      return [resolve(node)]
+    case "Match":
+      return node.cases.map((matchCase) => matchCase.grammar)
+  }
+}

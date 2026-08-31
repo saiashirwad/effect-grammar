@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 
-import { Equal, Result } from "effect"
+import { Result } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
@@ -32,12 +32,37 @@ export const printFail = <A>(grammar: Grammar.Grammar<A>, value: A): Grammar.Pri
   return r.failure
 }
 
-export const assertRoundTrip = <A>(grammar: Grammar.Grammar<A>, value: A) => {
-  const printed = printOk(grammar, value)
-  const reparsed = parseOk(grammar, printed)
-  if (!Equal.equals(reparsed, value)) {
-    assert.fail(
-      `round trip changed the value\n  original: ${JSON.stringify(value)}\n  printed:  ${JSON.stringify(printed)}\n  reparsed: ${JSON.stringify(reparsed)}`,
-    )
-  }
-}
+export { assertPrintParse as assertRoundTrip } from "../src/testing.ts"
+
+// Two branches whose encoders ignore the discriminant. `plain` accepts any
+// value with a `value` field, so a trial-based printer picks it for a `hashed`
+// value and prints "x" instead of "#x".
+export const word = Grammar.regex(/[a-z]+/, "word")
+export const plain = word.pipe(
+  Grammar.transform({
+    decode: (value) => ({ kind: "plain" as const, value }),
+    encode: (v) => v.value,
+  }),
+)
+export const hashed = Grammar.prefix("#", word).pipe(
+  Grammar.transform({
+    decode: (value) => ({ kind: "hashed" as const, value }),
+    encode: (v) => v.value,
+  }),
+)
+export const wrong = { kind: "hashed", value: "x" } as const
+
+// "42" is both a number and a symbol, so a symbol whose text is "42" reads back
+// as a number no matter which branch prints it.
+export const number = Grammar.regex(/\d+/, "number").pipe(
+  Grammar.transform({
+    decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),
+    encode: (n) => String(n.value),
+  }),
+)
+export const symbol = Grammar.regex(/[^\s()]+/, "symbol").pipe(
+  Grammar.transform({
+    decode: (value) => ({ kind: "symbol" as const, value }),
+    encode: (s) => s.value,
+  }),
+)

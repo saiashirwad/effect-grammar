@@ -6,13 +6,11 @@ import type {
   Grammar,
   GrammarInternal,
   GrammarIssue,
-  MatchKey,
   Node,
   ScopeId,
 } from "./core.ts"
-import { nodeOf, resolve } from "./core.ts"
-import type { ParseError } from "./errors.ts"
-import { preview, type PrintError } from "./errors.ts"
+import { children, nodeOf, resolve } from "./core.ts"
+import type { ParseError, PrintError } from "./errors.ts"
 import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 import { describe, render } from "./render.ts"
@@ -30,11 +28,10 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): boolean => {
   switch (node._tag) {
     case "Literal":
       return node.value === ""
-    case "Regex": {
+    case "Regex":
+      // `regex` always compiles with the sticky flag, so a match here is empty at 0.
       node.re.lastIndex = 0
-      const match = node.re.exec("")
-      return match !== null && match.index === 0 && match[0] === ""
-    }
+      return node.re.exec("") !== null
     case "Gen":
       return node.steps.every((step) => matchesEmpty(step.grammar, seen))
     case "Wrap":
@@ -67,14 +64,28 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): boolean => {
   }
 }
 
-const duplicateKeys = (keys: ReadonlyArray<MatchKey>): ReadonlyArray<MatchKey> => {
-  const seen = new Set<MatchKey>()
-  const dupes = new Set<MatchKey>()
-  for (const key of keys) {
-    if (seen.has(key)) dupes.add(key)
-    seen.add(key)
+/** Walk every node reachable from `grammar`, once per `Suspend`. */
+const eachNode = (grammar: GrammarInternal, visit: (node: Node) => void, seen: Set<Node>): void => {
+  const node = nodeOf(grammar)
+  if (node._tag === "Suspend") {
+    if (seen.has(node)) return
+    seen.add(node)
   }
-  return [...dupes]
+  visit(node)
+  for (const child of children(node)) eachNode(child, visit, seen)
+}
+
+const checkRef = (
+  expr: Expr,
+  where: string,
+  active: ReadonlyArray<ScopeId>,
+  issues: Array<GrammarIssue>,
+): void => {
+  if (!active.includes(exprScope(expr))) {
+    issues.push({
+      message: `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
+    })
+  }
 }
 
 const walk = (
@@ -84,81 +95,43 @@ const walk = (
   issues: Array<GrammarIssue>,
 ): void => {
   const node = nodeOf(grammar)
-  const checkRef = (expr: Expr, where: string): void => {
-    if (!active.includes(exprScope(expr))) {
-      issues.push({
-        message: `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
-      })
-    }
-  }
   switch (node._tag) {
-    case "Literal":
-    case "Regex":
-      return
     case "Gen": {
       const inner = [...active, node.scope]
       for (const step of node.steps) walk(step.grammar, inner, seen, issues)
       return
     }
-    case "Wrap":
-      walk(node.open, active, seen, issues)
-      walk(node.inner, active, seen, issues)
-      walk(node.close, active, seen, issues)
-      return
-    case "Choice": {
-      if (node.on !== undefined) {
-        for (const key of duplicateKeys(node.on.keys)) {
-          issues.push({ message: `choiceOn(${node.on.tag}): duplicate key ${preview(key)}` })
-        }
-      }
-      for (const option of node.options) walk(option, active, seen, issues)
-      return
-    }
-    case "Many": {
+    case "Many":
       if (node.max === Number.POSITIVE_INFINITY && matchesEmpty(node.inner, new Set())) {
         issues.push({
           message: `unbounded repetition of ${describe(node.inner)}, which can match the empty string, so parsing could not make progress`,
         })
       }
-      walk(node.inner, active, seen, issues)
-      walk(node.sep, active, seen, issues)
-      return
-    }
-    case "Optional":
-    case "Transform":
-    case "Label":
-    case "Skip":
-      walk(node.inner, active, seen, issues)
-      return
-    case "Suspend": {
+      break
+    case "Suspend":
       if (seen.has(node)) return
       seen.add(node)
-      walk(resolve(node), active, seen, issues)
-      return
-    }
-    case "Match": {
-      checkRef(node.scrutinee, "match")
-      for (const key of duplicateKeys(node.cases.map((matchCase) => matchCase.key))) {
-        issues.push({ message: `match: duplicate case key ${preview(key)}` })
-      }
-      for (const matchCase of node.cases) walk(matchCase.grammar, active, seen, issues)
-      return
-    }
+      break
+    case "Match":
+      checkRef(node.scrutinee, "match", active, issues)
+      break
     case "Take":
-      checkRef(node.count, "take")
-      return
+      checkRef(node.count, "take", active, issues)
+      break
     case "RepeatExact":
-      checkRef(node.count, "repeat")
-      walk(node.inner, active, seen, issues)
-      return
+      checkRef(node.count, "repeat", active, issues)
+      break
+    default:
+      break
   }
+  for (const child of children(node)) walk(child, active, seen, issues)
 }
 
 /**
  * Check a grammar for staged errors that `parse` and `print` would otherwise
- * only report when they run: refs used outside their gen, duplicate discriminant
- * keys, and unbounded repetition of an empty-matching grammar. Returns the
- * issues it finds, or an empty array when the grammar is sound.
+ * only report when they run: refs used outside their gen and unbounded
+ * repetition of an empty-matching grammar. Returns the issues it finds, or an
+ * empty array when the grammar is sound.
  */
 export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> => {
   const issues: Array<GrammarIssue> = []
@@ -171,56 +144,6 @@ export interface FidelityEntry {
   readonly fidelity: Fidelity
 }
 
-const collectFidelity = (
-  grammar: GrammarInternal,
-  seen: Set<Node>,
-  entries: Array<FidelityEntry>,
-): void => {
-  const node = nodeOf(grammar)
-  switch (node._tag) {
-    case "Literal":
-    case "Regex":
-    case "Take":
-      return
-    case "Transform":
-      if (node.fidelity !== "claimed-iso") {
-        entries.push({ name: node.name ?? describe(node.inner), fidelity: node.fidelity })
-      }
-      collectFidelity(node.inner, seen, entries)
-      return
-    case "Gen":
-      for (const step of node.steps) collectFidelity(step.grammar, seen, entries)
-      return
-    case "Wrap":
-      collectFidelity(node.open, seen, entries)
-      collectFidelity(node.inner, seen, entries)
-      collectFidelity(node.close, seen, entries)
-      return
-    case "Choice":
-      for (const option of node.options) collectFidelity(option, seen, entries)
-      return
-    case "Many":
-      collectFidelity(node.inner, seen, entries)
-      collectFidelity(node.sep, seen, entries)
-      return
-    case "Optional":
-    case "Label":
-    case "Skip":
-    case "RepeatExact":
-      collectFidelity(node.inner, seen, entries)
-      return
-    case "Suspend": {
-      if (seen.has(node)) return
-      seen.add(node)
-      collectFidelity(resolve(node), seen, entries)
-      return
-    }
-    case "Match":
-      for (const matchCase of node.cases) collectFidelity(matchCase.grammar, seen, entries)
-      return
-  }
-}
-
 /**
  * List the transforms in a grammar that claim no inverse law (`transform`,
  * `transformOrFail`, `partialIso`). An empty result means every transform is an
@@ -228,7 +151,15 @@ const collectFidelity = (
  */
 export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityEntry> => {
   const entries: Array<FidelityEntry> = []
-  collectFidelity(grammar, new Set(), entries)
+  eachNode(
+    grammar,
+    (node) => {
+      if (node._tag === "Transform" && node.fidelity !== "claimed-iso") {
+        entries.push({ name: node.name ?? describe(node.inner), fidelity: node.fidelity })
+      }
+    },
+    new Set(),
+  )
   return entries
 }
 

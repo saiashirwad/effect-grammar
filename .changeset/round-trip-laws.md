@@ -23,8 +23,8 @@ packaging around it.
   guarded) alongside the law-free `transform` and `transformOrFail`.
   `auditFidelity` lists the transforms that claim no inverse.
 - Add `validate` and `compile` to catch staged errors — refs used outside their
-  gen, duplicate discriminant keys, unbounded repetition of an empty-matching
-  grammar — before parse or print.
+  gen, unbounded repetition of an empty-matching grammar — before parse or
+  print. `choiceOn` and `matchValue` reject duplicate keys on construction.
 - Add the `effect-grammar/testing` export with `assertPrintParse`,
   `assertParsePrintCanonical`, `checkPrintParse`, and `checkCanonicalization`.
   The build now cleans `dist` first, so the package no longer ships stale

@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+
+import * as index from "../src/index.ts"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const run = (command: string, args: ReadonlyArray<string>, cwd: string): string =>
@@ -30,14 +32,18 @@ describe("packaged exports", () => {
     if (workspace !== undefined) rmSync(workspace, { recursive: true, force: true })
   })
 
-  it("ships only the current dist modules", () => {
-    const listing = run("tar", ["-tzf", tarball], workspace)
-    for (const stale of ["ast", "recovery", "grammar", "pattern.recovery"]) {
-      expect(listing).not.toContain(`package/dist/${stale}.js`)
-    }
-    for (const shipped of ["index", "schema", "testing"]) {
-      expect(listing).toContain(`package/dist/${shipped}.js`)
-    }
+  it("ships exactly one dist module per source module", () => {
+    const shipped = run("tar", ["-tzf", tarball], workspace)
+      .split("\n")
+      .flatMap((entry) =>
+        /^package\/dist\/[^/]+\.js$/.test(entry) ? [basename(entry, ".js")] : [],
+      )
+      .sort()
+    const sources = readdirSync(join(root, "src"))
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => basename(name, ".ts"))
+      .sort()
+    expect(shipped).toEqual(sources)
   })
 
   it("imports every declared export and hides undeclared files", () => {
@@ -53,8 +59,8 @@ describe("packaged exports", () => {
       "const root = await import('effect-grammar')",
       "const schema = await import('effect-grammar/Schema')",
       "const testing = await import('effect-grammar/testing')",
-      "for (const name of ['parse', 'print', 'printChecked', 'choiceOn', 'checkedChoice', 'iso', 'partialIso', 'validate', 'compile', 'auditFidelity', 'codec']) {",
-      "  if (typeof root[name] !== 'function') throw new Error('missing export ' + name)",
+      `for (const name of ${JSON.stringify(Object.keys(index))}) {`,
+      "  if (!(name in root)) throw new Error('missing export ' + name)",
       "}",
       "if (typeof schema.codec !== 'function') throw new Error('missing Schema.codec')",
       "if (typeof testing.assertPrintParse !== 'function') throw new Error('missing testing.assertPrintParse')",

@@ -147,7 +147,7 @@ export const checkedChoice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
 >(
   ...options: Grammars
-): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options, printSelection: "roundTrip" })
+): Grammar<Type<Grammars[number]>> => choice(...options, { printSelection: "roundTrip" })
 
 export function optional(): <G extends GrammarInternal>(inner: G) => OptionalGrammar<G>
 export function optional(inner: Silent): Silent
@@ -219,6 +219,16 @@ export const match = <K extends string, const Cases extends Readonly<Record<K, G
     cases: Object.keys(cases).map((key) => ({ key, grammar: cases[key as K] })),
   })
 
+const uniqueCases = (
+  entries: ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+): ReadonlyArray<{ readonly key: MatchKey; readonly grammar: GrammarInternal }> => {
+  assertUniqueKeys(
+    entries.map(([key]) => key),
+    "matchValue",
+  )
+  return entries.map(([key, grammar]) => ({ key, grammar }))
+}
+
 type EntryOutput<Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>> = Type<
   Entries[number][1]
 >
@@ -238,7 +248,7 @@ export const matchValue = <
   make({
     _tag: "Match",
     scrutinee: assertInScope(scrutinee, "matchValue"),
-    cases: entries.map(([key, grammar]) => ({ key, grammar })),
+    cases: uniqueCases(entries),
   })
 
 export const take = (count: Ref<number>): Grammar<string> =>
@@ -345,30 +355,22 @@ export const decodeTo =
   <A>(options: DecodeToOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> => {
     let guard: ((value: T) => boolean) | undefined
-    return plainTransform(
-      inner,
-      {
-        ...options,
-        is: options.is ?? ((value) => (guard ??= Schema.is(schema))(value)),
-      },
-      "claimed-iso",
-    )
+    return iso(inner, {
+      ...options,
+      is: options.is ?? ((value) => (guard ??= Schema.is(schema))(value)),
+    })
   }
 
 export const as: {
   <const V>(value: V): (inner: Silent) => Grammar<V>
   <const V>(inner: Silent, value: V): Grammar<V>
 } = F.dual(2, <const V>(inner: Silent, value: V) =>
-  plainTransform(
-    inner,
-    {
-      decode: () => value,
-      encode: () => undefined,
-      is: (input) => Equal.equals(input, value),
-      name: preview(value),
-    },
-    "claimed-iso",
-  ),
+  iso(inner, {
+    decode: () => value,
+    encode: () => undefined,
+    is: (input) => Equal.equals(input, value),
+    name: preview(value),
+  }),
 )
 
 export const flag = (value: Silent | string): Grammar<boolean> =>
@@ -393,14 +395,10 @@ export const defaulted: {
   <A>(value: A): (inner: Grammar<A | undefined>) => Grammar<A>
   <A>(inner: Grammar<A | undefined>, value: A): Grammar<A>
 } = F.dual(dataFirst, <A>(inner: Grammar<A | undefined>, value: A) =>
-  plainTransform(
-    inner,
-    {
-      decode: (input) => input ?? value,
-      encode: (input) => (Equal.equals(input, value) ? undefined : input),
-    },
-    "claimed-iso",
-  ),
+  iso(inner, {
+    decode: (input) => input ?? value,
+    encode: (input) => (Equal.equals(input, value) ? undefined : input),
+  }),
 )
 
 type StructFields = Readonly<Record<string, GrammarInternal>>
@@ -465,6 +463,14 @@ type OnEntries<
 
 const isIntegerKey = (key: string): boolean => String(Number.parseInt(key, 10)) === key
 
+const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void => {
+  const seen = new Set<MatchKey>()
+  for (const key of keys) {
+    if (seen.has(key)) throw new RangeError(`${where}: duplicate key ${preview(key)}`)
+    seen.add(key)
+  }
+}
+
 /**
  * Alternatives dispatched by a discriminant field. Parsing tries the branches
  * in order; printing reads `value[tag]` and prints with the branch of that key,
@@ -502,11 +508,7 @@ export function choiceOn(
       })
   if (entries.length === 0) throw new RangeError("choiceOn: at least one case is required")
   const keys = entries.map(([key]) => key)
-  const seen = new Set<MatchKey>()
-  for (const key of keys) {
-    if (seen.has(key)) throw new RangeError(`choiceOn: duplicate key ${preview(key)}`)
-    seen.add(key)
-  }
+  assertUniqueKeys(keys, "choiceOn")
   return make({
     _tag: "Choice",
     options: entries.map(([, grammar]) => grammar),

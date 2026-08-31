@@ -220,10 +220,11 @@ checkPrintParse(grammar, arbitrary) // property test over an Arbitrary<A>
 
 A dependent grammar (`take`, `repeat`, `match`) can bind a ref in one `gen` and
 use it in another, which only fails when it runs. `validate(grammar)` reports
-those staged errors up front: a ref used outside its gen, duplicate discriminant
-keys, or unbounded repetition of a grammar that matches the empty string.
-`compile(grammar)` validates once and returns prepared `parse`, `print`,
-`printChecked`, `render`, and `fidelity`.
+those staged errors up front: a ref used outside its gen, or unbounded
+repetition of a grammar that matches the empty string. (`choiceOn` and
+`matchValue` reject duplicate keys when you build them.) `compile(grammar)`
+validates once and returns prepared `parse`, `print`, `printChecked`, `render`,
+and `fidelity`.
 
 ## Whitespace
 

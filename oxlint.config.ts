@@ -51,9 +51,9 @@ export default defineConfig({
   },
   overrides: [
     {
-      // Tests drive the real toolchain (pnpm pack, tar, node), so they use
+      // This test drives the real toolchain (pnpm pack, tar, node), so it uses
       // Node's own child_process, fs, and path rather than the Effect wrappers.
-      files: ["test/**"],
+      files: ["test/package.test.ts"],
       rules: {
         "effecttsgo/node-builtin-import": "off",
       },

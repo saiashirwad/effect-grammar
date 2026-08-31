@@ -87,11 +87,15 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
         .map((child) => formatAt(child, []))
         .join("\n  ")}`
     case "RoundTrip":
-      return issue.error === undefined
-        ? `${prefix}${preview(issue.value)} prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
-        : `${prefix}${preview(issue.value)} prints as ${JSON.stringify(issue.printed)}, which does not parse back: ${issue.error}`
+      return `${prefix}${preview(issue.value)} ${describeRoundTrip(issue)}`
   }
 }
+
+/** The tail of a round-trip message: what the value printed as and how that read back. */
+export const describeRoundTrip = (issue: Extract<PrintIssue, { _tag: "RoundTrip" }>): string =>
+  issue.error === undefined
+    ? `prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
+    : `prints as ${JSON.stringify(issue.printed)}, which does not parse back: ${issue.error}`
 
 export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   issue: Schema.Unknown,

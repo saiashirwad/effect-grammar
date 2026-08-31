@@ -12,7 +12,13 @@ import {
   type Value,
 } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
-import { exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import {
+  describeRoundTrip,
+  exceptionMessage,
+  preview,
+  PrintError,
+  type PrintIssue,
+} from "./errors.ts"
 import { reparse } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
@@ -26,6 +32,22 @@ class Failure {
 }
 
 const fail = (issue: PrintIssue): Failure => new Failure(issue)
+
+type RoundTripIssue = Extract<PrintIssue, { _tag: "RoundTrip" }>
+
+/** Parse `printed` back through `grammar`; the issue if it does not read as `value`. */
+const roundTripIssue = (
+  grammar: GrammarInternal,
+  value: Value,
+  printed: string,
+  env: Frame | undefined,
+): RoundTripIssue | undefined => {
+  const back = reparse(grammar, printed, env)
+  if (!back.ok) return { _tag: "RoundTrip", value, printed, error: back.error.message }
+  return Equal.equals(back.value, value)
+    ? undefined
+    : { _tag: "RoundTrip", value, printed, parsed: back.value }
+}
 
 const bindingPath = (
   pattern: Pattern,
@@ -148,15 +170,13 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           continue
         }
         if (!roundTrip) return result
-        const back = reparse(grammar, result, env)
-        if (back.ok && Equal.equals(back.value, value)) return result
+        const issue = roundTripIssue(grammar, value, result, env)
+        if (issue === undefined) return result
         issues.push({
           _tag: "InvalidValue",
           expected: describe(option),
           actual: value,
-          detail: back.ok
-            ? `prints as ${JSON.stringify(result)}, which reads back as ${preview(back.value)}`
-            : `prints as ${JSON.stringify(result)}, which does not parse: ${back.error.message}`,
+          detail: describeRoundTrip(issue),
         })
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
@@ -299,22 +319,8 @@ export const printCheckedUnknown = (
 ): Result.Result<string, PrintError> => {
   const printed = printUnknown(grammar, value)
   if (Result.isFailure(printed)) return printed
-  const back = reparse(grammar, printed.success, undefined)
-  if (!back.ok) {
-    return Result.fail(
-      new PrintError({
-        issue: { _tag: "RoundTrip", value, printed: printed.success, error: back.error.message },
-      }),
-    )
-  }
-  if (!Equal.equals(back.value, value)) {
-    return Result.fail(
-      new PrintError({
-        issue: { _tag: "RoundTrip", value, printed: printed.success, parsed: back.value },
-      }),
-    )
-  }
-  return printed
+  const issue = roundTripIssue(grammar, value, printed.success, undefined)
+  return issue === undefined ? printed : Result.fail(new PrintError({ issue }))
 }
 
 /**

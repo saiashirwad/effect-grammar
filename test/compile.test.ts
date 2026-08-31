@@ -7,6 +7,17 @@ import * as G from "../src/index.ts"
 
 const word = G.regex(/[a-z]+/, "word")
 
+// A ref captured inside a gen and used after it closes.
+const escaped = (() => {
+  let leaked: G.Grammar<string> | undefined
+  G.gen(function* () {
+    const length = yield* G.integer
+    leaked = G.take(length)
+    return length
+  })
+  return leaked!
+})()
+
 describe("validate", () => {
   it("passes a sound grammar", () => {
     const g = G.gen(function* () {
@@ -19,13 +30,6 @@ describe("validate", () => {
   })
 
   it("catches a ref used outside the gen that bound it", () => {
-    let escaped: G.Grammar<string> | undefined
-    G.gen(function* () {
-      const length = yield* G.integer
-      escaped = G.take(length)
-      return length
-    })
-    if (escaped === undefined) assert.fail("expected escaped grammar")
     const issues = G.validate(escaped)
     assert.equal(issues.length, 1)
     assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
@@ -37,20 +41,21 @@ describe("validate", () => {
     assert.match(issues[0]!.message, /can match the empty string/)
   })
 
-  it("catches duplicate match keys", () => {
+  it("has nothing to report for duplicate match keys, which matchValue rejects on construction", () => {
     const selector = G.choice(G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2)))
-    const g = G.gen(function* () {
-      const kind = yield* selector
-      const value = yield* G.matchValue(kind, [
-        [1, G.integer],
-        [1, G.integer],
-        [2, G.integer],
-      ] as const)
-      return { kind, value }
-    })
-    const issues = G.validate(g)
-    assert.equal(issues.length, 1)
-    assert.match(issues[0]!.message, /duplicate case key 1/)
+    assert.throws(
+      () =>
+        G.gen(function* () {
+          const kind = yield* selector
+          const value = yield* G.matchValue(kind, [
+            [1, G.integer],
+            [1, G.integer],
+            [2, G.integer],
+          ] as const)
+          return { kind, value }
+        }),
+      /matchValue: duplicate key 1/,
+    )
   })
 })
 
@@ -65,13 +70,7 @@ describe("compile", () => {
   })
 
   it("throws on an invalid grammar", () => {
-    let escaped: G.Grammar<string> | undefined
-    G.gen(function* () {
-      const length = yield* G.integer
-      escaped = G.take(length)
-      return length
-    })
-    assert.throws(() => G.compile(escaped!), /the grammar has 1 issue/)
+    assert.throws(() => G.compile(escaped), /the grammar has 1 issue/)
   })
 })
 
