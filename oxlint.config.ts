@@ -49,4 +49,14 @@ export default defineConfig({
     "effecttsgo/layer-merge-all-with-dependencies": "off",
     "effecttsgo/return-effect-in-gen": "off",
   },
+  overrides: [
+    {
+      // Tests drive the real toolchain (pnpm pack, tar, node), so they use
+      // Node's own child_process, fs, and path rather than the Effect wrappers.
+      files: ["test/**"],
+      rules: {
+        "effecttsgo/node-builtin-import": "off",
+      },
+    },
+  ],
 })
