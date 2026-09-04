@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
-import { parseFail, parseOk } from "./helpers.ts"
+import { parseFail, parseOk, printOk } from "./helpers.ts"
 
 describe("correctness regressions", () => {
   it("rejects invalid repetition bounds at construction", () => {
@@ -70,5 +70,29 @@ describe("correctness regressions", () => {
     })
     assert.deepEqual(parseOk(g, "1;2=3"), { first: 1, second: { a: 2, b: 3 } })
     assert.deepEqual(parseOk(g, "1=2;3=4"), { first: { a: 1, b: 2 }, second: { a: 3, b: 4 } })
+  })
+
+  it("keeps a computed __proto__ return field as an own property", () => {
+    const inner = Grammar.gen(function* () {
+      const value = yield* Grammar.integer
+      return { value }
+    })
+    const key = "__proto__"
+    const grammar = Grammar.gen(function* () {
+      const value = yield* inner
+      return { [key]: value }
+    })
+
+    const result = parseOk(grammar, "1")
+    assert.equal(Object.hasOwn(result, key), true)
+    assert.equal(Object.getPrototypeOf(result), Object.prototype)
+    assert.equal(Object.getOwnPropertyDescriptor(result, key)?.enumerable, true)
+    assert.deepEqual(result[key], { value: 1 })
+    assert.equal(printOk(grammar, result), "1")
+  })
+
+  it("rejects value as the taggedChoice tag", () => {
+    // @ts-expect-error "value" is reserved for the branch payload
+    assert.throws(() => Grammar.taggedChoice("value", { number: Grammar.integer }), /reserved/)
   })
 })

@@ -163,7 +163,8 @@ Three ways out, from most to least specific:
   ] as const)
   ```
 
-  `taggedChoice` is `choiceOn` for values shaped `{ [tag]: key, value }`.
+  `taggedChoice` is `choiceOn` for values shaped `{ [tag]: key, value }`. The
+  tag name cannot be `"value"`, which is reserved for the branch payload.
   `choiceOn` fixes printer dispatch; it does not remove parse ambiguity, so two
   branches may still parse the same text.
 
@@ -220,7 +221,9 @@ checkPrintParse(grammar, arbitrary) // property test over an Arbitrary<A>
 A dependent grammar (`take`, `repeat`, `match`) can bind a ref in one `gen` and
 use it in another, which only fails when it runs. `validate(grammar)` reports
 those staged errors up front: a ref used outside its gen, or unbounded
-repetition of a grammar that matches the empty string. (`choiceOn` and
+repetition of a grammar that is known to match the empty string. Validation does
+not run transforms, so it treats their empty-match behavior as unknown; the
+parser still rejects a repeated item that consumes no input. (`choiceOn` and
 `matchValue` reject duplicate keys when you build them.) `compile(grammar)`
 validates once and returns prepared `parse`, `print`, `printChecked`, `render`,
 and `fidelity`.

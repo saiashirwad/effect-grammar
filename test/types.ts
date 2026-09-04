@@ -2,6 +2,13 @@ import * as G from "../src/index.ts"
 
 const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
 
+// `value` is reserved for the tagged branch payload.
+// @ts-expect-error taggedChoice cannot use "value" as its tag
+G.taggedChoice("value", { number: G.integer })
+// A tag chosen at runtime remains valid and meets the runtime reserved-name check.
+const dynamicTag: string = "kind"
+G.taggedChoice(dynamicTag, { number: G.integer })
+
 // A ref has no value while the grammar is built, so JavaScript cannot branch on it.
 G.gen(function* () {
   const kind = yield* kindOf

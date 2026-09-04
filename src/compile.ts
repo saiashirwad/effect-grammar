@@ -18,40 +18,61 @@ import { describe, render } from "./render.ts"
 const exprScope = (expr: Expr): ScopeId =>
   expr._tag === "Ref" ? expr.scope : exprScope(expr.object)
 
-/**
- * True only when the grammar provably matches the empty string. Unknown cases
- * (a `Match` key, a `take` count, an unresolved `Suspend`) return `false`, so
- * the check never reports a false positive.
- */
-const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): boolean => {
+type EmptyMatch = "yes" | "no" | "unknown"
+
+const allMatchEmpty = (grammars: Iterable<GrammarInternal>, seen: Set<Node>): EmptyMatch => {
+  let result: EmptyMatch = "yes"
+  for (const grammar of grammars) {
+    const match = matchesEmpty(grammar, seen)
+    if (match === "no") return "no"
+    if (match === "unknown") result = "unknown"
+  }
+  return result
+}
+
+/** Check whether the grammar can be proved to match or reject empty input. */
+const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
-      return node.value === ""
+      return node.value === "" ? "yes" : "no"
     case "Regex":
       // `regex` always compiles with the sticky flag, so a match here is empty at 0.
       node.re.lastIndex = 0
-      return node.re.exec("") !== null
+      return node.re.exec("") === null ? "no" : "yes"
     case "Gen":
-      return node.steps.every((step) => matchesEmpty(step.grammar, seen))
-    case "Wrap":
-      return (
-        matchesEmpty(node.open, seen) &&
-        matchesEmpty(node.inner, seen) &&
-        matchesEmpty(node.close, seen)
+      return allMatchEmpty(
+        node.steps.map((step) => step.grammar),
+        seen,
       )
-    case "Choice":
-      return node.options.some((option) => matchesEmpty(option, seen))
-    case "Many":
-      return node.min === 0 || matchesEmpty(node.inner, seen)
+    case "Wrap":
+      return allMatchEmpty([node.open, node.inner, node.close], seen)
+    case "Choice": {
+      let result: EmptyMatch = "no"
+      for (const option of node.options) {
+        const match = matchesEmpty(option, seen)
+        if (match === "yes") return "yes"
+        if (match === "unknown") result = "unknown"
+      }
+      return result
+    }
+    case "Many": {
+      if (node.max === 0) return "yes"
+      const item = matchesEmpty(node.inner, seen)
+      // A zero-width item makes the repetition fail its own progress guard.
+      if (item === "yes") return "no"
+      if (item === "unknown") return "unknown"
+      return node.min === 0 ? "yes" : "no"
+    }
     case "Optional":
-      return true
+      return "yes"
     case "Transform":
+      return "unknown"
     case "Label":
     case "Skip":
       return matchesEmpty(node.inner, seen)
     case "Suspend": {
-      if (seen.has(node)) return false
+      if (seen.has(node)) return "unknown"
       seen.add(node)
       const empty = matchesEmpty(resolve(node), seen)
       seen.delete(node)
@@ -60,11 +81,11 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): boolean => {
     case "Match":
     case "Take":
     case "RepeatExact":
-      return false
+      return "unknown"
   }
 }
 
-/** Walk every node reachable from `grammar`, once per `Suspend`. */
+/** Walk every node reachable from `grammar`, once per `Suspend` node. */
 const eachNode = (grammar: GrammarInternal, visit: (node: Node) => void, seen: Set<Node>): void => {
   const node = nodeOf(grammar)
   if (node._tag === "Suspend") {
@@ -88,30 +109,43 @@ const checkRef = (
   }
 }
 
+const sameScopePath = (left: ReadonlyArray<ScopeId>, right: ReadonlyArray<ScopeId>): boolean =>
+  left.length === right.length && left.every((scope, index) => scope === right[index])
+
 const walk = (
   grammar: GrammarInternal,
   active: ReadonlyArray<ScopeId>,
-  seen: Set<Node>,
+  visiting: Set<Node>,
+  completed: WeakMap<Node, Array<ReadonlyArray<ScopeId>>>,
   issues: Array<GrammarIssue>,
 ): void => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Gen": {
       const inner = [...active, node.scope]
-      for (const step of node.steps) walk(step.grammar, inner, seen, issues)
+      for (const step of node.steps) walk(step.grammar, inner, visiting, completed, issues)
       return
     }
     case "Many":
-      if (node.max === Number.POSITIVE_INFINITY && matchesEmpty(node.inner, new Set())) {
+      if (node.max === Number.POSITIVE_INFINITY && matchesEmpty(node.inner, new Set()) === "yes") {
         issues.push({
           message: `unbounded repetition of ${describe(node.inner)}, which can match the empty string, so parsing could not make progress`,
         })
       }
       break
     case "Suspend":
-      if (seen.has(node)) return
-      seen.add(node)
-      break
+      if (visiting.has(node)) return
+      const paths = completed.get(node)
+      if (paths?.some((path) => sameScopePath(path, active))) return
+      visiting.add(node)
+      try {
+        for (const child of children(node)) walk(child, active, visiting, completed, issues)
+      } finally {
+        visiting.delete(node)
+      }
+      if (paths === undefined) completed.set(node, [active.slice()])
+      else paths.push(active.slice())
+      return
     case "Match":
       checkRef(node.scrutinee, "match", active, issues)
       break
@@ -124,18 +158,18 @@ const walk = (
     default:
       break
   }
-  for (const child of children(node)) walk(child, active, seen, issues)
+  for (const child of children(node)) walk(child, active, visiting, completed, issues)
 }
 
 /**
  * Check a grammar for staged errors that `parse` and `print` would otherwise
  * only report when they run: refs used outside their gen and unbounded
- * repetition of an empty-matching grammar. Returns the issues it finds, or an
- * empty array when the grammar is sound.
+ * repetition of a grammar proven to match empty input. Returns the issues
+ * these checks find; an empty array is not proof of all runtime behavior.
  */
 export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> => {
   const issues: Array<GrammarIssue> = []
-  walk(grammar, [], new Set(), issues)
+  walk(grammar, [], new Set(), new WeakMap(), issues)
   return issues
 }
 
@@ -145,9 +179,9 @@ export interface FidelityEntry {
 }
 
 /**
- * List the transforms in a grammar that claim no inverse law (`transform`,
- * `transformOrFail`, `partialIso`). An empty result means every transform is an
- * `iso`, `decodeTo`, `as`, or the like, so nothing silently breaks round trips.
+ * List the transforms in a grammar that do not claim a full inverse law
+ * (`transform`, `transformOrFail`, `partialIso`). An empty result means each
+ * transform makes that claim; it does not prove the claim or a round trip.
  */
 export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityEntry> => {
   const entries: Array<FidelityEntry> = []
@@ -173,8 +207,8 @@ export interface Compiled<A> {
 
 /**
  * Validate a grammar once, then return prepared operations bound to it.
- * Throws if {@link validate} finds any issue, so a compiled grammar is known
- * sound before its first parse or print.
+ * Throws if {@link validate} finds an issue. Other input, value, callback, and
+ * round-trip failures can still occur when a prepared operation runs.
  */
 export const compile = <A>(grammar: Grammar<A>): Compiled<A> => {
   const issues = validate(grammar)

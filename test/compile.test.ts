@@ -39,6 +39,92 @@ describe("validate", () => {
     const issues = G.validate(G.many(G.regex(/x*/, "xs")))
     assert.equal(issues.length, 1)
     assert.match(issues[0]!.message, /can match the empty string/)
+    assert.throws(() => G.compile(G.many(G.literal(""))), /can match the empty string/)
+  })
+
+  it("does not claim a bounded repetition of an empty item matches empty", () => {
+    const inner = G.many(G.empty, { min: 1, max: 2 })
+    const outer = G.many(inner)
+
+    assert.deepEqual(G.validate(outer), [])
+    assert.deepEqual(Result.getOrThrow(G.compile(outer).parse("")), [])
+  })
+
+  it("detects that a zero-maximum repetition always matches empty", () => {
+    const inner = G.many(G.empty, { max: 0 })
+    const outer = G.many(inner)
+
+    const issues = G.validate(outer)
+    assert.equal(issues.length, 1)
+    assert.match(issues[0]!.message, /can match the empty string/)
+    assert.throws(() => G.compile(outer), /can match the empty string/)
+  })
+
+  it("does not claim a fallible transform matches empty", () => {
+    const nonempty = G.regex(/x*/, "xs").pipe(
+      G.transformOrFail({
+        decode: (value) =>
+          value === ""
+            ? Result.fail({ message: "expected at least one x" })
+            : Result.succeed(value),
+        encode: Result.succeed,
+      }),
+    )
+    const grammar = G.many(nonempty.pipe(G.label("nonempty xs")))
+
+    assert.deepEqual(G.validate(grammar), [])
+    assert.deepEqual(Result.getOrThrow(G.compile(grammar).parse("xx")), ["xx"])
+  })
+
+  it("leaves an empty-producing transform to the runtime progress check", () => {
+    const empty = G.regex(/x*/, "xs").pipe(
+      G.transform({
+        decode: () => "x",
+        encode: () => "",
+      }),
+      G.skip(""),
+    )
+    const grammar = G.many(empty)
+
+    assert.deepEqual(G.validate(grammar), [])
+    const parsed = G.compile(grammar).parse("")
+    assert.equal(Result.isFailure(parsed), true)
+    if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /consumes input/)
+  })
+
+  it("validates a delayed grammar in each ref scope where it is used", () => {
+    let delayed: G.Grammar<string> | undefined
+    const owner = G.gen(function* () {
+      const length = yield* G.integer
+      const dependent = G.gen(function* () {
+        const payload = yield* G.take(length)
+        return payload
+      })
+      delayed = G.suspend(() => dependent)
+      const payload = yield* delayed
+      return { length, payload }
+    })
+
+    const grammar = G.choice(owner, delayed!)
+    const issues = G.validate(grammar)
+    assert.equal(issues.length, 1)
+    assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
+    assert.throws(() => G.compile(grammar), /the grammar has 1 issue/)
+  })
+
+  it("reports one issue when a delayed grammar repeats in one ref scope", () => {
+    let delayed: G.Grammar<string> | undefined
+    G.gen(function* () {
+      const length = yield* G.integer
+      const dependent = G.gen(function* () {
+        const payload = yield* G.take(length)
+        return payload
+      })
+      delayed = G.suspend(() => dependent)
+      return length
+    })
+
+    assert.equal(G.validate(G.choice(delayed!, delayed!)).length, 1)
   })
 
   it("has nothing to report for duplicate match keys, which matchValue rejects on construction", () => {

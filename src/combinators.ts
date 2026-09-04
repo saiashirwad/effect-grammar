@@ -373,12 +373,17 @@ export const label: {
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
   make({ _tag: "Suspend", thunk, name })
 
+/**
+ * Replace an absent (`undefined`) inner value when parsing, and omit a value
+ * equal to the default when printing. Parsing leaves every other value,
+ * including `null`, unchanged.
+ */
 export const defaulted: {
   <A>(value: A): (inner: Grammar<A | undefined>) => Grammar<A>
   <A>(inner: Grammar<A | undefined>, value: A): Grammar<A>
 } = F.dual(dataFirst, <A>(inner: Grammar<A | undefined>, value: A) =>
   iso(inner, {
-    decode: (input) => input ?? value,
+    decode: (input) => (input === undefined ? value : input),
     encode: (input) => (Equal.equals(input, value) ? undefined : input),
   }),
 )
@@ -508,9 +513,10 @@ export const taggedChoice = <
   const Tag extends string,
   const Cases extends Readonly<Record<string, GrammarInternal>>,
 >(
-  tag: Tag,
+  tag: Tag extends "value" ? never : Tag,
   cases: Cases,
 ): Grammar<TaggedValue<Tag, Cases>> => {
+  if (tag === "value") throw new RangeError('taggedChoice: tag name "value" is reserved')
   const keys = Object.keys(cases)
   if (keys.length === 0) throw new RangeError("taggedChoice: at least one case is required")
   const branches = keys.map((key) =>

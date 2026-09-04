@@ -52,6 +52,12 @@ describe("regex", () => {
     assert.deepEqual(parseOk(G.many(sticky), "123"), ["1", "2", "3"])
   })
 
+  it("rejects a Unicode match that starts before the cursor", () => {
+    const error = parseFail(G.prefix("\ud83d", G.regex(/./u, "point")), "😀x")
+    assert.equal(error.pos, 1)
+    assert.deepEqual(error.expected, ["point"])
+  })
+
   it("round-trips", () => {
     assertRoundTrip(word, "roundtrip")
   })

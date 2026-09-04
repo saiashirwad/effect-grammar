@@ -53,7 +53,7 @@ const go = (
     case "Regex": {
       node.re.lastIndex = state.pos
       const match = node.re.exec(state.input)
-      if (match === null) return failAt(state, node.name)
+      if (match === null || match.index !== state.pos) return failAt(state, node.name)
       state.pos += match[0].length
       return match[0]
     }
