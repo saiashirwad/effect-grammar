@@ -36,56 +36,69 @@ const ExprSchema: Schema.Codec<Expr> = Schema.Union([
   QuoteSchema,
 ])
 
-const numberAtom = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number")).pipe(
-  Grammar.decodeTo(NumberAtom)({
-    decode: (raw) => ({ kind: "number", value: Number(raw) }),
+const numberAtom = Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number").pipe(
+  Grammar.transform({
+    decode: (raw): typeof NumberAtom.Type => ({ kind: "number", value: Number(raw) }),
     encode: (n) => String(n.value),
   }),
 )
 
-const stringAtom = Grammar.lexeme(Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string")).pipe(
-  Grammar.decodeTo(StringAtom)({
-    decode: (raw) => ({ kind: "string", value: JSON.parse(raw) }),
+const stringAtom = Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
+  Grammar.transform({
+    decode: (raw): typeof StringAtom.Type => ({ kind: "string", value: JSON.parse(raw) }),
     encode: (s) => JSON.stringify(s.value),
   }),
 )
 
-const booleanAtom = Grammar.lexeme(
-  Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean"),
-).pipe(
-  Grammar.decodeTo(BooleanAtom)({
-    decode: (raw) => ({ kind: "boolean", value: raw === "#t" || raw === "#true" }),
+const booleanAtom = Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean").pipe(
+  Grammar.transform({
+    decode: (raw): typeof BooleanAtom.Type => ({
+      kind: "boolean",
+      value: raw === "#t" || raw === "#true",
+    }),
     encode: (b) => (b.value ? "#t" : "#f"),
   }),
 )
 
-const symbolAtom = Grammar.lexeme(Grammar.regex(/[^\s()"'`;,]+/, "symbol")).pipe(
-  Grammar.decodeTo(SymbolAtom)({
-    decode: (value) => ({ kind: "symbol", value }),
+const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
+  Grammar.transform({
+    decode: (value): typeof SymbolAtom.Type => ({ kind: "symbol", value }),
     encode: (s) => s.value,
   }),
 )
 
-const atom = Grammar.choice(numberAtom, stringAtom, booleanAtom, symbolAtom)
-
+// Printing reads `kind` and goes straight to that case; parsing tries the
+// cases in this order. No branch needs a guard.
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
-  () => Grammar.choice(quoteExpr, list, atom),
+  () =>
+    Grammar.choiceOn("kind", {
+      quote: quoteExpr,
+      list,
+      number: numberAtom,
+      string: stringAtom,
+      boolean: booleanAtom,
+      symbol: symbolAtom,
+    }),
   "expr",
 )
 
-const list = Grammar.wrap(Grammar.symbol("("), Grammar.many(expr), Grammar.symbol(")")).pipe(
-  Grammar.decodeTo(ListSchema)({
-    decode: (elements) => ({ kind: "list", elements }),
+// `trivia` prints nothing, `spaces` prints one space: "(+ 1 2)" prints back as
+// "(+ 1 2)", not "(+12)".
+const list: Grammar.Grammar<List> = Grammar.wrap(
+  Grammar.seq(Grammar.literal("("), Grammar.trivia),
+  Grammar.sepBy(expr, Grammar.spaces),
+  Grammar.seq(Grammar.trivia, Grammar.literal(")")),
+).pipe(
+  Grammar.transform({
+    decode: (elements): List => ({ kind: "list", elements }),
     encode: (l) => l.elements,
-    is: (v) => v.kind === "list",
   }),
 )
 
-const quoteExpr = Grammar.prefix("'", expr).pipe(
-  Grammar.decodeTo(QuoteSchema)({
-    decode: (inner) => ({ kind: "quote", inner }),
+const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
+  Grammar.transform({
+    decode: (inner): Quote => ({ kind: "quote", inner }),
     encode: (q) => q.inner,
-    is: (v) => v.kind === "quote",
   }),
 )
 

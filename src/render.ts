@@ -117,13 +117,24 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
         show(node.inner, context),
         show(node.close, context),
       ])
-    case "Choice":
+    case "Choice": {
+      const on = node.on
+      if (on !== undefined) {
+        const cases = node.options.map(
+          (option, index) => `${preview(on.keys[index])} => ${show(option, context).text}`,
+        )
+        return {
+          precedence: AtomPrecedence,
+          text: `on(${on.tag}){${cases.join(" | ")}}`,
+        }
+      }
       return {
         precedence: ChoicePrecedence,
         text: node.options
           .map((option) => parenthesize(show(option, context), SequencePrecedence))
           .join(" | "),
       }
+    }
     case "Many": {
       const inner = show(node.inner, context)
       const sep = show(node.sep, context)

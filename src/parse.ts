@@ -53,7 +53,7 @@ const go = (
     case "Regex": {
       node.re.lastIndex = state.pos
       const match = node.re.exec(state.input)
-      if (match === null) return failAt(state, node.name)
+      if (match === null || match.index !== state.pos) return failAt(state, node.name)
       state.pos += match[0].length
       return match[0]
     }
@@ -181,6 +181,20 @@ const toError = (state: State): ParseError => {
     expected: [...state.expected],
     found: code === undefined ? undefined : String.fromCodePoint(code),
   })
+}
+
+export const reparse = (
+  grammar: GrammarInternal,
+  text: string,
+  env: Frame | undefined,
+):
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: ParseError } => {
+  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set() }
+  const value = go(grammar, state, env)
+  if (value !== Fail && state.pos === text.length) return { ok: true, value }
+  if (value !== Fail) failAt(state, "end of input")
+  return { ok: false, error: toError(state) }
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {

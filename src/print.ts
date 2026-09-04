@@ -1,4 +1,4 @@
-import { Predicate, Result } from "effect"
+import { Equal, Predicate, Result } from "effect"
 
 import {
   type Grammar,
@@ -12,7 +12,14 @@ import {
   type Value,
 } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
-import { exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import {
+  describeRoundTrip,
+  exceptionMessage,
+  preview,
+  PrintError,
+  type PrintIssue,
+} from "./errors.ts"
+import { reparse } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
 
@@ -25,6 +32,22 @@ class Failure {
 }
 
 const fail = (issue: PrintIssue): Failure => new Failure(issue)
+
+type RoundTripIssue = Extract<PrintIssue, { _tag: "RoundTrip" }>
+
+/** Parse `printed` back through `grammar`; the issue if it does not read as `value`. */
+const roundTripIssue = (
+  grammar: GrammarInternal,
+  value: Value,
+  printed: string,
+  env: Frame | undefined,
+): RoundTripIssue | undefined => {
+  const back = reparse(grammar, printed, env)
+  if (!back.ok) return { _tag: "RoundTrip", value, printed, error: back.error.message }
+  return Equal.equals(back.value, value)
+    ? undefined
+    : { _tag: "RoundTrip", value, printed, parsed: back.value }
+}
 
 const bindingPath = (
   pattern: Pattern,
@@ -118,11 +141,42 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       return close instanceof Failure ? close : open + inner + close
     }
     case "Choice": {
+      if (node.on !== undefined) {
+        const { tag, keys } = node.on
+        if (!Predicate.isObject(value) || !Object.hasOwn(value, tag)) {
+          return fail({
+            _tag: "TypeMismatch",
+            expected: `an object with a ${tag} field`,
+            actual: value,
+          })
+        }
+        const key = value[tag]
+        const index = keys.findIndex((candidate) => Object.is(candidate, key))
+        if (index === -1) {
+          return fail({
+            _tag: "InvalidValue",
+            expected: `${tag} to be one of ${keys.map(preview).join(", ")}`,
+            actual: key,
+          })
+        }
+        return out(node.options[index]!, value, env)
+      }
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
         const result = out(option, value, env)
-        if (!(result instanceof Failure)) return result
-        issues.push(result.issue)
+        if (result instanceof Failure) {
+          issues.push(result.issue)
+          continue
+        }
+        if (node.checked !== true) return result
+        const issue = roundTripIssue(grammar, value, result, env)
+        if (issue === undefined) return result
+        issues.push({
+          _tag: "InvalidValue",
+          expected: describe(option),
+          actual: value,
+          detail: describeRoundTrip(issue),
+        })
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
     }
@@ -254,5 +308,24 @@ export const printUnknown = (
     : Result.succeed(result)
 }
 
+/** Write a value as canonical text. No round-trip guarantee; see {@link printCheckedUnknown}. */
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   printUnknown(grammar, value)
+
+export const printCheckedUnknown = (
+  grammar: GrammarInternal,
+  value: Value,
+): Result.Result<string, PrintError> => {
+  const printed = printUnknown(grammar, value)
+  if (Result.isFailure(printed)) return printed
+  const issue = roundTripIssue(grammar, value, printed.success, undefined)
+  return issue === undefined ? printed : Result.fail(new PrintError({ issue }))
+}
+
+/**
+ * Print a value, then parse the whole output back and confirm it equals the
+ * original. Fails if the text would decode to a different value, so a checked
+ * print never hides a broken round trip.
+ */
+export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  printCheckedUnknown(grammar, value)

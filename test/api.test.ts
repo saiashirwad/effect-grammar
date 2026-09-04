@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 
+import { Result } from "effect"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
@@ -17,6 +18,18 @@ describe("product and conditional APIs", () => {
     assert.equal(parseOk(port, ":80"), 80)
     assert.equal(printOk(port, 443), "")
     assert.equal(printOk(port, 80), ":80")
+  })
+
+  it("does not replace an explicitly parsed null with the default", () => {
+    const nullable = Grammar.choice(Grammar.as(Grammar.literal("null"), null), Grammar.integer)
+    const grammar = Grammar.optional(nullable).pipe(Grammar.defaulted<number | null>(0))
+
+    assert.equal(parseOk(grammar, "null"), null)
+    assert.equal(printOk(grammar, null), "null")
+    assert.equal(Result.getOrThrow(Grammar.printChecked(grammar, null)), "null")
+    assert.equal(parseOk(grammar, ""), 0)
+    assert.equal(printOk(grammar, 0), "")
+    assert.equal(Result.getOrThrow(Grammar.printChecked(grammar, 0)), "")
   })
 
   it("supports data-last delimiters and optional", () => {

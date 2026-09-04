@@ -1,9 +1,12 @@
+export { auditFidelity, compile, type Compiled, type FidelityEntry, validate } from "./compile.ts"
+export type { Fidelity, Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
 export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
-export type { Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
 export {
   as,
   between,
+  checkedChoice,
   choice,
+  choiceOn,
   decodeTo,
   type DecodeToOptions,
   defaulted,
@@ -13,6 +16,7 @@ export {
   type GenGrammar,
   get,
   integer,
+  iso,
   label,
   lexeme,
   literal,
@@ -20,6 +24,7 @@ export {
   match,
   matchValue,
   optional,
+  partialIso,
   prefix,
   regex,
   repeat,
@@ -44,6 +49,6 @@ export {
   wrap,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
-export { print } from "./print.ts"
+export { print, printChecked } from "./print.ts"
 export { describe, render } from "./render.ts"
-export { codec } from "./schema.ts"
+export { type CodecOptions, codec } from "./schema.ts"

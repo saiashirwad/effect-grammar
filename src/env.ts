@@ -54,7 +54,12 @@ export const materialize = (pattern: Pattern, env: Frame): BoundValue => {
       for (const [key, field] of pattern.fields) {
         const value = materialize(field, env)
         if (value === Unbound) return Unbound
-        object[key] = value
+        Object.defineProperty(object, key, {
+          value,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        })
       }
       return object
     }

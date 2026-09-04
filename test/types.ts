@@ -2,6 +2,13 @@ import * as G from "../src/index.ts"
 
 const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
 
+// `value` is reserved for the tagged branch payload.
+// @ts-expect-error taggedChoice cannot use "value" as its tag
+G.taggedChoice("value", { number: G.integer })
+// A tag chosen at runtime remains valid and meets the runtime reserved-name check.
+const dynamicTag: string = "kind"
+G.taggedChoice(dynamicTag, { number: G.integer })
+
 // A ref has no value while the grammar is built, so JavaScript cannot branch on it.
 G.gen(function* () {
   const kind = yield* kindOf
@@ -156,3 +163,28 @@ void [
   notSilent,
   widenedGrammar,
 ]
+
+// choiceOn: every case must yield a value whose tag field is its key.
+const plainTagged = G.regex(/a/, "a").pipe(
+  G.transform({ decode: (v) => ({ kind: "plain" as const, v }), encode: (x) => x.v }),
+)
+const untagged = G.regex(/b/, "b").pipe(G.transform({ decode: (v) => ({ v }), encode: (x) => x.v }))
+const misTagged = G.regex(/c/, "c").pipe(
+  G.transform({ decode: (v) => ({ kind: "other" as const, v }), encode: (x) => x.v }),
+)
+G.choiceOn("kind", { plain: plainTagged })
+// @ts-expect-error case "b" has no kind field
+G.choiceOn("kind", { plain: plainTagged, b: untagged })
+// @ts-expect-error case "c" has kind "other", not "c"
+G.choiceOn("kind", { plain: plainTagged, c: misTagged })
+// The parsed type is the union of the case types.
+const onGrammar = G.choiceOn("kind", { plain: plainTagged })
+const onValue: G.Type<typeof onGrammar> = {
+  kind: "plain",
+  v: "a",
+}
+// choiceOn also accepts ordered [key, grammar] entries.
+const onEntries = G.choiceOn("kind", [["plain", plainTagged]] as const)
+const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
+void onEntriesValue
+void onValue

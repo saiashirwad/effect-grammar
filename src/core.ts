@@ -46,6 +46,15 @@ export type Pattern =
 
 export type MatchKey = string | number | boolean
 
+/**
+ * How much a `Transform` promises about its two directions.
+ *
+ * - `unchecked`: no law claimed (`transform`, `transformOrFail`).
+ * - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
+ * - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
+ */
+export type Fidelity = "unchecked" | "partial" | "claimed-iso"
+
 export interface GrammarIssue {
   readonly message: string
 }
@@ -79,7 +88,13 @@ export type Node =
       readonly inner: GrammarInternal
       readonly close: Silent
     }
-  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<GrammarInternal> }
+  | {
+      readonly _tag: "Choice"
+      readonly options: ReadonlyArray<GrammarInternal>
+      readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
+      /** Print with the first branch whose text parses back, not just the first that accepts. */
+      readonly checked?: boolean | undefined
+    }
   | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
   | { readonly _tag: "Optional"; readonly inner: GrammarInternal }
   | {
@@ -89,6 +104,7 @@ export type Node =
       readonly encode: (b: never) => Result.Result<Value, GrammarIssue>
       readonly is?: ((value: never) => boolean) | undefined
       readonly name?: string | undefined
+      readonly fidelity: Fidelity
     }
   | {
       readonly _tag: "Skip"
@@ -184,3 +200,31 @@ export const isSilent = (grammar: GrammarInternal): grammar is Silent =>
 
 export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal =>
   (node.resolved ??= node.thunk())
+
+/** The grammars a node refers to directly. A `Suspend` yields its resolved target. */
+export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
+  switch (node._tag) {
+    case "Literal":
+    case "Regex":
+    case "Take":
+      return []
+    case "Gen":
+      return node.steps.map((step) => step.grammar)
+    case "Wrap":
+      return [node.open, node.inner, node.close]
+    case "Choice":
+      return node.options
+    case "Many":
+      return [node.inner, node.sep]
+    case "Optional":
+    case "Transform":
+    case "Label":
+    case "Skip":
+    case "RepeatExact":
+      return [node.inner]
+    case "Suspend":
+      return [resolve(node)]
+    case "Match":
+      return node.cases.map((matchCase) => matchCase.grammar)
+  }
+}
