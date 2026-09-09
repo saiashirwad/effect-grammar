@@ -264,6 +264,12 @@ you mean to claim the directions are inverse, say so:
 - `partialIso` — `Result`-returning functions that agree where both succeed.
 - `decodeTo(schema)` — a transform guarded by an Effect Schema.
 
+`refine(predicate, name?)` keeps the value unchanged and checks the predicate
+when parsing and printing. A type guard also narrows the grammar's value type.
+For example, `integer.pipe(refine((n) => n >= 1 && n <= 65535, "port"))` rejects
+out-of-range ports in either direction. It also supports
+`refine(grammar, predicate, name?)` and records a partial identity conversion.
+
 The claim is recorded, not proved. `auditFidelity(grammar)` lists every
 transform that makes no such claim, so you can find the unchecked steps in a
 grammar you expected to be invertible.

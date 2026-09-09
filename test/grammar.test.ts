@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 
-import { Result, Schema } from "effect"
+import { Predicate, Result, Schema } from "effect"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
@@ -542,6 +542,40 @@ describe("sepBy", () => {
     assert.equal(printOk(g, [1, 2]), "1,2")
     assert.equal(printOk(g, []), "")
     assertRoundTrip(g, [1, 2, 3])
+  })
+})
+
+describe("refine", () => {
+  const even = G.integer.pipe(G.refine((n) => n % 2 === 0, "even integer"))
+
+  it("checks the predicate when parsing and printing", () => {
+    assertRoundTrip(even, 2)
+    assert.deepEqual(parseFail(even, "3").expected, ["even integer"])
+    assert.match(printFail(even, 3).message, /even integer/)
+    assert.deepEqual(G.auditFidelity(even), [{ name: "even integer", fidelity: "partial" }])
+  })
+
+  it("narrows with a type guard and works data-first", () => {
+    const g = G.refine(G.choice(G.integer, word), (value): value is number =>
+      Predicate.isNumber(value),
+    )
+    assertRoundTrip(g, 12)
+    assert.ok(parseFail(g, "abc").expected.includes("refinement"))
+    // @ts-expect-error the type guard also narrows the printer input
+    printFail(g, "abc")
+  })
+
+  it("lets a choice try the next branch after a failed refinement", () => {
+    const g = G.choice(even, G.integer)
+    assertRoundTrip(g, 3)
+  })
+
+  it("reports thrown predicates as parse and print failures", () => {
+    const g = G.refine(G.integer, () => {
+      throw new Error("predicate failed")
+    })
+    assert.match(parseFail(g, "1").message, /predicate failed/)
+    assert.match(printFail(g, 1).message, /predicate failed/)
   })
 })
 

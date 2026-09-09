@@ -1,3 +1,5 @@
+import { Predicate } from "effect"
+
 import { message } from "../examples/binary.ts"
 import * as B from "../src/binary.ts"
 import * as G from "../src/index.ts"
@@ -32,6 +34,20 @@ G.print(kindOf, "a")
 G.print(kindOf, "c")
 // @ts-expect-error literals needs at least one alternative
 G.literals()
+
+const numberOrWord = G.choice(G.integer, G.regex(/[a-z]+/, "word"))
+const onlyNumber = numberOrWord.pipe(
+  G.refine((value): value is number => Predicate.isNumber(value)),
+)
+G.print(onlyNumber, 1)
+// @ts-expect-error a refinement narrows the output and printer input
+G.print(onlyNumber, "word")
+const onlyWord = G.refine(numberOrWord, (value): value is string => Predicate.isString(value))
+G.print(onlyWord, "word")
+// @ts-expect-error data-first refinements narrow too
+G.print(onlyWord, 1)
+// @ts-expect-error the predicate must accept the grammar's values
+G.refine(G.integer, (value: string) => value.length > 0)
 
 // `value` is reserved for the tagged branch payload.
 // @ts-expect-error taggedChoice cannot use "value" as its tag

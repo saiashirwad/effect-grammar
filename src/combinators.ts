@@ -329,6 +329,29 @@ export const partialIso: {
   resultTransform(inner, options, "partial"),
 )
 
+/** Keep values satisfying a predicate in both directions, narrowing with a type guard. */
+export const refine: {
+  <A, B extends A>(
+    refinement: (value: A) => value is B,
+    name?: string,
+  ): (inner: Grammar<A>) => Grammar<B>
+  <A>(predicate: (value: A) => boolean, name?: string): (inner: Grammar<A>) => Grammar<A>
+  <A, B extends A>(
+    inner: Grammar<A>,
+    refinement: (value: A) => value is B,
+    name?: string,
+  ): Grammar<B>
+  <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name?: string): Grammar<A>
+} = F.dual(
+  dataFirst,
+  <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name = "refinement") =>
+    plainTransform(
+      inner,
+      { decode: (value) => value, encode: (value) => value, is: predicate, name },
+      "partial",
+    ),
+)
+
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
   readonly is?: ((value: T) => boolean) | undefined
 }

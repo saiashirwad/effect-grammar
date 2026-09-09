@@ -30,6 +30,7 @@ export {
   partialIso,
   prefix,
   regex,
+  refine,
   repeat,
   type RepeatOptions,
   sepBy,

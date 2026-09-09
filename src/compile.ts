@@ -231,7 +231,7 @@ export interface FidelityEntry {
 
 /**
  * List the transforms in a grammar that do not claim a full inverse law
- * (`transform`, `transformOrFail`, `partialIso`). An empty result means each
+ * (`transform`, `transformOrFail`, `partialIso`, `refine`). An empty result means each
  * transform makes that claim; it does not prove the claim or a round trip.
  */
 export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityEntry> => {
