@@ -156,6 +156,13 @@ calls, so they also work with `pipe`.
 `"GET" | "POST"`. It requires at least one alternative and tries them in order,
 like `choice`; put longer strings first when they share a prefix.
 
+Repetition types preserve literal counts: `repeat(integer, 4)` returns a
+readonly four-element tuple, as does `sepBy(integer, ".", { min: 4, max: 4 })`.
+`many` and `sepBy` with a positive literal `min` return nonempty readonly
+arrays. Dynamic counts and refs return readonly arrays. Exact tuple inference
+supports counts from 0 through 64; larger counts retain the array type to keep
+type checking bounded. Runtime count and bound checks apply at every size.
+
 ## Refs are names, not values
 
 Inside `gen`, `yield*` gives you a `Ref<A>`, not an `A`. The generator runs

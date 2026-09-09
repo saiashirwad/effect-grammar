@@ -8,10 +8,6 @@ const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
 const ip = Grammar.regex(/\d{1,3}/, "octet").pipe(
   Grammar.transform({ decode: Number, encode: String }),
   Grammar.sepBy(".", { min: 4, max: 4 }),
-  Grammar.transform({
-    decode: ([a, b, c, d]) => [a!, b!, c!, d!] as const,
-    encode: (tuple) => tuple,
-  }),
 )
 
 const Ip = Grammar.codec(ip, IpAddress, { identifier: "IpAddress" })

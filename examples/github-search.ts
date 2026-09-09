@@ -1,5 +1,5 @@
 // https://docs.github.com/en/search-github
-import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
+import { Array as Arr, Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
@@ -192,9 +192,14 @@ const notBranch = Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws), notExp
 const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
   Grammar.sepBy(part, sep, { min: 1 }).pipe(
     Grammar.transform({
-      decode: (parts): Query =>
-        parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts },
-      encode: (q) => (q.kind === kind ? q.parts : [q]),
+      decode: (parts): Query => (parts.length === 1 ? parts[0] : { kind, parts }),
+      encode: (q) => {
+        if (q.kind !== kind) return [q]
+        if (!Arr.isReadonlyArrayNonEmpty(q.parts)) {
+          throw new TypeError("expected at least one query part")
+        }
+        return q.parts
+      },
     }),
   )
 

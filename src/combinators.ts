@@ -1,4 +1,4 @@
-import { Equal, Function as F, Predicate, Result, Schema } from "effect"
+import { Equal, Function as F, Predicate, Result, Schema, type Types } from "effect"
 
 import {
   type Bounds,
@@ -145,6 +145,39 @@ export interface RepeatOptions {
   readonly max?: number
 }
 
+// Bound tuple construction so large or invalid counts cannot exhaust TypeScript's recursion limit.
+type RepeatTuple<
+  A,
+  N extends number,
+  Items extends ReadonlyArray<A> = readonly [],
+> = Items["length"] extends N
+  ? Items
+  : Items["length"] extends 64
+    ? ReadonlyArray<A>
+    : RepeatTuple<A, N, readonly [...Items, A]>
+
+type RepeatedValue<A, N extends number | Ref<number>> = N extends number
+  ? number extends N
+    ? ReadonlyArray<A>
+    : RepeatTuple<A, N>
+  : ReadonlyArray<A>
+
+type NonEmptyWhenPositive<A, Min extends number> = 0 extends Min
+  ? ReadonlyArray<A>
+  : readonly [A, ...Array<A>]
+
+type BoundedRepeatValue<A, Options> = Options extends { readonly min: infer Min extends number }
+  ? number extends Min
+    ? ReadonlyArray<A>
+    : Options extends { readonly max: Min }
+      ? Types.IsUnion<Min> extends false
+        ? RepeatedValue<A, Min>
+        : NonEmptyWhenPositive<A, Min>
+      : NonEmptyWhenPositive<A, Min>
+  : Options extends { readonly max: 0 }
+    ? readonly []
+    : ReadonlyArray<A>
+
 const bounds = (name: string, options: RepeatOptions | undefined): Bounds => {
   const min = options?.min ?? 0
   const max = options?.max ?? Number.POSITIVE_INFINITY
@@ -166,22 +199,31 @@ const repeatNode = <A>(
   make({ _tag: "Many", inner, sep: separator, ...bounds(name, options) })
 
 export const many: {
-  <A>(inner: Grammar<A>, options?: RepeatOptions): Grammar<ReadonlyArray<A>>
-  (options?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <A>(inner: Grammar<A>): Grammar<ReadonlyArray<A>>
+  <A, const Options extends RepeatOptions | undefined = RepeatOptions | undefined>(
+    inner: Grammar<A>,
+    options: Options,
+  ): Grammar<BoundedRepeatValue<A, Options>>
+  (): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <const Options extends RepeatOptions | undefined>(
+    options: Options,
+  ): <A>(inner: Grammar<A>) => Grammar<BoundedRepeatValue<A, Options>>
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, options?: RepeatOptions) =>
   repeatNode("many", inner, empty, options),
 )
 
 export const sepBy: {
-  <A>(
+  <A>(inner: Grammar<A>, separator: Silent | string): Grammar<ReadonlyArray<A>>
+  <A, const Options extends RepeatOptions | undefined = RepeatOptions | undefined>(
     inner: Grammar<A>,
     separator: Silent | string,
-    options?: RepeatOptions,
-  ): Grammar<ReadonlyArray<A>>
-  (
+    options: Options,
+  ): Grammar<BoundedRepeatValue<A, Options>>
+  (separator: Silent | string): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <const Options extends RepeatOptions | undefined>(
     separator: Silent | string,
-    options?: RepeatOptions,
-  ): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+    options: Options,
+  ): <A>(inner: Grammar<A>) => Grammar<BoundedRepeatValue<A, Options>>
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, separator: Silent | string, options?: RepeatOptions) =>
   repeatNode("sepBy", inner, toSilent(separator), options),
 )
@@ -238,8 +280,13 @@ export const take = (count: number | Ref<number>): Grammar<string> =>
   make({ _tag: "Take", count: countOf(count, "take") })
 
 export const repeat: {
-  <A>(inner: Grammar<A>, count: number | Ref<number>): Grammar<ReadonlyArray<A>>
-  (count: number | Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <A, const N extends number | Ref<number> = number | Ref<number>>(
+    inner: Grammar<A>,
+    count: N,
+  ): Grammar<RepeatedValue<A, N>>
+  <const N extends number | Ref<number>>(
+    count: N,
+  ): <A>(inner: Grammar<A>) => Grammar<RepeatedValue<A, N>>
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, count: number | Ref<number>) =>
   make({ _tag: "RepeatExact", count: countOf(count, "repeat"), inner }),
 )

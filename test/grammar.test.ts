@@ -497,6 +497,7 @@ describe("many", () => {
 
   it("prints by concatenation and checks bounds", () => {
     assert.equal(printOk(g, ["x", "y"]), "xy")
+    // @ts-expect-error nonempty repetitions also reject empty values at runtime
     assert.match(printFail(G.many(G.integer, { min: 1 }), []).message, /at least 1/)
     assert.match(printFail(G.many(G.integer, { max: 1 }), [1, 2]).message, /0..1/)
   })
@@ -512,6 +513,37 @@ describe("many", () => {
 
   it("round-trips", () => {
     assertRoundTrip(g, ["a", "b"])
+  })
+})
+
+describe("fixed repetition", () => {
+  const digit = G.regex(/\d/, "digit")
+
+  it("round-trips exact tuples and still checks lengths at runtime", () => {
+    const pair = digit.pipe(G.repeat(2))
+    assert.deepEqual(parseOk(pair, "12"), ["1", "2"])
+    assertRoundTrip(pair, ["1", "2"])
+    parseFail(pair, "1")
+    parseFail(pair, "123")
+    // @ts-expect-error JavaScript callers still get runtime length checks
+    printFail(pair, ["1"])
+    // @ts-expect-error JavaScript callers still get runtime length checks
+    printFail(pair, ["1", "2", "3"])
+    assertRoundTrip(G.repeat(digit, 0), [])
+  })
+
+  it("checks matching min and max bounds with and without separators", () => {
+    const pair = G.sepBy(digit, ",", { min: 2, max: 2 })
+    assert.deepEqual(parseOk(pair, "1,2"), ["1", "2"])
+    assertRoundTrip(pair, ["1", "2"])
+    parseFail(pair, "1")
+    parseFail(pair, "1,2,3")
+    // @ts-expect-error static bounds do not replace runtime validation
+    printFail(pair, ["1"])
+    // @ts-expect-error static bounds do not replace runtime validation
+    printFail(pair, ["1", "2", "3"])
+    assertRoundTrip(G.many(digit, { min: 2, max: 2 }), ["1", "2"])
+    assertRoundTrip(G.many(digit, { max: 0 }), [])
   })
 })
 
