@@ -259,13 +259,13 @@ describe("binary validation and compilation", () => {
 })
 
 describe("binary codec and laws", () => {
-  const Packet = Schema.Struct({ length: Schema.Number, payload: Schema.Uint8Array })
+  const Packet = Schema.Struct({ length: Schema.Finite, payload: Schema.Uint8Array })
   const PacketCodec = B.codec(packet, Packet, { identifier: "Packet" })
   const input = bytes(0xca, 0xfe, 0, 2, 7, 9)
   const value = { length: 2, payload: bytes(7, 9) }
 
   it("decodes bytes to the schema value and encodes it back", () => {
-    assert.deepEqual(Schema.decodeUnknownSync(PacketCodec)(input), value)
+    assert.deepEqual(Schema.decodeSync(PacketCodec)(input), value)
     assert.deepEqual(Schema.encodeSync(PacketCodec)(value), input)
     assert.throws(() => Schema.decodeUnknownSync(PacketCodec)("cafe"))
     assert.throws(
