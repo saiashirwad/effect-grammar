@@ -57,6 +57,8 @@ describe("packaged exports", () => {
 
     const script = [
       "const root = await import('effect-grammar')",
+      "const binary = await import('effect-grammar/Binary')",
+      "if (binary.parse(binary.be.uint16, new Uint8Array([1, 2])).success !== 258) throw new Error('binary parser missing')",
       "const schema = await import('effect-grammar/Schema')",
       "const testing = await import('effect-grammar/testing')",
       `for (const name of ${JSON.stringify(Object.keys(index))}) {`,
@@ -64,6 +66,7 @@ describe("packaged exports", () => {
       "}",
       "if (typeof schema.codec !== 'function') throw new Error('missing Schema.codec')",
       "if (typeof testing.assertPrintParse !== 'function') throw new Error('missing testing.assertPrintParse')",
+      "if (typeof binary.codec !== 'function' || typeof testing.lawsFor !== 'function') throw new Error('binary codec or laws missing')",
       "let hidden = false",
       "try { await import('effect-grammar/ast') } catch { hidden = true }",
       "if (!hidden) throw new Error('undeclared subpath ./ast is importable')",

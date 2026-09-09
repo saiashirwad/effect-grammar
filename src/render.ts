@@ -2,6 +2,8 @@ import { Predicate } from "effect"
 
 import {
   type Bounds,
+  type Count,
+  derivations,
   type Expr,
   type GrammarInternal,
   nodeOf,
@@ -79,25 +81,49 @@ const nameBindings = (
 
 const showExpr = (expr: Expr, context: Context): string => {
   if (expr._tag === "Ref") return context.names.get(expr.scope)?.get(expr.slot) ?? `$${expr.slot}`
+  if (expr._tag === "Map") return `${expr.name ?? "f"}(${showExpr(expr.expr, context)})`
   const object = showExpr(expr.object, context)
   return Predicate.isString(expr.key) && /^[A-Za-z_$][\w$]*$/.test(expr.key)
     ? `${object}.${expr.key}`
     : `${object}[${preview(expr.key)}]`
 }
 
+const showCount = (count: Count, context: Context): string =>
+  Predicate.isNumber(count) ? String(count) : showExpr(count, context)
+
 const show = (grammar: GrammarInternal, context: Context): Fragment => {
   const node = nodeOf(grammar)
   switch (node._tag) {
+    case "Empty":
+      return { precedence: AtomPrecedence, text: "" }
     case "Literal":
-      return {
-        precedence: AtomPrecedence,
-        text: node.value === "" ? "" : JSON.stringify(node.value),
-      }
+      return { precedence: AtomPrecedence, text: JSON.stringify(node.value) }
     case "Regex":
       return { precedence: AtomPrecedence, text: `<${node.name}>` }
+    case "ByteLiteral":
+      return { precedence: AtomPrecedence, text: preview(node.value) }
+    case "Number":
+      return {
+        precedence: AtomPrecedence,
+        text: `<${node.kind}${node.width * 8}${node.width === 1 ? "" : node.littleEndian ? "LE" : "BE"}>`,
+      }
+    case "VarInt":
+      return { precedence: AtomPrecedence, text: node.signed ? "<varint>" : "<varuint>" }
+    case "Derive":
+      return { precedence: AtomPrecedence, text: "" }
+    case "Bytes":
+      return {
+        precedence: AtomPrecedence,
+        text: `<byte>{${showCount(node.count, context)}}`,
+      }
     case "Gen": {
       const names = namesFor(context, node.scope)
-      if (context.includeBindings) nameBindings(node.result, undefined, node.scope, names)
+      if (context.includeBindings) {
+        nameBindings(node.result, undefined, node.scope, names)
+        for (const { slot, expr } of derivations(node.steps)) {
+          if (!names.has(slot)) names.set(slot, showExpr(expr, context))
+        }
+      }
       return sequence(
         node.steps.map((step) => {
           const inner = show(step.grammar, context)
@@ -179,11 +205,11 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
       }
     }
     case "Take":
-      return { precedence: AtomPrecedence, text: `<char>{${showExpr(node.count, context)}}` }
+      return { precedence: AtomPrecedence, text: `<char>{${showCount(node.count, context)}}` }
     case "RepeatExact":
       return {
         precedence: PostfixPrecedence,
-        text: `(${show(node.inner, context).text}){${showExpr(node.count, context)}}`,
+        text: `(${show(node.inner, context).text}){${showCount(node.count, context)}}`,
       }
   }
 }

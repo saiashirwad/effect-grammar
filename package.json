@@ -34,6 +34,10 @@
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js"
     },
+    "./Binary": {
+      "types": "./dist/binary.d.ts",
+      "import": "./dist/binary.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"

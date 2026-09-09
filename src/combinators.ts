@@ -1,4 +1,4 @@
-import { Equal, Function as F, Predicate, Result, Schema } from "effect"
+import { Equal, Function as F, Predicate, Result, Schema, type Types } from "effect"
 
 import {
   type Bounds,
@@ -19,13 +19,14 @@ import {
 } from "./core.ts"
 import { isCount } from "./env.ts"
 import { exceptionMessage, preview } from "./errors.ts"
-import { assertInScope } from "./gen.ts"
+import { countOf, exprOf } from "./gen.ts"
 
-export { gen, type GenGrammar, get, seq } from "./gen.ts"
+export { derive, gen, type GenGrammar, get, mapRef, seq } from "./gen.ts"
 
-export const literal = (value: string): Silent => silent({ _tag: "Literal", value })
+export const empty: Silent = silent({ _tag: "Empty" })
 
-export const empty = literal("")
+export const literal = (value: string): Silent =>
+  value === "" ? empty : silent({ _tag: "Literal", value })
 
 export const regex = (expression: RegExp, name: string): Grammar<string> => {
   const flags = expression.flags.replace(/[gy]/g, "")
@@ -144,6 +145,39 @@ export interface RepeatOptions {
   readonly max?: number
 }
 
+// Bound tuple construction so large or invalid counts cannot exhaust TypeScript's recursion limit.
+type RepeatTuple<
+  A,
+  N extends number,
+  Items extends ReadonlyArray<A> = readonly [],
+> = Items["length"] extends N
+  ? Items
+  : Items["length"] extends 64
+    ? ReadonlyArray<A>
+    : RepeatTuple<A, N, readonly [...Items, A]>
+
+type RepeatedValue<A, N extends number | Ref<number>> = N extends number
+  ? number extends N
+    ? ReadonlyArray<A>
+    : RepeatTuple<A, N>
+  : ReadonlyArray<A>
+
+type NonEmptyWhenPositive<A, Min extends number> = 0 extends Min
+  ? ReadonlyArray<A>
+  : readonly [A, ...Array<A>]
+
+type BoundedRepeatValue<A, Options> = Options extends { readonly min: infer Min extends number }
+  ? number extends Min
+    ? ReadonlyArray<A>
+    : Options extends { readonly max: Min }
+      ? Types.IsUnion<Min> extends false
+        ? RepeatedValue<A, Min>
+        : NonEmptyWhenPositive<A, Min>
+      : NonEmptyWhenPositive<A, Min>
+  : Options extends { readonly max: 0 }
+    ? readonly []
+    : ReadonlyArray<A>
+
 const bounds = (name: string, options: RepeatOptions | undefined): Bounds => {
   const min = options?.min ?? 0
   const max = options?.max ?? Number.POSITIVE_INFINITY
@@ -165,22 +199,31 @@ const repeatNode = <A>(
   make({ _tag: "Many", inner, sep: separator, ...bounds(name, options) })
 
 export const many: {
-  <A>(inner: Grammar<A>, options?: RepeatOptions): Grammar<ReadonlyArray<A>>
-  (options?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <A>(inner: Grammar<A>): Grammar<ReadonlyArray<A>>
+  <A, const Options extends RepeatOptions | undefined = RepeatOptions | undefined>(
+    inner: Grammar<A>,
+    options: Options,
+  ): Grammar<BoundedRepeatValue<A, Options>>
+  (): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <const Options extends RepeatOptions | undefined>(
+    options: Options,
+  ): <A>(inner: Grammar<A>) => Grammar<BoundedRepeatValue<A, Options>>
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, options?: RepeatOptions) =>
   repeatNode("many", inner, empty, options),
 )
 
 export const sepBy: {
-  <A>(
+  <A>(inner: Grammar<A>, separator: Silent | string): Grammar<ReadonlyArray<A>>
+  <A, const Options extends RepeatOptions | undefined = RepeatOptions | undefined>(
     inner: Grammar<A>,
     separator: Silent | string,
-    options?: RepeatOptions,
-  ): Grammar<ReadonlyArray<A>>
-  (
+    options: Options,
+  ): Grammar<BoundedRepeatValue<A, Options>>
+  (separator: Silent | string): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+  <const Options extends RepeatOptions | undefined>(
     separator: Silent | string,
-    options?: RepeatOptions,
-  ): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+    options: Options,
+  ): <A>(inner: Grammar<A>) => Grammar<BoundedRepeatValue<A, Options>>
 } = F.dual(dataFirst, <A>(inner: Grammar<A>, separator: Silent | string, options?: RepeatOptions) =>
   repeatNode("sepBy", inner, toSilent(separator), options),
 )
@@ -196,7 +239,7 @@ export const match = <K extends string, const Cases extends Readonly<Record<K, G
 ): Grammar<CaseOutput<Cases>> =>
   make({
     _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "match"),
+    scrutinee: exprOf(scrutinee, "match"),
     // SAFETY: Object.keys returns only keys from the closed Cases record.
     cases: Object.keys(cases).map((key) => ({ key, grammar: cases[key as K] })),
   })
@@ -229,18 +272,23 @@ export const matchValue = <
 ): Grammar<EntryOutput<Entries>> =>
   make({
     _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "matchValue"),
+    scrutinee: exprOf(scrutinee, "matchValue"),
     cases: uniqueCases(entries),
   })
 
-export const take = (count: Ref<number>): Grammar<string> =>
-  make({ _tag: "Take", count: assertInScope(count, "take") })
+export const take = (count: number | Ref<number>): Grammar<string> =>
+  make({ _tag: "Take", count: countOf(count, "take") })
 
 export const repeat: {
-  <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
-  (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
-} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
-  make({ _tag: "RepeatExact", count: assertInScope(count, "repeat"), inner }),
+  <A, const N extends number | Ref<number> = number | Ref<number>>(
+    inner: Grammar<A>,
+    count: N,
+  ): Grammar<RepeatedValue<A, N>>
+  <const N extends number | Ref<number>>(
+    count: N,
+  ): <A>(inner: Grammar<A>) => Grammar<RepeatedValue<A, N>>
+} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: number | Ref<number>) =>
+  make({ _tag: "RepeatExact", count: countOf(count, "repeat"), inner }),
 )
 
 export interface TransformOptions<A, B> {
@@ -328,6 +376,29 @@ export const partialIso: {
   resultTransform(inner, options, "partial"),
 )
 
+/** Keep values satisfying a predicate in both directions, narrowing with a type guard. */
+export const refine: {
+  <A, B extends A>(
+    refinement: (value: A) => value is B,
+    name?: string,
+  ): (inner: Grammar<A>) => Grammar<B>
+  <A>(predicate: (value: A) => boolean, name?: string): (inner: Grammar<A>) => Grammar<A>
+  <A, B extends A>(
+    inner: Grammar<A>,
+    refinement: (value: A) => value is B,
+    name?: string,
+  ): Grammar<B>
+  <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name?: string): Grammar<A>
+} = F.dual(
+  dataFirst,
+  <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name = "refinement") =>
+    plainTransform(
+      inner,
+      { decode: (value) => value, encode: (value) => value, is: predicate, name },
+      "partial",
+    ),
+)
+
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
   readonly is?: ((value: T) => boolean) | undefined
 }
@@ -354,6 +425,17 @@ export const as: {
     name: preview(value),
   }),
 )
+
+/**
+ * Ordered text alternatives that return and print their matching string.
+ * As with `choice`, put longer literals first when alternatives share a prefix.
+ */
+export const literals = <const Values extends readonly [string, ...Array<string>]>(
+  ...values: Values
+): Grammar<Values[number]> => {
+  if (values.length === 0) throw new RangeError("literals: at least one value is required")
+  return make({ _tag: "Choice", options: values.map((value) => as(literal(value), value)) })
+}
 
 export const flag = (value: Silent | string): Grammar<boolean> =>
   choice(as(toSilent(value), true), as(empty, false))

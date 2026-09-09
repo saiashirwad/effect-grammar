@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 
-import { Result, Schema } from "effect"
+import { Predicate, Result, Schema } from "effect"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
@@ -33,6 +33,32 @@ describe("literal", () => {
   it("prints itself", () => {
     assert.equal(printOk(g, undefined), "hello")
     assertRoundTrip(g, undefined)
+  })
+})
+
+describe("literals", () => {
+  const method = G.literals("GET", "POST")
+
+  it("returns the matching literal and prints the selected alternative", () => {
+    for (const value of ["GET", "POST"] as const) {
+      assert.equal(parseOk(method, value), value)
+      assert.equal(printOk(method, value), value)
+      assertRoundTrip(method, value)
+    }
+    assert.deepEqual(parseFail(method, "PUT").expected, ['"POST"'])
+    // @ts-expect-error invalid values are also rejected at runtime
+    printFail(method, "PUT")
+  })
+
+  it("preserves ordered choice semantics and supports an empty literal", () => {
+    assert.equal(parseOk(G.literals("ab", "a"), "ab"), "ab")
+    assert.equal(parseFail(G.literals("a", "ab"), "ab").pos, 1)
+    assertRoundTrip(G.literals("x", ""), "")
+  })
+
+  it("rejects an empty alternative list", () => {
+    // @ts-expect-error JavaScript callers also get a useful error
+    assert.throws(() => G.literals(), /at least one value/)
   })
 })
 
@@ -186,7 +212,7 @@ describe("gen", () => {
           })
           return pair.a
         }),
-      /property of a ref/,
+      /property or mapRef of a ref/,
     )
   })
 
@@ -471,6 +497,7 @@ describe("many", () => {
 
   it("prints by concatenation and checks bounds", () => {
     assert.equal(printOk(g, ["x", "y"]), "xy")
+    // @ts-expect-error nonempty repetitions also reject empty values at runtime
     assert.match(printFail(G.many(G.integer, { min: 1 }), []).message, /at least 1/)
     assert.match(printFail(G.many(G.integer, { max: 1 }), [1, 2]).message, /0..1/)
   })
@@ -486,6 +513,37 @@ describe("many", () => {
 
   it("round-trips", () => {
     assertRoundTrip(g, ["a", "b"])
+  })
+})
+
+describe("fixed repetition", () => {
+  const digit = G.regex(/\d/, "digit")
+
+  it("round-trips exact tuples and still checks lengths at runtime", () => {
+    const pair = digit.pipe(G.repeat(2))
+    assert.deepEqual(parseOk(pair, "12"), ["1", "2"])
+    assertRoundTrip(pair, ["1", "2"])
+    parseFail(pair, "1")
+    parseFail(pair, "123")
+    // @ts-expect-error JavaScript callers still get runtime length checks
+    printFail(pair, ["1"])
+    // @ts-expect-error JavaScript callers still get runtime length checks
+    printFail(pair, ["1", "2", "3"])
+    assertRoundTrip(G.repeat(digit, 0), [])
+  })
+
+  it("checks matching min and max bounds with and without separators", () => {
+    const pair = G.sepBy(digit, ",", { min: 2, max: 2 })
+    assert.deepEqual(parseOk(pair, "1,2"), ["1", "2"])
+    assertRoundTrip(pair, ["1", "2"])
+    parseFail(pair, "1")
+    parseFail(pair, "1,2,3")
+    // @ts-expect-error static bounds do not replace runtime validation
+    printFail(pair, ["1"])
+    // @ts-expect-error static bounds do not replace runtime validation
+    printFail(pair, ["1", "2", "3"])
+    assertRoundTrip(G.many(digit, { min: 2, max: 2 }), ["1", "2"])
+    assertRoundTrip(G.many(digit, { max: 0 }), [])
   })
 })
 
@@ -516,6 +574,40 @@ describe("sepBy", () => {
     assert.equal(printOk(g, [1, 2]), "1,2")
     assert.equal(printOk(g, []), "")
     assertRoundTrip(g, [1, 2, 3])
+  })
+})
+
+describe("refine", () => {
+  const even = G.integer.pipe(G.refine((n) => n % 2 === 0, "even integer"))
+
+  it("checks the predicate when parsing and printing", () => {
+    assertRoundTrip(even, 2)
+    assert.deepEqual(parseFail(even, "3").expected, ["even integer"])
+    assert.match(printFail(even, 3).message, /even integer/)
+    assert.deepEqual(G.auditFidelity(even), [{ name: "even integer", fidelity: "partial" }])
+  })
+
+  it("narrows with a type guard and works data-first", () => {
+    const g = G.refine(G.choice(G.integer, word), (value): value is number =>
+      Predicate.isNumber(value),
+    )
+    assertRoundTrip(g, 12)
+    assert.ok(parseFail(g, "abc").expected.includes("refinement"))
+    // @ts-expect-error the type guard also narrows the printer input
+    printFail(g, "abc")
+  })
+
+  it("lets a choice try the next branch after a failed refinement", () => {
+    const g = G.choice(even, G.integer)
+    assertRoundTrip(g, 3)
+  })
+
+  it("reports thrown predicates as parse and print failures", () => {
+    const g = G.refine(G.integer, () => {
+      throw new Error("predicate failed")
+    })
+    assert.match(parseFail(g, "1").message, /predicate failed/)
+    assert.match(printFail(g, 1).message, /predicate failed/)
   })
 })
 

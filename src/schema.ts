@@ -3,8 +3,9 @@ import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 import type { Grammar, Value } from "./core.ts"
 import type { PrintIssue } from "./errors.ts"
 import { PrintError } from "./errors.ts"
-import { parse } from "./parse.ts"
-import { printCheckedUnknown, printUnknown } from "./print.ts"
+import { type Format, type Input, textFormat } from "./format.ts"
+import { parseWith } from "./parse.ts"
+import { printCheckedWith, printWith } from "./print.ts"
 import { render } from "./render.ts"
 
 const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue => {
@@ -25,22 +26,23 @@ export interface CodecOptions {
   readonly roundTrip?: "verify" | "off"
 }
 
-export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
+export const codecWith = <S extends Schema.Top, A extends S["Encoded"], I extends Input>(
   grammar: Grammar<A>,
   target: S,
+  format: Format<I, Error>,
   options?: CodecOptions,
 ) => {
-  const print = options?.roundTrip === "off" ? printUnknown : printCheckedUnknown
-  return Schema.String.pipe(
+  const print = options?.roundTrip === "off" ? printWith : printCheckedWith
+  return format.schema.pipe(
     Schema.decodeTo(
       target,
-      SchemaTransformation.transformOrFail<S["Encoded"], string>({
-        decode: (text) =>
-          Effect.fromResult(parse(grammar, text)).pipe(
-            Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message }, text)),
+      SchemaTransformation.transformOrFail<S["Encoded"], I>({
+        decode: (input) =>
+          Effect.fromResult(parseWith(grammar, input, format)).pipe(
+            Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message }, input)),
           ),
         encode: (value) =>
-          Effect.fromResult(print(grammar, value)).pipe(
+          Effect.fromResult(print(grammar, value, format)).pipe(
             Effect.mapError((error) => printIssueToSchema(value, error.issue)),
           ),
       }),
@@ -48,3 +50,9 @@ export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
     Schema.annotate({ identifier: options?.identifier, description: render(grammar) }),
   )
 }
+
+export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
+  grammar: Grammar<A>,
+  target: S,
+  options?: CodecOptions,
+) => codecWith(grammar, target, textFormat, options)

@@ -1,6 +1,15 @@
 import { Predicate } from "effect"
 
-import type { Case, Expr, Pattern, RefExpr, ScopeId, Value } from "./core.ts"
+import {
+  type Case,
+  type Count,
+  type Expr,
+  type Pattern,
+  type RefExpr,
+  type ScopeId,
+  unsafeToNever,
+  type Value,
+} from "./core.ts"
 
 /**
  * Sentinel for "no value has been bound here". Distinguished from `undefined`
@@ -37,11 +46,22 @@ export const lookup = (env: Frame | undefined, ref: RefExpr): BoundValue => {
 
 export const evaluate = (expr: Expr, env: Frame | undefined): BoundValue => {
   if (expr._tag === "Ref") return lookup(env, expr)
+  if (expr._tag === "Map") {
+    const inner = evaluate(expr.expr, env)
+    return inner === Unbound ? Unbound : expr.f(unsafeToNever(inner))
+  }
 
   const object = evaluate(expr.object, env)
-  if (object === Unbound || !Predicate.isObject(object)) return Unbound
+  if (object === Unbound) return Unbound
+  if (expr.key === "length" && (Predicate.isString(object) || object instanceof Uint8Array)) {
+    return object.length
+  }
+  if (!Predicate.isObject(object)) return Unbound
   return Object.hasOwn(object, expr.key) ? object[expr.key] : Unbound
 }
+
+export const evaluateCount = (count: Count, env: Frame | undefined): BoundValue =>
+  Predicate.isNumber(count) ? count : evaluate(count, env)
 
 export const materialize = (pattern: Pattern, env: Frame): BoundValue => {
   switch (pattern._tag) {

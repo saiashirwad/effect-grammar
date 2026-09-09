@@ -37,6 +37,12 @@ export interface RefExpr {
 export type Expr =
   | RefExpr
   | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
+  | {
+      readonly _tag: "Map"
+      readonly expr: Expr
+      readonly f: (value: never) => Value
+      readonly name: string | undefined
+    }
 
 export type Pattern =
   | RefExpr
@@ -72,9 +78,23 @@ export type Step =
   | { readonly _tag: "Silent"; readonly grammar: Silent }
   | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: GrammarInternal }
 
+export type Count = number | Expr
+
+export type InputKind = "text" | "binary"
+
+export type NumberLayout =
+  | { readonly kind: "uint" | "int"; readonly width: 1 | 2 | 4 | 8 }
+  | { readonly kind: "float"; readonly width: 4 | 8 }
+
 export type Node =
+  | { readonly _tag: "Empty" }
   | { readonly _tag: "Literal"; readonly value: string }
   | { readonly _tag: "Regex"; readonly re: RegExp; readonly name: string }
+  | { readonly _tag: "ByteLiteral"; readonly value: Uint8Array }
+  | { readonly _tag: "Bytes"; readonly count: Count }
+  | ({ readonly _tag: "Number"; readonly littleEndian: boolean } & NumberLayout)
+  | { readonly _tag: "VarInt"; readonly signed: boolean }
+  | { readonly _tag: "Derive"; readonly target: RefExpr; readonly source: Expr }
   | {
       readonly _tag: "Gen"
       readonly scope: ScopeId
@@ -120,8 +140,8 @@ export type Node =
       resolved?: GrammarInternal | undefined
     }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | { readonly _tag: "Take"; readonly count: Expr }
-  | { readonly _tag: "RepeatExact"; readonly count: Expr; readonly inner: GrammarInternal }
+  | { readonly _tag: "Take"; readonly count: Count }
+  | { readonly _tag: "RepeatExact"; readonly count: Count; readonly inner: GrammarInternal }
 
 export type Bound<A> = [A] extends [void] ? void : Ref<A>
 
@@ -142,7 +162,7 @@ export interface RefBase<out A> {
   readonly [RefTypeId]: Types.Covariant<A>
 }
 
-type RefProps<A> = [A] extends [ReadonlyArray<unknown>]
+type RefProps<A> = [A] extends [ReadonlyArray<unknown> | Uint8Array | string]
   ? { readonly length: Ref<number> }
   : [A] extends [object]
     ? { readonly [K in keyof A & string]-?: Ref<A[K]> }
@@ -204,8 +224,14 @@ export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarIntern
 /** The grammars a node refers to directly. A `Suspend` yields its resolved target. */
 export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
   switch (node._tag) {
+    case "Empty":
     case "Literal":
     case "Regex":
+    case "ByteLiteral":
+    case "Bytes":
+    case "Number":
+    case "VarInt":
+    case "Derive":
     case "Take":
       return []
     case "Gen":
@@ -228,3 +254,28 @@ export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
       return node.cases.map((matchCase) => matchCase.grammar)
   }
 }
+
+export const inputOf = (node: Node): InputKind | undefined => {
+  switch (node._tag) {
+    case "Literal":
+    case "Regex":
+    case "Take":
+      return "text"
+    case "ByteLiteral":
+    case "Bytes":
+    case "Number":
+    case "VarInt":
+      return "binary"
+    default:
+      return undefined
+  }
+}
+
+/** The bindings a gen's `derive` steps compute when a value leaves them out. */
+export const derivations = (
+  steps: ReadonlyArray<Step>,
+): ReadonlyArray<{ readonly slot: number; readonly expr: Expr }> =>
+  steps.flatMap((step) => {
+    const node = nodeOf(step.grammar)
+    return node._tag === "Derive" ? [{ slot: node.target.slot, expr: node.source }] : []
+  })

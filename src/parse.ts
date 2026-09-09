@@ -1,5 +1,6 @@
-import { Result } from "effect"
+import { Equal, Predicate, Result } from "effect"
 
+import { freeDerive } from "./compile.ts"
 import {
   type Grammar,
   type GrammarInternal,
@@ -8,12 +9,24 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { bind, caseFor, evaluate, type Frame, frame, isCount, materialize, Unbound } from "./env.ts"
-import { exceptionMessage, ParseError, preview } from "./errors.ts"
+import {
+  bind,
+  caseFor,
+  evaluate,
+  evaluateCount,
+  type Frame,
+  frame,
+  isCount,
+  materialize,
+  Unbound,
+} from "./env.ts"
+import { exceptionMessage, hexByte, type ParseError, preview } from "./errors.ts"
+import { type Format, type Input, textFormat } from "./format.ts"
+import { readNumber, readVarInt } from "./number.ts"
 import { describe } from "./render.ts"
 
 interface State {
-  readonly input: string
+  readonly input: Input
   pos: number
   furthest: number
   expected: Set<string>
@@ -38,7 +51,47 @@ const go = (
 ): Value | typeof Fail => {
   const node = nodeOf(grammar)
   switch (node._tag) {
+    case "Empty":
+      return undefined
+    case "ByteLiteral": {
+      if (!(state.input instanceof Uint8Array)) return failAt(state, "binary input")
+      for (const byte of node.value) {
+        if (state.input[state.pos] !== byte) return failAt(state, hexByte(byte))
+        state.pos++
+      }
+      return undefined
+    }
+    case "Number": {
+      if (!(state.input instanceof Uint8Array)) return failAt(state, "binary input")
+      if (state.input.length - state.pos < node.width) {
+        return failAt(state, `${node.width} bytes`)
+      }
+      const value = readNumber(node, state.input, state.pos)
+      state.pos += node.width
+      return value
+    }
+    case "VarInt": {
+      if (!(state.input instanceof Uint8Array)) return failAt(state, "binary input")
+      const read = readVarInt(node.signed, state.input, state.pos)
+      if (read === undefined) return failAt(state, describe(grammar))
+      state.pos += read.width
+      return read.value
+    }
+    case "Derive":
+      return failAt(state, freeDerive)
+    case "Bytes": {
+      if (!(state.input instanceof Uint8Array)) return failAt(state, "binary input")
+      const count = evaluateCount(node.count, env)
+      if (count === Unbound) return failAt(state, "a bound bytes count")
+      if (!isCount(count)) return failAt(state, "a non-negative byte count")
+      if (state.input.length - state.pos < count) return failAt(state, `${count} bytes`)
+      // Copy explicitly: Buffer.slice would retain the caller's storage.
+      const value = new Uint8Array(state.input.subarray(state.pos, state.pos + count))
+      state.pos += count
+      return value
+    }
     case "Literal": {
+      if (!Predicate.isString(state.input)) return failAt(state, "text input")
       if (state.input.startsWith(node.value, state.pos)) {
         state.pos += node.value.length
         return undefined
@@ -51,6 +104,7 @@ const go = (
       return failAt(state, JSON.stringify(node.value))
     }
     case "Regex": {
+      if (!Predicate.isString(state.input)) return failAt(state, "text input")
       node.re.lastIndex = state.pos
       const match = node.re.exec(state.input)
       if (match === null || match.index !== state.pos) return failAt(state, node.name)
@@ -60,6 +114,14 @@ const go = (
     case "Gen": {
       const local = frame(node.scope, node.slotCount, env)
       for (const step of node.steps) {
+        const inner = nodeOf(step.grammar)
+        if (inner._tag === "Derive") {
+          const target = local.values[inner.target.slot]
+          const source = evaluate(inner.source, local)
+          if (source === Unbound) return failAt(state, "a bound derive source")
+          if (!Equal.equals(target, source)) return failAt(state, `a derived ${preview(source)}`)
+          continue
+        }
         const value = go(step.grammar, state, local)
         if (value === Fail) return Fail
         if (step._tag === "Bind") bind(local, step.slot, value)
@@ -144,7 +206,8 @@ const go = (
       return go(matchCase.grammar, state, env)
     }
     case "Take": {
-      const count = evaluate(node.count, env)
+      if (!Predicate.isString(state.input)) return failAt(state, "text input")
+      const count = evaluateCount(node.count, env)
       if (count === Unbound) return failAt(state, "a bound take count")
       if (!isCount(count)) return failAt(state, `<char>{${preview(count)}}`)
       if (state.input.length - state.pos < count) {
@@ -155,7 +218,7 @@ const go = (
       return value
     }
     case "RepeatExact": {
-      const count = evaluate(node.count, env)
+      const count = evaluateCount(node.count, env)
       if (count === Unbound) return failAt(state, "a bound repeat count")
       if (!isCount(count)) return failAt(state, `a non-negative repeat count`)
       const values: Array<Value> = []
@@ -171,39 +234,27 @@ const go = (
   }
 }
 
-const toError = (state: State): ParseError => {
-  const before = state.input.slice(0, state.furthest)
-  const code = state.input.codePointAt(state.furthest)
-  return new ParseError({
-    pos: state.furthest,
-    line: before.split("\n").length,
-    column: before.length - before.lastIndexOf("\n"),
-    expected: [...state.expected],
-    found: code === undefined ? undefined : String.fromCodePoint(code),
-  })
-}
-
-export const reparse = (
+export const reparse = <I extends Input, E extends Error>(
   grammar: GrammarInternal,
-  text: string,
+  input: I,
   env: Frame | undefined,
-):
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly error: ParseError } => {
-  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set() }
+  format: Format<I, E>,
+): Result.Result<Value, E> => {
+  const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
   const value = go(grammar, state, env)
-  if (value !== Fail && state.pos === text.length) return { ok: true, value }
+  if (value !== Fail && state.pos === input.length) return Result.succeed(value)
   if (value !== Fail) failAt(state, "end of input")
-  return { ok: false, error: toError(state) }
+  return Result.fail(format.error(input, state.furthest, [...state.expected]))
 }
 
-export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
-  const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
-  const value = go(grammar, state, undefined)
-  if (value !== Fail && state.pos === input.length) {
-    // SAFETY: interpreting Grammar<A> preserves its output type across every node.
-    return Result.succeed(value as A)
-  }
-  if (value !== Fail) failAt(state, "end of input")
-  return Result.fail(toError(state))
+export const parseWith = <A, I extends Input, E extends Error>(
+  grammar: Grammar<A>,
+  input: I,
+  format: Format<I, E>,
+): Result.Result<A, E> => {
+  // SAFETY: interpreting Grammar<A> preserves its output type across every node.
+  return reparse(grammar, input, undefined, format) as Result.Result<A, E>
 }
+
+export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> =>
+  parseWith(grammar, input, textFormat)
