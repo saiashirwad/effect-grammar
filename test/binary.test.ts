@@ -373,6 +373,33 @@ describe("varint", () => {
 })
 
 describe("utf8 and bitfield", () => {
+  it("preserves leading BOM characters in UTF-8 fields", () => {
+    for (const value of ["\uFEFF", "\uFEFFA", "\uFEFF\uFEFFA"]) {
+      const input = encoder.encode(value)
+      const grammar = B.utf8(input.length)
+      const parsed = Result.getOrThrow(B.parse(grammar, input))
+      assert.equal(parsed, value)
+      assert.deepEqual(Result.getOrThrow(B.print(grammar, parsed)), input)
+      assert.deepEqual(Result.getOrThrow(B.printChecked(grammar, value)), input)
+    }
+  })
+
+  it("rejects negative and non-integer bitfield words", () => {
+    const signed = B.bitfield(B.int8, { a: 4, b: 4 })
+    assert.ok(Result.isFailure(B.parse(signed, bytes(0xff))))
+    assert.deepEqual(Result.getOrThrow(B.parse(signed, bytes(0x7f))), { a: 7, b: 15 })
+    assert.deepEqual(Result.getOrThrow(B.printChecked(signed, { a: 7, b: 15 })), bytes(0x7f))
+    const grammar = B.bitfield(B.be.float64, { value: 53 })
+    for (const value of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+      const input = new Uint8Array(8)
+      new DataView(input.buffer).setFloat64(0, value)
+      assert.ok(Result.isFailure(B.parse(grammar, input)))
+    }
+    for (const value of [0, Number.MAX_SAFE_INTEGER]) {
+      assert.ok(Result.isSuccess(B.printChecked(grammar, { value })))
+    }
+  })
+
   it("decodes UTF-8 by byte length and rejects malformed bytes", () => {
     const text = B.utf8(3)
     assert.equal(Result.getOrThrow(B.parse(text, bytes(0xe2, 0x82, 0xac))), "€")
@@ -395,6 +422,38 @@ describe("utf8 and bitfield", () => {
 })
 
 describe("mapRef and derive", () => {
+  it("resolves omitted derivations in dependency order", () => {
+    const grammar = G.gen(function* () {
+      const a = yield* B.byte
+      const b = yield* B.byte
+      const c = yield* B.byte
+      yield* G.derive(a, b)
+      yield* G.derive(b, c)
+      const payload = yield* B.bytes(c)
+      yield* G.derive(c, payload.length)
+      return payload
+    })
+    const input = bytes(2, 2, 2, 7, 9)
+    const parsed = Result.getOrThrow(B.parse(grammar, input))
+    assert.deepEqual(parsed, bytes(7, 9))
+    assert.deepEqual(Result.getOrThrow(B.print(grammar, parsed)), input)
+    assert.deepEqual(Result.getOrThrow(B.compile(grammar).printChecked(parsed)), input)
+  })
+
+  it("reports missing sources when derivations cannot make progress", () => {
+    const grammar = G.gen(function* () {
+      const a = yield* B.byte
+      const b = yield* B.byte
+      yield* G.derive(a, b)
+      yield* G.derive(b, a)
+      return "cycle"
+    })
+    assert.equal(Result.getOrThrow(B.parse(grammar, bytes(1, 1))), "cycle")
+    const result = B.print(grammar, "cycle")
+    assert.ok(Result.isFailure(result))
+    assert.deepEqual(result.failure.issue, { _tag: "MissingBinding", binding: "a derive source" })
+  })
+
   it("computes a byte count from a ref with arithmetic", () => {
     const grammar = G.gen(function* () {
       const words = yield* B.byte

@@ -122,16 +122,32 @@ const outputGen = <I extends Input>(
   const local = frame(node.scope, node.slotCount, env)
   const issue = unifyPattern(node.result, value, local)
   if (issue !== undefined) return fail(issue)
-  for (const { slot, expr } of derivations(node.steps)) {
-    const derived = evaluate(expr, local)
-    if (derived === Unbound) return fail({ _tag: "MissingBinding", binding: "a derive source" })
-    const given = local.values[slot]
-    if (given === Unbound) {
-      bind(local, slot, derived)
-    } else if (!Equal.equals(given, derived)) {
-      const issue: PrintIssue = { _tag: "InvalidValue", expected: preview(derived), actual: given }
-      return fail(issueAt(issue, bindingPath(node.result, node.scope, slot, []) ?? []))
+  let pending = derivations(node.steps)
+  while (pending.length > 0) {
+    const unresolved: Array<(typeof pending)[number]> = []
+    for (const derivation of pending) {
+      const { slot, expr } = derivation
+      const derived = evaluate(expr, local)
+      if (derived === Unbound) {
+        unresolved.push(derivation)
+        continue
+      }
+      const given = local.values[slot]
+      if (given === Unbound) {
+        bind(local, slot, derived)
+      } else if (!Equal.equals(given, derived)) {
+        const issue: PrintIssue = {
+          _tag: "InvalidValue",
+          expected: preview(derived),
+          actual: given,
+        }
+        return fail(issueAt(issue, bindingPath(node.result, node.scope, slot, []) ?? []))
+      }
     }
+    if (unresolved.length === pending.length) {
+      return fail({ _tag: "MissingBinding", binding: "a derive source" })
+    }
+    pending = unresolved
   }
 
   for (const [index, step] of node.steps.entries()) {

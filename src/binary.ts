@@ -80,7 +80,7 @@ export const varint: Grammar<number> = make({ _tag: "VarInt", signed: true })
 export const bytes = (count: number | Ref<number>): Grammar<Uint8Array> =>
   make({ _tag: "Bytes", count: countOf(count, "bytes") })
 
-const decoder = new TextDecoder("utf-8", { fatal: true })
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 const encoder = new TextEncoder()
 
 /** Exactly `count` bytes of UTF-8. `count` is the byte length, not the character count. */
@@ -119,6 +119,9 @@ export const bitfield = <const Fields extends Record<string, number>>(
   return word.pipe(
     iso({
       decode: (value) => {
+        if (!isCount(value)) {
+          throw new RangeError("bitfield: word must be a non-negative safe integer")
+        }
         if (value >= 2 ** total) {
           throw new RangeError(`bitfield: ${value} has bits beyond the declared fields`)
         }
