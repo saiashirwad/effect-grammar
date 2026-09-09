@@ -186,7 +186,7 @@ describe("gen", () => {
           })
           return pair.a
         }),
-      /property of a ref/,
+      /property or mapRef of a ref/,
     )
   })
 

@@ -4,6 +4,8 @@ import { Result } from "effect"
 
 import * as Grammar from "../src/index.ts"
 
+export const bytes = (...values: Array<number>): Uint8Array => new Uint8Array(values)
+
 export const parseOk = <A>(grammar: Grammar.Grammar<A>, input: string): A => {
   const r = Grammar.parse(grammar, input)
   if (Result.isFailure(r)) assert.fail(`expected parse success, got ${r.failure.message}`)

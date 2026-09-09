@@ -2,6 +2,9 @@ import { Predicate, Schema } from "effect"
 
 import type { Value } from "./core.ts"
 
+const describeExpected = (expected: ReadonlyArray<string>): string =>
+  expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
+
 export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   pos: Schema.Finite,
   line: Schema.Finite,
@@ -11,9 +14,19 @@ export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
 }) {
   override get message(): string {
     const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
-    const expected =
-      this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
-    return `line ${this.line}, column ${this.column}: expected ${expected}, found ${found}`
+    return `line ${this.line}, column ${this.column}: expected ${describeExpected(this.expected)}, found ${found}`
+  }
+}
+
+/** A parse failure at a zero-based byte offset. */
+export class BinaryParseError extends Schema.TaggedError<BinaryParseError>()("BinaryParseError", {
+  pos: Schema.Finite,
+  expected: Schema.Array(Schema.String),
+  found: Schema.UndefinedOr(Schema.Finite),
+}) {
+  override get message(): string {
+    const found = this.found === undefined ? "end of input" : hexByte(this.found)
+    return `byte ${this.pos}: expected ${describeExpected(this.expected)}, found ${found}`
   }
 }
 
@@ -50,7 +63,7 @@ export type PrintIssue =
   | {
       readonly _tag: "RoundTrip"
       readonly value: Value
-      readonly printed: string
+      readonly printed: string | Uint8Array
       readonly parsed?: Value | undefined
       readonly error?: string | undefined
     }
@@ -94,8 +107,8 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
 /** The tail of a round-trip message: what the value printed as and how that read back. */
 export const describeRoundTrip = (issue: Extract<PrintIssue, { _tag: "RoundTrip" }>): string =>
   issue.error === undefined
-    ? `prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
-    : `prints as ${JSON.stringify(issue.printed)}, which does not parse back: ${issue.error}`
+    ? `prints as ${preview(issue.printed)}, which reads back as ${preview(issue.parsed)}`
+    : `prints as ${preview(issue.printed)}, which does not parse back: ${issue.error}`
 
 export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   issue: Schema.Unknown,
@@ -112,6 +125,7 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
 }
 
 export const preview = <T>(value: T): string => {
+  if (value instanceof Uint8Array) return `[${Array.from(value, hexByte).join(" ")}]`
   try {
     return JSON.stringify(value) ?? String(value)
   } catch {
@@ -121,3 +135,5 @@ export const preview = <T>(value: T): string => {
 
 export const exceptionMessage = (error: Value): string =>
   Predicate.isError(error) ? error.message : preview(error)
+
+export const hexByte = (value: number): string => `0x${value.toString(16).padStart(2, "0")}`

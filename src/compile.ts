@@ -1,24 +1,34 @@
-import { Result } from "effect"
+import { Predicate, Result } from "effect"
 
 import type {
+  Count,
   Expr,
   Fidelity,
   Grammar,
   GrammarInternal,
   GrammarIssue,
+  InputKind,
   Node,
   ScopeId,
 } from "./core.ts"
-import { children, nodeOf, resolve } from "./core.ts"
+import { children, derivations, inputOf, nodeOf, resolve } from "./core.ts"
 import type { ParseError, PrintError } from "./errors.ts"
-import { parse } from "./parse.ts"
-import { print, printChecked } from "./print.ts"
+import { type Format, type Input, textFormat } from "./format.ts"
+import { parseWith } from "./parse.ts"
+import { printCheckedWith, printWith } from "./print.ts"
 import { describe, render } from "./render.ts"
 
+/** A `derive` that was not yielded directly by its gen, so no gen hoisted it. */
+export const freeDerive =
+  "derive: must be yielded directly by the gen that binds its target, not nested in another grammar"
+
 const exprScope = (expr: Expr): ScopeId =>
-  expr._tag === "Ref" ? expr.scope : exprScope(expr.object)
+  expr._tag === "Ref" ? expr.scope : exprScope(expr._tag === "Map" ? expr.expr : expr.object)
 
 type EmptyMatch = "yes" | "no" | "unknown"
+
+const countEmpty = (count: Count): EmptyMatch =>
+  Predicate.isNumber(count) ? (count === 0 ? "yes" : "no") : "unknown"
 
 const allMatchEmpty = (grammars: Iterable<GrammarInternal>, seen: Set<Node>): EmptyMatch => {
   let result: EmptyMatch = "yes"
@@ -34,8 +44,18 @@ const allMatchEmpty = (grammars: Iterable<GrammarInternal>, seen: Set<Node>): Em
 const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => {
   const node = nodeOf(grammar)
   switch (node._tag) {
+    case "Empty":
+    case "Derive":
+      return "yes"
     case "Literal":
-      return node.value === "" ? "yes" : "no"
+    case "Number":
+    case "VarInt":
+      return "no"
+    case "ByteLiteral":
+      return node.value.length === 0 ? "yes" : "no"
+    case "Bytes":
+    case "Take":
+      return countEmpty(node.count)
     case "Regex":
       // `regex` always compiles with the sticky flag, so a match here is empty at 0.
       node.re.lastIndex = 0
@@ -79,9 +99,13 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
       return empty
     }
     case "Match":
-    case "Take":
-    case "RepeatExact":
       return "unknown"
+    case "RepeatExact":
+      return node.count === 0
+        ? "yes"
+        : Predicate.isNumber(node.count)
+          ? matchesEmpty(node.inner, seen)
+          : "unknown"
   }
 }
 
@@ -97,12 +121,12 @@ const eachNode = (grammar: GrammarInternal, visit: (node: Node) => void, seen: S
 }
 
 const checkRef = (
-  expr: Expr,
+  count: Count,
   where: string,
   active: ReadonlyArray<ScopeId>,
   issues: Array<GrammarIssue>,
 ): void => {
-  if (!active.includes(exprScope(expr))) {
+  if (!Predicate.isNumber(count) && !active.includes(exprScope(count))) {
     issues.push({
       message: `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
     })
@@ -123,9 +147,16 @@ const walk = (
   switch (node._tag) {
     case "Gen": {
       const inner = [...active, node.scope]
-      for (const step of node.steps) walk(step.grammar, inner, visiting, completed, issues)
+      for (const step of node.steps) {
+        if (nodeOf(step.grammar)._tag === "Derive") continue
+        walk(step.grammar, inner, visiting, completed, issues)
+      }
+      for (const { expr } of derivations(node.steps)) checkRef(expr, "derive", inner, issues)
       return
     }
+    case "Derive":
+      issues.push({ message: freeDerive })
+      return
     case "Many":
       if (node.max === Number.POSITIVE_INFINITY && matchesEmpty(node.inner, new Set()) === "yes") {
         issues.push({
@@ -152,6 +183,9 @@ const walk = (
     case "Take":
       checkRef(node.count, "take", active, issues)
       break
+    case "Bytes":
+      checkRef(node.count, "bytes", active, issues)
+      break
     case "RepeatExact":
       checkRef(node.count, "repeat", active, issues)
       break
@@ -163,15 +197,32 @@ const walk = (
 
 /**
  * Check a grammar for staged errors that `parse` and `print` would otherwise
- * only report when they run: refs used outside their gen and unbounded
- * repetition of a grammar proven to match empty input. Returns the issues
- * these checks find; an empty array is not proof of all runtime behavior.
+ * only report when they run: refs used outside their gen, unbounded
+ * repetition of a grammar proven to match empty input, and terminals that
+ * read a different kind of input. Returns the issues these checks find; an
+ * empty array is not proof of all runtime behavior.
  */
-export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> => {
+export const validateWith = (
+  grammar: GrammarInternal,
+  input: InputKind,
+): ReadonlyArray<GrammarIssue> => {
   const issues: Array<GrammarIssue> = []
   walk(grammar, [], new Set(), new WeakMap(), issues)
+  eachNode(
+    grammar,
+    (node) => {
+      const kind = inputOf(node)
+      if (kind !== undefined && kind !== input) {
+        issues.push({ message: `${node._tag} cannot be used with ${input} input` })
+      }
+    },
+    new Set(),
+  )
   return issues
 }
+
+export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> =>
+  validateWith(grammar, "text")
 
 export interface FidelityEntry {
   readonly name: string
@@ -197,21 +248,19 @@ export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityE
   return entries
 }
 
-export interface Compiled<A> {
-  readonly parse: (text: string) => Result.Result<A, ParseError>
-  readonly print: (value: A) => Result.Result<string, PrintError>
-  readonly printChecked: (value: A) => Result.Result<string, PrintError>
+export interface Compiled<A, I extends Input = string, E extends Error = ParseError> {
+  readonly parse: (input: I) => Result.Result<A, E>
+  readonly print: (value: A) => Result.Result<I, PrintError>
+  readonly printChecked: (value: A) => Result.Result<I, PrintError>
   readonly render: string
   readonly fidelity: ReadonlyArray<FidelityEntry>
 }
 
-/**
- * Validate a grammar once, then return prepared operations bound to it.
- * Throws if {@link validate} finds an issue. Other input, value, callback, and
- * round-trip failures can still occur when a prepared operation runs.
- */
-export const compile = <A>(grammar: Grammar<A>): Compiled<A> => {
-  const issues = validate(grammar)
+export const compileWith = <A, I extends Input, E extends Error>(
+  grammar: Grammar<A>,
+  format: Format<I, E>,
+): Compiled<A, I, E> => {
+  const issues = validateWith(grammar, format.kind)
   if (issues.length > 0) {
     throw new Error(
       `compile: the grammar has ${issues.length} issue${issues.length === 1 ? "" : "s"}:\n  ${issues
@@ -220,10 +269,17 @@ export const compile = <A>(grammar: Grammar<A>): Compiled<A> => {
     )
   }
   return {
-    parse: (text) => parse(grammar, text),
-    print: (value) => print(grammar, value),
-    printChecked: (value) => printChecked(grammar, value),
+    parse: (input) => parseWith(grammar, input, format),
+    print: (value) => printWith(grammar, value, format),
+    printChecked: (value) => printCheckedWith(grammar, value, format),
     render: render(grammar),
     fidelity: auditFidelity(grammar),
   }
 }
+
+/**
+ * Validate a grammar once, then return prepared operations bound to it.
+ * Throws if {@link validate} finds an issue. Other input, value, callback, and
+ * round-trip failures can still occur when a prepared operation runs.
+ */
+export const compile = <A>(grammar: Grammar<A>): Compiled<A> => compileWith(grammar, textFormat)

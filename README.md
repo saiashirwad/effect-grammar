@@ -8,13 +8,15 @@ Invertible grammar combinators and parser-printers for Effect.
 
 A `Grammar<A>` supports these operations:
 
-- `parse`: read a string and return a `Result<A, ParseError>`
+- `parse`: read a string (or bytes, via `effect-grammar/Binary`) and return a
+  `Result<A, ParseError>`
 - `print`: write an `A` as canonical text and return a
   `Result<string, PrintError>`. Whitespace you skipped while parsing is not
   kept; `print` gives one fixed form.
 - `printChecked`: `print`, then parse the output back and fail unless it reads
   as an equal value. The whole-grammar round-trip guarantee.
-- `codec`: combine the grammar with an Effect Schema to make a string codec
+- `codec`: combine the grammar with an Effect Schema to make a string (or
+  `Uint8Array`) codec
 - `render`: return a readable description of the grammar
 - `validate` / `compile`: check a grammar for staged errors before use
 
@@ -74,19 +76,78 @@ integration in one code block.
 
 See the [endpoint example](./examples/endpoint.ts) for a complete Schema.
 
+## Binary input
+
+`effect-grammar/Binary` parses and prints `Uint8Array` values, including Node.js
+`Buffer`s. Binary primitives compose with the structural combinators (`gen`,
+`choice`, `many`, `between`, and so on), and a length field can be derived from
+the payload so values need not carry it:
+
+```ts
+import { Result } from "effect"
+import * as G from "effect-grammar"
+import * as B from "effect-grammar/Binary"
+
+const encoder = new TextEncoder()
+const message = G.gen(function* () {
+  yield* B.literal([0xca, 0xfe])
+  const length = yield* B.varuint
+  const text = yield* B.utf8(length)
+  yield* G.derive(
+    length,
+    G.mapRef(text, (value) => encoder.encode(value).length),
+  )
+  return { text }
+})
+
+const compiled = B.compile(message)
+Result.getOrThrow(compiled.parse(new Uint8Array([0xca, 0xfe, 2, 0x68, 0x69])))
+// { text: "hi" }
+Result.getOrThrow(compiled.printChecked({ text: "hi" }))
+// Uint8Array([0xca, 0xfe, 2, 0x68, 0x69])
+```
+
+| Primitive                               | Value        | Behavior                                               |
+| --------------------------------------- | ------------ | ------------------------------------------------------ |
+| `B.literal(bytes)`                      | `void`       | Match and print exact bytes                            |
+| `B.uint8` (alias `B.byte`) / `B.int8`   | `number`     | 8-bit integers                                         |
+| `B.be.uint16` … `B.le.float64`          | `number`     | 16/32-bit integers, 32/64-bit floats, by byte order    |
+| `B.be.uint64` / `B.be.int64` (and `le`) | `bigint`     | 64-bit integers                                        |
+| `B.varuint` / `B.varint`                | `number`     | LEB128, zigzag for signed, safe-integer range          |
+| `B.bytes(count)`                        | `Uint8Array` | Exactly `count` bytes; static or `Ref<number>`         |
+| `B.utf8(count)`                         | `string`     | Exactly `count` bytes of UTF-8                         |
+| `B.bitfield(word, { a: 3, b: 5 })`      | `{ a, b }`   | Named bit fields of an integer, most significant first |
+
+`B.parse`, `B.print`, `B.printChecked`, `B.validate`, `B.compile`, and `B.codec`
+mirror the text operations; `B.codec` makes a `Schema.Uint8Array` codec. For the
+round-trip laws, bind the testing helpers to the binary format:
+
+```ts
+import { lawsFor } from "effect-grammar/testing"
+
+const { assertPrintParse, checkPrintParse } = lawsFor(B.format)
+```
+
+`B.ParseError` (tagged `BinaryParseError`) reports a zero-based byte `pos` and
+the `found` byte. A `Grammar<A>` does not say which input it reads, so
+`B.compile` (and `G.compile`) reject terminals of the other kind up front.
+Fields are byte-aligned: `bitfield` splits one integer, and there is no
+streaming. See the [binary message example](./examples/binary.ts).
+
 ## Main building blocks
 
-| Purpose                     | Combinators                                                                   |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| Text                        | `literal`, `regex`, `integer`, `take`, `repeat`                               |
-| Sequences and products      | `gen`, `seq`, `struct`, `tuple`                                               |
-| Delimiters                  | `prefix`, `suffix`, `between`, `wrap`                                         |
-| Repetition and options      | `optional`, `many`, `sepBy`                                                   |
-| Alternatives                | `choice`, `checkedChoice`, `choiceOn`, `taggedChoice`, `match`, `matchValue`  |
-| Value conversion            | `transform`, `transformOrFail`, `iso`, `partialIso`, `decodeTo`, `as`, `flag` |
-| Defaults and ignored values | `defaulted`, `skip`                                                           |
-| Whitespace                  | `lexeme`, `symbol`, `space`, `spaces`, `trivia`                               |
-| Recursion                   | `suspend`                                                                     |
+| Purpose                         | Combinators                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| Text                            | `literal`, `regex`, `integer`, `take`, `repeat`                               |
+| Bytes (`effect-grammar/Binary`) | `literal`, `byte`, `be`/`le`, `varuint`, `bytes`, `utf8`, `bitfield`          |
+| Sequences and products          | `gen`, `seq`, `struct`, `tuple`                                               |
+| Delimiters                      | `prefix`, `suffix`, `between`, `wrap`                                         |
+| Repetition and options          | `optional`, `many`, `sepBy`                                                   |
+| Alternatives                    | `choice`, `checkedChoice`, `choiceOn`, `taggedChoice`, `match`, `matchValue`  |
+| Value conversion                | `transform`, `transformOrFail`, `iso`, `partialIso`, `decodeTo`, `as`, `flag` |
+| Defaults and ignored values     | `defaulted`, `skip`                                                           |
+| Whitespace                      | `lexeme`, `symbol`, `space`, `spaces`, `trivia`                               |
+| Recursion                       | `suspend`                                                                     |
 
 Most delimiter and repetition combinators support data-first and data-last
 calls, so they also work with `pipe`.
@@ -100,7 +161,14 @@ one:
 
 - `match(ref, cases)` and `matchValue(ref, entries)` choose a grammar by a
   parsed value
-- `take(ref)` and `repeat(grammar, ref)` read a count
+- `take(ref)`, `repeat(grammar, ref)`, and `B.bytes(ref)` read a count (each
+  also accepts a static number)
+- `mapRef(ref, f)` is a ref to `f` of its value, for counts that need arithmetic
+  such as a length in words
+- `derive(target, source)` declares that a binding equals another expression:
+  parsing and printing check it, and printing computes the binding when the
+  value leaves it out, so length prefixes and checksums stay out of your values
+  (see the [netstring example](./examples/netstring.ts))
 - return it, whole, from the generator
 
 TypeScript rejects `ref === "x"`, `switch (ref)`, and `ref + 1`. Converting a
@@ -262,6 +330,8 @@ mismatches. `PrintError.format` converts that tree to text.
 - [Postgres connection string](./examples/connection-string.ts): optional parts,
   query parameters, Schema checks, encoding, and round trips
 - [JSON](./examples/json.ts): a recursive grammar and Schema codec
+- [Binary message](./examples/binary.ts): bit fields, varints, UTF-8, a derived
+  length, a `Uint8Array` Schema codec, and the round-trip laws
 - [Scheme](./examples/scheme.ts): recursive expressions, tokens, and canonical
   whitespace
 - [GitHub search](./examples/github-search.ts): a larger search-query DSL

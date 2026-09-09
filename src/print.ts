@@ -1,6 +1,8 @@
 import { Equal, Predicate, Result } from "effect"
 
+import { freeDerive } from "./compile.ts"
 import {
+  derivations,
   type Grammar,
   type GrammarInternal,
   type Node,
@@ -11,7 +13,16 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
+import {
+  bind,
+  caseFor,
+  evaluate,
+  evaluateCount,
+  type Frame,
+  frame,
+  isCount,
+  Unbound,
+} from "./env.ts"
 import {
   describeRoundTrip,
   exceptionMessage,
@@ -19,6 +30,8 @@ import {
   PrintError,
   type PrintIssue,
 } from "./errors.ts"
+import { type Format, type Input, textFormat } from "./format.ts"
+import { numberIssue, varIntIssue, writeNumber, writeVarInt } from "./number.ts"
 import { reparse } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
@@ -33,20 +46,37 @@ class Failure {
 
 const fail = (issue: PrintIssue): Failure => new Failure(issue)
 
+interface Sink<I extends Input> {
+  readonly format: Format<I, Error>
+  readonly chunks: Array<I>
+}
+
+const emit = <I extends Input>(sink: Sink<I>, chunk: Input): Failure | undefined => {
+  if (Predicate.isString(chunk) !== (sink.format.kind === "text")) {
+    return fail({ _tag: "InvalidValue", expected: `a ${sink.format.kind} grammar`, actual: chunk })
+  }
+  // SAFETY: a chunk of the sink's kind has the sink's chunk type.
+  sink.chunks.push(chunk as I)
+  return undefined
+}
+
 type RoundTripIssue = Extract<PrintIssue, { _tag: "RoundTrip" }>
 
 /** Parse `printed` back through `grammar`; the issue if it does not read as `value`. */
-const roundTripIssue = (
+const roundTripIssue = <I extends Input>(
   grammar: GrammarInternal,
   value: Value,
-  printed: string,
+  printed: I,
   env: Frame | undefined,
+  format: Format<I, Error>,
 ): RoundTripIssue | undefined => {
-  const back = reparse(grammar, printed, env)
-  if (!back.ok) return { _tag: "RoundTrip", value, printed, error: back.error.message }
-  return Equal.equals(back.value, value)
+  const back = reparse(grammar, printed, env, format)
+  if (Result.isFailure(back)) {
+    return { _tag: "RoundTrip", value, printed, error: back.failure.message }
+  }
+  return Equal.equals(back.success, value)
     ? undefined
-    : { _tag: "RoundTrip", value, printed, parsed: back.value }
+    : { _tag: "RoundTrip", value, printed, parsed: back.success }
 }
 
 const bindingPath = (
@@ -83,38 +113,85 @@ const issueAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): Print
   return nested
 }
 
-const outputGen = (
+const outputGen = <I extends Input>(
   node: Extract<Node, { _tag: "Gen" }>,
   value: Value,
   env: Frame | undefined,
-): string | Failure => {
+  sink: Sink<I>,
+): Failure | undefined => {
   const local = frame(node.scope, node.slotCount, env)
   const issue = unifyPattern(node.result, value, local)
   if (issue !== undefined) return fail(issue)
+  for (const { slot, expr } of derivations(node.steps)) {
+    const derived = evaluate(expr, local)
+    if (derived === Unbound) return fail({ _tag: "MissingBinding", binding: "a derive source" })
+    const given = local.values[slot]
+    if (given === Unbound) {
+      bind(local, slot, derived)
+    } else if (!Equal.equals(given, derived)) {
+      const issue: PrintIssue = { _tag: "InvalidValue", expected: preview(derived), actual: given }
+      return fail(issueAt(issue, bindingPath(node.result, node.scope, slot, []) ?? []))
+    }
+  }
 
-  let text = ""
   for (const [index, step] of node.steps.entries()) {
-    const result =
+    if (nodeOf(step.grammar)._tag === "Derive") continue
+    const failure =
       step._tag === "Silent"
-        ? out(step.grammar, undefined, local)
+        ? out(step.grammar, undefined, local, sink)
         : local.values[step.slot] === Unbound
           ? fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
-          : out(step.grammar, local.values[step.slot], local)
-    if (result instanceof Failure) {
+          : out(step.grammar, local.values[step.slot], local, sink)
+    if (failure !== undefined) {
       const path =
         step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
-      return fail(path === undefined ? result.issue : issueAt(result.issue, path))
+      return path === undefined ? failure : fail(issueAt(failure.issue, path))
     }
-    text += result
   }
-  return text
+  return undefined
 }
 
-const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): string | Failure => {
+const out = <I extends Input>(
+  grammar: GrammarInternal,
+  value: Value,
+  env: Frame | undefined,
+  sink: Sink<I>,
+): Failure | undefined => {
   const node = nodeOf(grammar)
   switch (node._tag) {
+    case "Empty":
+      return undefined
+    case "ByteLiteral":
+      return emit(sink, node.value)
+    case "Number": {
+      const expected = numberIssue(node, value)
+      if (expected !== undefined) return fail({ _tag: "InvalidValue", expected, actual: value })
+      // SAFETY: numberIssue accepted the value, so it is a number or bigint.
+      return emit(sink, writeNumber(node, value as number | bigint))
+    }
+    case "VarInt": {
+      const expected = varIntIssue(node.signed, value)
+      if (expected !== undefined) return fail({ _tag: "InvalidValue", expected, actual: value })
+      // SAFETY: varIntIssue accepted the value, so it is a safe integer.
+      return emit(sink, writeVarInt(node.signed, value as number))
+    }
+    case "Derive":
+      return fail({ _tag: "InvalidValue", expected: freeDerive, actual: value })
+    case "Bytes": {
+      const count = evaluateCount(node.count, env)
+      if (count === Unbound) return fail({ _tag: "MissingBinding", binding: "bytes count" })
+      if (!isCount(count)) {
+        return fail({ _tag: "InvalidValue", expected: "a non-negative byte count", actual: count })
+      }
+      if (!(value instanceof Uint8Array)) {
+        return fail({ _tag: "TypeMismatch", expected: "a Uint8Array", actual: value })
+      }
+      return value.length === count
+        ? emit(sink, value)
+        : fail({ _tag: "InvalidValue", expected: `${count} bytes`, actual: value })
+    }
     case "Literal":
-      return node.value
+      return emit(sink, node.value)
     case "Regex": {
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
@@ -128,18 +205,16 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           detail: `${JSON.stringify(value)} does not match /${node.re.source}/`,
         })
       }
-      return value
+      return emit(sink, value)
     }
     case "Gen":
-      return outputGen(node, value, env)
-    case "Wrap": {
-      const open = out(node.open, undefined, env)
-      if (open instanceof Failure) return open
-      const inner = out(node.inner, value, env)
-      if (inner instanceof Failure) return inner
-      const close = out(node.close, undefined, env)
-      return close instanceof Failure ? close : open + inner + close
-    }
+      return outputGen(node, value, env, sink)
+    case "Wrap":
+      return (
+        out(node.open, undefined, env, sink) ??
+        out(node.inner, value, env, sink) ??
+        out(node.close, undefined, env, sink)
+      )
     case "Choice": {
       if (node.on !== undefined) {
         const { tag, keys } = node.on
@@ -159,24 +234,32 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
             actual: key,
           })
         }
-        return out(node.options[index]!, value, env)
+        return out(node.options[index]!, value, env, sink)
       }
       const issues: Array<PrintIssue> = []
+      const mark = sink.chunks.length
       for (const option of node.options) {
-        const result = out(option, value, env)
-        if (result instanceof Failure) {
-          issues.push(result.issue)
-          continue
+        const failure = out(option, value, env, sink)
+        if (failure === undefined) {
+          if (node.checked !== true) return undefined
+          const issue = roundTripIssue(
+            grammar,
+            value,
+            sink.format.join(sink.chunks.slice(mark)),
+            env,
+            sink.format,
+          )
+          if (issue === undefined) return undefined
+          issues.push({
+            _tag: "InvalidValue",
+            expected: describe(option),
+            actual: value,
+            detail: describeRoundTrip(issue),
+          })
+        } else {
+          issues.push(failure.issue)
         }
-        if (node.checked !== true) return result
-        const issue = roundTripIssue(grammar, value, result, env)
-        if (issue === undefined) return result
-        issues.push({
-          _tag: "InvalidValue",
-          expected: describe(option),
-          actual: value,
-          detail: describeRoundTrip(issue),
-        })
+        sink.chunks.length = mark
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
     }
@@ -195,20 +278,10 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           detail: `expected ${expected} items, got ${value.length}`,
         })
       }
-      const separator = out(node.sep, undefined, env)
-      if (separator instanceof Failure) return separator
-      let text = ""
-      for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env)
-        if (result instanceof Failure) {
-          return fail({ _tag: "AtPath", path: index, issue: result.issue })
-        }
-        text += index === 0 ? result : separator + result
-      }
-      return text
+      return outputItems(node.inner, node.sep, value, env, sink)
     }
     case "Optional":
-      return value === undefined ? "" : out(node.inner, value, env)
+      return value === undefined ? undefined : out(node.inner, value, env, sink)
     case "Transform": {
       try {
         if (node.is?.(unsafeToNever(value)) === false) {
@@ -226,7 +299,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
               actual: value,
               detail: encoded.failure.message,
             })
-          : out(node.inner, encoded.success, env)
+          : out(node.inner, encoded.success, env, sink)
       } catch (error) {
         return fail({
           _tag: "InvalidValue",
@@ -237,11 +310,11 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       }
     }
     case "Skip":
-      return out(node.inner, node.printAs, env)
+      return out(node.inner, node.printAs, env, sink)
     case "Label":
-      return out(node.inner, value, env)
+      return out(node.inner, value, env, sink)
     case "Suspend":
-      return out(resolve(node), value, env)
+      return out(resolve(node), value, env, sink)
     case "Match": {
       const key = evaluate(node.scrutinee, env)
       if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
@@ -252,10 +325,10 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
             expected: `a match case for ${preview(key)}`,
             actual: value,
           })
-        : out(matchCase.grammar, value, env)
+        : out(matchCase.grammar, value, env, sink)
     }
     case "Take": {
-      const count = evaluate(node.count, env)
+      const count = evaluateCount(node.count, env)
       if (count === Unbound) return fail({ _tag: "MissingBinding", binding: "take count" })
       if (!isCount(count)) {
         return fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
@@ -263,7 +336,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
       return value.length === count
-        ? value
+        ? emit(sink, value)
         : fail({
             _tag: "InvalidValue",
             expected: `${count} UTF-16 code units`,
@@ -271,7 +344,7 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           })
     }
     case "RepeatExact": {
-      const count = evaluate(node.count, env)
+      const count = evaluateCount(node.count, env)
       if (count === Unbound) return fail({ _tag: "MissingBinding", binding: "repeat count" })
       if (!isCount(count)) {
         return fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
@@ -285,47 +358,55 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
           actual: value.length,
         })
       }
-      let text = ""
-      for (const [index, item] of value.entries()) {
-        const result = out(node.inner, item, env)
-        if (result instanceof Failure) {
-          return fail({ _tag: "AtPath", path: index, issue: result.issue })
-        }
-        text += result
-      }
-      return text
+      return outputItems(node.inner, undefined, value, env, sink)
     }
   }
 }
 
-export const printUnknown = (
-  grammar: GrammarInternal,
-  value: Value,
-): Result.Result<string, PrintError> => {
-  const result = out(grammar, value, undefined)
-  return result instanceof Failure
-    ? Result.fail(new PrintError({ issue: result.issue }))
-    : Result.succeed(result)
+const outputItems = <I extends Input>(
+  inner: GrammarInternal,
+  separator: GrammarInternal | undefined,
+  items: ReadonlyArray<Value>,
+  env: Frame | undefined,
+  sink: Sink<I>,
+): Failure | undefined => {
+  for (const [index, item] of items.entries()) {
+    if (index > 0 && separator !== undefined) {
+      const failure = out(separator, undefined, env, sink)
+      if (failure !== undefined) return failure
+    }
+    const failure = out(inner, item, env, sink)
+    if (failure !== undefined) return fail({ _tag: "AtPath", path: index, issue: failure.issue })
+  }
+  return undefined
 }
 
-/** Write a value as canonical text. No round-trip guarantee; see {@link printCheckedUnknown}. */
-export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
-  printUnknown(grammar, value)
-
-export const printCheckedUnknown = (
+export const printWith = <I extends Input>(
   grammar: GrammarInternal,
   value: Value,
-): Result.Result<string, PrintError> => {
-  const printed = printUnknown(grammar, value)
+  format: Format<I, Error>,
+): Result.Result<I, PrintError> => {
+  const sink: Sink<I> = { format, chunks: [] }
+  const failure = out(grammar, value, undefined, sink)
+  return failure === undefined
+    ? Result.succeed(format.join(sink.chunks))
+    : Result.fail(new PrintError({ issue: failure.issue }))
+}
+
+/** Print, then parse the whole output back and confirm it equals the original value. */
+export const printCheckedWith = <I extends Input>(
+  grammar: GrammarInternal,
+  value: Value,
+  format: Format<I, Error>,
+): Result.Result<I, PrintError> => {
+  const printed = printWith(grammar, value, format)
   if (Result.isFailure(printed)) return printed
-  const issue = roundTripIssue(grammar, value, printed.success, undefined)
+  const issue = roundTripIssue(grammar, value, printed.success, undefined, format)
   return issue === undefined ? printed : Result.fail(new PrintError({ issue }))
 }
 
-/**
- * Print a value, then parse the whole output back and confirm it equals the
- * original. Fails if the text would decode to a different value, so a checked
- * print never hides a broken round trip.
- */
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  printWith(grammar, value, textFormat)
+
 export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
-  printCheckedUnknown(grammar, value)
+  printCheckedWith(grammar, value, textFormat)

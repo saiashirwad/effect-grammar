@@ -1,8 +1,9 @@
 import { Predicate, type Types } from "effect"
 
 import {
-  type Value,
+  type Count,
   type Denote,
+  derivations,
   type Expr,
   type Grammar,
   type GrammarInternal,
@@ -10,6 +11,7 @@ import {
   isSilent,
   make,
   type Node,
+  nodeOf,
   type Pattern,
   type Ref,
   type RefBase,
@@ -18,7 +20,9 @@ import {
   type Silent,
   silent,
   type Step,
+  type Value,
 } from "./core.ts"
+import { isCount } from "./env.ts"
 import { describeStep } from "./render.ts"
 
 export type GenGrammar<R> = [R] extends [void] ? Silent : Grammar<Denote<R>>
@@ -76,24 +80,54 @@ const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
 const isRef = (value: Value): value is RefBase<unknown> =>
   Predicate.isObject(value) && refs.has(value)
 
-export const assertInScope = (ref: RefBase<unknown>, where: string): Expr => {
+const openEntry = (ref: RefBase<unknown>, where: string): RefEntry => {
   const entry = entryOf(ref)
   if (!entry.scope.open) {
     throw new Error(
       `${where}: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built`,
     )
   }
-  return entry.expr
+  return entry
+}
+
+export const exprOf = (ref: RefBase<unknown>, where: string): Expr => openEntry(ref, where).expr
+
+export const countOf = (count: number | Ref<number>, where: string): Count => {
+  if (!Predicate.isNumber(count)) return exprOf(count, where)
+  if (!isCount(count)) throw new RangeError(`${where}: count must be a non-negative safe integer`)
+  return count
 }
 
 export const get = <A, K extends keyof A>(ref: Ref<A>, key: K): Ref<A[K]> => {
-  const entry = entryOf(ref)
-  if (!entry.scope.open) {
-    throw new Error(
-      "get: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built",
-    )
+  const { expr, scope } = openEntry(ref, "get")
+  return refFor({ _tag: "Prop", object: expr, key }, scope)
+}
+
+/**
+ * A ref to `f` of another ref's value, for counts and derivations that need
+ * arithmetic. `f` runs during parse and print; it cannot fail or be inverted.
+ */
+export const mapRef = <A, B extends Value>(
+  ref: Ref<A>,
+  f: (value: A) => B,
+  name?: string,
+): Ref<B> => {
+  const { expr, scope } = openEntry(ref, "mapRef")
+  return refFor({ _tag: "Map", expr, f, name }, scope)
+}
+
+/**
+ * Declare that `target` equals `source` in every value. Parsing and printing
+ * both check it, and printing computes `target` from `source` when the value
+ * does not return it, so a length or checksum field can be left out of values.
+ * Yield it directly from the gen that bound `target`.
+ */
+export const derive = <A>(target: Ref<A>, source: Ref<A>): Silent => {
+  const targetExpr = exprOf(target, "derive")
+  if (targetExpr._tag !== "Ref") {
+    throw new Error("derive: the target must be a whole binding, not a property or mapRef of one")
   }
-  return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
+  return silent({ _tag: "Derive", target: targetExpr, source: exprOf(source, "derive") })
 }
 
 const isPlainObject = <T extends object>(value: T): boolean => {
@@ -106,7 +140,7 @@ const toPattern = (value: Value, active: WeakSet<object>): Pattern => {
     const { expr } = entryOf(value)
     if (expr._tag !== "Ref") {
       throw new Error(
-        "gen: the return holds a property of a ref; printing cannot rebuild a value from one property, so return the whole ref",
+        "gen: the return holds a property or mapRef of a ref; printing cannot rebuild a value from it, so return the whole ref",
       )
     }
     return expr
@@ -204,10 +238,11 @@ const validate = (scope: ScopeId, steps: ReadonlyArray<Step>, result: Pattern): 
   }
   collect(result)
 
+  const derived = new Set(derivations(steps).map(({ slot }) => slot))
   for (const [slot, where] of binds) {
-    if (!returned.has(slot)) {
+    if (!returned.has(slot) && !derived.has(slot)) {
       throw new Error(
-        `gen: ${where()} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
+        `gen: ${where()} is parsed but not returned, so printing has nothing to print it from; return it, derive it, or discard it with skip`,
       )
     }
   }
@@ -224,6 +259,10 @@ export const gen = <R>(run: () => Generator<GrammarInternal, R, unknown>): GenGr
     while (!result.done) {
       const grammar = result.value
       if (!isGrammar(grammar)) throw new TypeError("gen: only a grammar can be yielded")
+      const node = nodeOf(grammar)
+      if (node._tag === "Derive" && node.target.scope !== scope.id) {
+        throw new Error("derive: the target must be bound by the gen that yields the derive")
+      }
       if (isSilent(grammar)) {
         steps.push({ _tag: "Silent", grammar })
         result = iterator.next()

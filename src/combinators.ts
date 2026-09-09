@@ -19,13 +19,14 @@ import {
 } from "./core.ts"
 import { isCount } from "./env.ts"
 import { exceptionMessage, preview } from "./errors.ts"
-import { assertInScope } from "./gen.ts"
+import { countOf, exprOf } from "./gen.ts"
 
-export { gen, type GenGrammar, get, seq } from "./gen.ts"
+export { derive, gen, type GenGrammar, get, mapRef, seq } from "./gen.ts"
 
-export const literal = (value: string): Silent => silent({ _tag: "Literal", value })
+export const empty: Silent = silent({ _tag: "Empty" })
 
-export const empty = literal("")
+export const literal = (value: string): Silent =>
+  value === "" ? empty : silent({ _tag: "Literal", value })
 
 export const regex = (expression: RegExp, name: string): Grammar<string> => {
   const flags = expression.flags.replace(/[gy]/g, "")
@@ -196,7 +197,7 @@ export const match = <K extends string, const Cases extends Readonly<Record<K, G
 ): Grammar<CaseOutput<Cases>> =>
   make({
     _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "match"),
+    scrutinee: exprOf(scrutinee, "match"),
     // SAFETY: Object.keys returns only keys from the closed Cases record.
     cases: Object.keys(cases).map((key) => ({ key, grammar: cases[key as K] })),
   })
@@ -229,18 +230,18 @@ export const matchValue = <
 ): Grammar<EntryOutput<Entries>> =>
   make({
     _tag: "Match",
-    scrutinee: assertInScope(scrutinee, "matchValue"),
+    scrutinee: exprOf(scrutinee, "matchValue"),
     cases: uniqueCases(entries),
   })
 
-export const take = (count: Ref<number>): Grammar<string> =>
-  make({ _tag: "Take", count: assertInScope(count, "take") })
+export const take = (count: number | Ref<number>): Grammar<string> =>
+  make({ _tag: "Take", count: countOf(count, "take") })
 
 export const repeat: {
-  <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
-  (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
-} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
-  make({ _tag: "RepeatExact", count: assertInScope(count, "repeat"), inner }),
+  <A>(inner: Grammar<A>, count: number | Ref<number>): Grammar<ReadonlyArray<A>>
+  (count: number | Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: number | Ref<number>) =>
+  make({ _tag: "RepeatExact", count: countOf(count, "repeat"), inner }),
 )
 
 export interface TransformOptions<A, B> {

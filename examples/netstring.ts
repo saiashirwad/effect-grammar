@@ -7,7 +7,8 @@ const netstring = Grammar.gen(function* () {
   yield* Grammar.literal(":")
   const payload = yield* Grammar.take(length)
   yield* Grammar.literal(",")
-  return { length, payload }
+  yield* Grammar.derive(length, payload.length)
+  return payload
 })
 
 const show = <A>(r: Result.Result<A, { readonly message: string }>) =>
@@ -18,9 +19,5 @@ Effect.gen(function* () {
   for (const source of ["12:hello world!,", "5:hi,"]) {
     yield* Console.log(`parse "${source}"  →  ${show(Grammar.parse(netstring, source))}`)
   }
-  yield* Console.log(
-    `print { length: 12, payload: "hello world!" }  →  ${show(
-      Grammar.print(netstring, { length: 12, payload: "hello world!" }),
-    )}`,
-  )
+  yield* Console.log(`print "hello world!"  →  ${show(Grammar.print(netstring, "hello world!"))}`)
 }).pipe(Effect.runSync)

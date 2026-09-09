@@ -1,4 +1,30 @@
+import { message } from "../examples/binary.ts"
+import * as B from "../src/binary.ts"
 import * as G from "../src/index.ts"
+
+const messageValue: G.Type<typeof message> = { header: { version: 2, priority: 1 }, text: "x" }
+B.print(message, messageValue)
+// @ts-expect-error binary parsers require bytes
+B.parse(message, "abc")
+// @ts-expect-error the derived length is not part of the value
+B.print(message, { ...messageValue, length: 1 })
+// @ts-expect-error 64-bit integers are bigint values
+B.print(B.be.uint64, 1)
+G.gen(function* () {
+  const count = yield* B.byte
+  const words = G.mapRef(count, (n) => n * 4)
+  // @ts-expect-error derive requires matching ref types
+  yield* G.derive(count, G.mapRef(words, String))
+  return count
+})
+// @ts-expect-error the root parser still requires a string
+G.parse(G.integer, new Uint8Array([49]))
+G.gen(function* () {
+  const payload = yield* B.bytes(1)
+  // @ts-expect-error a byte payload is not a numeric count
+  const next = yield* B.bytes(payload)
+  return { payload, next }
+})
 
 const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
 
