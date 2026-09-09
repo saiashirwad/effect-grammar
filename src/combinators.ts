@@ -356,6 +356,17 @@ export const as: {
   }),
 )
 
+/**
+ * Ordered text alternatives that return and print their matching string.
+ * As with `choice`, put longer literals first when alternatives share a prefix.
+ */
+export const literals = <const Values extends readonly [string, ...Array<string>]>(
+  ...values: Values
+): Grammar<Values[number]> => {
+  if (values.length === 0) throw new RangeError("literals: at least one value is required")
+  return make({ _tag: "Choice", options: values.map((value) => as(literal(value), value)) })
+}
+
 export const flag = (value: Silent | string): Grammar<boolean> =>
   choice(as(toSilent(value), true), as(empty, false))
 

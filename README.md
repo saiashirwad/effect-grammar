@@ -138,7 +138,7 @@ streaming. See the [binary message example](./examples/binary.ts).
 
 | Purpose                         | Combinators                                                                   |
 | ------------------------------- | ----------------------------------------------------------------------------- |
-| Text                            | `literal`, `regex`, `integer`, `take`, `repeat`                               |
+| Text                            | `literal`, `literals`, `regex`, `integer`, `take`, `repeat`                   |
 | Bytes (`effect-grammar/Binary`) | `literal`, `byte`, `be`/`le`, `varuint`, `bytes`, `utf8`, `bitfield`          |
 | Sequences and products          | `gen`, `seq`, `struct`, `tuple`                                               |
 | Delimiters                      | `prefix`, `suffix`, `between`, `wrap`                                         |
@@ -151,6 +151,10 @@ streaming. See the [binary message example](./examples/binary.ts).
 
 Most delimiter and repetition combinators support data-first and data-last
 calls, so they also work with `pipe`.
+
+`literals("GET", "POST")` parses and prints either string and has the value type
+`"GET" | "POST"`. It requires at least one alternative and tries them in order,
+like `choice`; put longer strings first when they share a prefix.
 
 ## Refs are names, not values
 

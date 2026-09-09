@@ -21,6 +21,7 @@ export {
   label,
   lexeme,
   literal,
+  literals,
   many,
   mapRef,
   match,

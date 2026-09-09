@@ -36,6 +36,32 @@ describe("literal", () => {
   })
 })
 
+describe("literals", () => {
+  const method = G.literals("GET", "POST")
+
+  it("returns the matching literal and prints the selected alternative", () => {
+    for (const value of ["GET", "POST"] as const) {
+      assert.equal(parseOk(method, value), value)
+      assert.equal(printOk(method, value), value)
+      assertRoundTrip(method, value)
+    }
+    assert.deepEqual(parseFail(method, "PUT").expected, ['"POST"'])
+    // @ts-expect-error invalid values are also rejected at runtime
+    printFail(method, "PUT")
+  })
+
+  it("preserves ordered choice semantics and supports an empty literal", () => {
+    assert.equal(parseOk(G.literals("ab", "a"), "ab"), "ab")
+    assert.equal(parseFail(G.literals("a", "ab"), "ab").pos, 1)
+    assertRoundTrip(G.literals("x", ""), "")
+  })
+
+  it("rejects an empty alternative list", () => {
+    // @ts-expect-error JavaScript callers also get a useful error
+    assert.throws(() => G.literals(), /at least one value/)
+  })
+})
+
 describe("regex", () => {
   it("parses a match anchored at the cursor", () => {
     assert.equal(parseOk(word, "abc"), "abc")

@@ -26,7 +26,12 @@ G.gen(function* () {
   return { payload, next }
 })
 
-const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
+const kindOf = G.literals("a", "b")
+G.print(kindOf, "a")
+// @ts-expect-error literals preserves the string union
+G.print(kindOf, "c")
+// @ts-expect-error literals needs at least one alternative
+G.literals()
 
 // `value` is reserved for the tagged branch payload.
 // @ts-expect-error taggedChoice cannot use "value" as its tag
