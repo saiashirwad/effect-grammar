@@ -3,6 +3,7 @@ import { Result } from "effect"
 import {
   type Grammar,
   type GrammarInternal,
+  type Node,
   nodeOf,
   resolve,
   unsafeToNever,
@@ -17,19 +18,23 @@ interface State {
   pos: number
   furthest: number
   expected: Set<string>
+  readonly suspended: Map<Node, Set<number>>
 }
 
 const Fail = Symbol("effect-grammar/ParseFail")
 
-const failAt = (state: State, expected: string): typeof Fail => {
-  if (state.pos > state.furthest) {
-    state.furthest = state.pos
+const failAtPosition = (state: State, position: number, expected: string): typeof Fail => {
+  if (position > state.furthest) {
+    state.furthest = position
     state.expected = new Set([expected])
-  } else if (state.pos === state.furthest) {
+  } else if (position === state.furthest) {
     state.expected.add(expected)
   }
   return Fail
 }
+
+const failAt = (state: State, expected: string): typeof Fail =>
+  failAtPosition(state, state.pos, expected)
 
 const go = (
   grammar: GrammarInternal,
@@ -51,8 +56,9 @@ const go = (
       return failAt(state, JSON.stringify(node.value))
     }
     case "Regex": {
-      node.re.lastIndex = state.pos
-      const match = node.re.exec(state.input)
+      const expression = new RegExp(node.source, `${node.flags}y`)
+      expression.lastIndex = state.pos
+      const match = expression.exec(state.input)
       if (match === null || match.index !== state.pos) return failAt(state, node.name)
       state.pos += match[0].length
       return match[0]
@@ -107,20 +113,25 @@ const go = (
       const start = state.pos
       const value = go(node.inner, state, env)
       if (value === Fail) return Fail
+      const consumed = state.pos
       try {
         const decoded = node.decode(unsafeToNever(value))
         if (Result.isFailure(decoded)) {
           state.pos = start
-          return failAt(state, decoded.failure.message)
+          return failAtPosition(state, consumed, decoded.failure.message)
         }
         if (node.is?.(unsafeToNever(decoded.success)) === false) {
           state.pos = start
-          return failAt(state, node.name ?? describe(node.inner))
+          return failAtPosition(state, consumed, node.name ?? describe(node.inner))
         }
         return decoded.success
       } catch (error) {
         state.pos = start
-        return failAt(state, `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`)
+        return failAtPosition(
+          state,
+          consumed,
+          `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`,
+        )
       }
     }
     case "Skip":
@@ -134,8 +145,25 @@ const go = (
       }
       return value
     }
-    case "Suspend":
-      return go(resolve(node), state, env)
+    case "Suspend": {
+      const positions = state.suspended.get(node) ?? new Set<number>()
+      if (positions.has(state.pos)) return failAt(state, "a non-left-recursive grammar")
+      state.suspended.set(node, positions)
+      const position = state.pos
+      positions.add(position)
+      let target: GrammarInternal
+      try {
+        target = resolve(node)
+      } catch (error) {
+        return failAt(state, exceptionMessage(error))
+      }
+      try {
+        return go(target, state, env)
+      } finally {
+        positions.delete(position)
+        if (positions.size === 0) state.suspended.delete(node)
+      }
+    }
     case "Match": {
       const key = evaluate(node.scrutinee, env)
       if (key === Unbound) return failAt(state, "a bound match ref")
@@ -190,15 +218,22 @@ export const reparse = (
 ):
   | { readonly ok: true; readonly value: Value }
   | { readonly ok: false; readonly error: ParseError } => {
-  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set() }
+  const state: State = {
+    input: text,
+    pos: 0,
+    furthest: 0,
+    expected: new Set(),
+    suspended: new Map(),
+  }
   const value = go(grammar, state, env)
   if (value !== Fail && state.pos === text.length) return { ok: true, value }
   if (value !== Fail) failAt(state, "end of input")
   return { ok: false, error: toError(state) }
 }
 
+/** Interpret a grammar from cursor zero and require the whole input to be consumed. */
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
-  const state: State = { input, pos: 0, furthest: 0, expected: new Set() }
+  const state: State = { input, pos: 0, furthest: 0, expected: new Set(), suspended: new Map() }
   const value = go(grammar, state, undefined)
   if (value !== Fail && state.pos === input.length) {
     // SAFETY: interpreting Grammar<A> preserves its output type across every node.

@@ -165,9 +165,16 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
         return { precedence: AtomPrecedence, text: node.name ?? "…" }
       }
       context.seen.add(node)
-      const fragment = show(resolve(node), context)
-      context.seen.delete(node)
-      return fragment
+      try {
+        return show(resolve(node), context)
+      } catch (error) {
+        return {
+          precedence: AtomPrecedence,
+          text: `<invalid suspend: ${error instanceof Error ? error.message : preview(error)}>`,
+        }
+      } finally {
+        context.seen.delete(node)
+      }
     }
     case "Match": {
       const cases = node.cases.map(

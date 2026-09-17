@@ -115,7 +115,11 @@ export const preview = <T>(value: T): string => {
   try {
     return JSON.stringify(value) ?? String(value)
   } catch {
-    return String(value)
+    try {
+      return String(value)
+    } catch {
+      return "<unprintable value>"
+    }
   }
 }
 

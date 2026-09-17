@@ -25,6 +25,11 @@ export interface CodecOptions {
   readonly roundTrip?: "verify" | "off"
 }
 
+/**
+ * Derive a string-to-schema codec from a grammar. Decoding parses the whole
+ * string. Encoding checks the printed value round trip by default; set
+ * `roundTrip: "off"` to use unchecked printing.
+ */
 export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,

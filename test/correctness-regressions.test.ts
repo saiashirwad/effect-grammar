@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
-import { parseFail, parseOk, printOk } from "./helpers.ts"
+import { parseFail, parseOk, printFail, printOk } from "./helpers.ts"
 
 describe("correctness regressions", () => {
   it("rejects invalid repetition bounds at construction", () => {
@@ -94,5 +94,63 @@ describe("correctness regressions", () => {
   it("rejects value as the taggedChoice tag", () => {
     // @ts-expect-error "value" is reserved for the branch payload
     assert.throws(() => Grammar.taggedChoice("value", { number: Grammar.integer }), /reserved/)
+  })
+
+  it("rejects left recursion without overflowing the stack", () => {
+    const recursive: Grammar.Grammar<void> = Grammar.suspend(() => recursive, "recursive")
+    assert.match(parseFail(recursive, "").message, /non-left-recursive/)
+  })
+
+  it("rejects an invalid suspend target", () => {
+    // SAFETY: deliberately invalid return value exercises runtime validation.
+    const invalid = Grammar.suspend(() => undefined as never, "invalid")
+    assert.match(parseFail(invalid, "").message, /thunk must return a grammar/)
+  })
+
+  it("does not mutate a caller-owned RegExp", () => {
+    const expression = /a/g
+    expression.lastIndex = 1
+    const grammar = Grammar.regex(expression, "a")
+    assert.equal(parseOk(grammar, "a"), "a")
+    assert.equal(expression.lastIndex, 1)
+  })
+
+  it("prints object patterns exactly", () => {
+    const grammar = Grammar.struct({ value: Grammar.integer })
+    // SAFETY: deliberately ill-typed value exercises exact object validation.
+    assert.match(
+      printFail(grammar, { value: 1, extra: true } as never).message,
+      /unexpected own field/,
+    )
+  })
+
+  it("preview and object inspection errors survive hostile coercion", () => {
+    const hostile = Object.create(null, {
+      toJSON: {
+        value: () => {
+          throw new Error("no json")
+        },
+      },
+      toString: {
+        value: () => {
+          throw new Error("no string")
+        },
+      },
+    })
+    assert.equal(
+      Grammar.PrintError.format({ _tag: "TypeMismatch", expected: "x", actual: hostile }),
+      "expected x, got <unprintable value>",
+    )
+
+    const target = { value: 1 }
+    const proxy = new Proxy(target, {
+      ownKeys: () => {
+        throw hostile
+      },
+    })
+    assert.match(
+      printFail(Grammar.struct({ value: Grammar.integer }), proxy).message,
+      /<unprintable value>/,
+    )
   })
 })

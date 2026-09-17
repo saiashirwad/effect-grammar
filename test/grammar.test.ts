@@ -339,7 +339,7 @@ describe("take / repeat", () => {
 })
 
 describe("wrap / prefix / suffix", () => {
-  const g = G.wrap("[", G.integer, "]")
+  const g = G.between("[", G.integer, "]")
 
   it("keeps only the inner value", () => {
     assert.equal(parseOk(g, "[5]"), 5)
@@ -359,7 +359,7 @@ describe("wrap / prefix / suffix", () => {
   })
 
   it("is silent when the inner is silent", () => {
-    const s = G.wrap("<", G.literal("x"), ">")
+    const s = G.between("<", G.literal("x"), ">")
     const outer = G.gen(function* () {
       yield* s
       const n = yield* G.integer
@@ -631,7 +631,7 @@ describe("as / flag / skip", () => {
 })
 
 describe("lexeme / symbol / trivia", () => {
-  const g = G.wrap(G.symbol("["), G.sepBy(G.lexeme(G.integer), G.symbol(",")), G.symbol("]"))
+  const g = G.between(G.symbol("["), G.sepBy(G.lexeme(G.integer), G.symbol(",")), G.symbol("]"))
 
   it("skips trailing whitespace after tokens", () => {
     assert.deepEqual(parseOk(g, "[ 1 ,2,  3 ]"), [1, 2, 3])
@@ -643,7 +643,7 @@ describe("lexeme / symbol / trivia", () => {
   })
 
   it("trivia is silent, optional, and hidden from render", () => {
-    const spaced = G.wrap(G.trivia, G.integer, G.trivia)
+    const spaced = G.between(G.trivia, G.integer, G.trivia)
     assert.equal(parseOk(spaced, "  4 "), 4)
     assert.equal(printOk(spaced, 4), "4")
     assert.equal(G.render(spaced), "<integer>")
@@ -683,7 +683,7 @@ describe("suspend", () => {
     () =>
       G.choice(
         G.integer,
-        G.wrap("[", G.sepBy(nested, ","), "]").pipe(
+        G.between("[", G.sepBy(nested, ","), "]").pipe(
           G.transform({
             decode: (a): Nested => a,
             encode: (a): Array<Nested> => {

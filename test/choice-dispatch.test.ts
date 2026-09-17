@@ -120,9 +120,13 @@ describe("choiceOn prints by reading the tag", () => {
     assert.equal(G.render(g), 'on(kind){"plain" => <word> | "hashed" => "#" <word>}')
   })
 
-  it("refuses integer-like object keys", () => {
-    // SAFETY: the integer key is rejected at runtime before types matter.
+  it("refuses array-index object keys without rejecting other numeric-looking keys", () => {
+    // SAFETY: the array-index key is rejected at runtime before types matter.
     assert.throws(() => G.choiceOn("kind", { 1: plain } as never), /looks like an integer/)
+    const numeric = G.literal("x").pipe(G.as({ kind: "01" as const, value: "x" as const }))
+    assert.doesNotThrow(() => G.choiceOn("kind", { "01": numeric }))
+    const negative = G.literal("x").pipe(G.as({ kind: "-1" as const, value: "x" as const }))
+    assert.doesNotThrow(() => G.choiceOn("kind", { "-1": negative }))
   })
 
   it("does not detect an ambiguous grammar on its own", () => {
@@ -143,5 +147,14 @@ describe("taggedChoice dispatches on its tag", () => {
     assertRoundTrip(g, { _tag: "word", value: "abc" })
     assertRoundTrip(g, { _tag: "num", value: 7 })
     assert.equal(G.render(g), 'on(_tag){"word" => <word> | "num" => <integer>}')
+  })
+
+  it("rejects reordered keys and malformed print values", () => {
+    // SAFETY: integer key deliberately exercises runtime validation.
+    assert.throws(() => G.taggedChoice("_tag", { 1: G.integer } as never), /array index/)
+    // SAFETY: malformed value deliberately exercises runtime validation.
+    const malformed = G.print(g, { _tag: "word" } as never)
+    assert.ok(Result.isFailure(malformed))
+    assert.match(malformed.failure.message, /value field/)
   })
 })

@@ -74,7 +74,12 @@ export type Step =
 
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
-  | { readonly _tag: "Regex"; readonly re: RegExp; readonly name: string }
+  | {
+      readonly _tag: "Regex"
+      readonly source: string
+      readonly flags: string
+      readonly name: string
+    }
   | {
       readonly _tag: "Gen"
       readonly scope: ScopeId
@@ -198,8 +203,31 @@ export const isGrammar = <T>(value: T): value is T & GrammarInternal =>
 export const isSilent = (grammar: GrammarInternal): grammar is Silent =>
   Predicate.hasProperty(grammar, SilentTypeId)
 
-export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal =>
-  (node.resolved ??= node.thunk())
+const Resolving = Symbol("effect-grammar/ResolvingSuspend")
+
+export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal => {
+  if (node.resolved !== undefined) return node.resolved
+  // SAFETY: the private marker exists only while this suspend thunk is resolving.
+  const state = node as typeof node & { resolving?: symbol }
+  if (state.resolving === Resolving) {
+    throw new Error(
+      `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}: thunk resolved itself while it was being evaluated`,
+    )
+  }
+  state.resolving = Resolving
+  try {
+    const target = node.thunk()
+    if (!isGrammar(target)) {
+      throw new TypeError(
+        `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}: thunk must return a grammar`,
+      )
+    }
+    node.resolved = target
+    return target
+  } finally {
+    delete state.resolving
+  }
+}
 
 /** The grammars a node refers to directly. A `Suspend` yields its resolved target. */
 export const children = (node: Node): ReadonlyArray<GrammarInternal> => {

@@ -1,4 +1,4 @@
-export { auditFidelity, compile, type Compiled, type FidelityEntry, validate } from "./compile.ts"
+export { auditFidelity, prepare, type Prepared, type FidelityEntry, validate } from "./compile.ts"
 export type { Fidelity, Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
 export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
 export {
@@ -46,7 +46,6 @@ export {
   type TransformOrFailOptions,
   trivia,
   tuple,
-  wrap,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
 export { print, printChecked } from "./print.ts"

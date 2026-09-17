@@ -27,9 +27,15 @@ export const literal = (value: string): Silent => silent({ _tag: "Literal", valu
 
 export const empty = literal("")
 
+/**
+ * Match at the parser's current cursor using JavaScript `RegExp` semantics.
+ * Parsing uses a fresh sticky matcher against the original full input; printing
+ * requires the supplied string to match in full. `g`, `y`, and the caller's
+ * `lastIndex` are ignored, and the caller's expression is never mutated.
+ */
 export const regex = (expression: RegExp, name: string): Grammar<string> => {
   const flags = expression.flags.replace(/[gy]/g, "")
-  return make({ _tag: "Regex", re: new RegExp(expression.source, `${flags}y`), name })
+  return make({ _tag: "Regex", source: expression.source, flags, name })
 }
 
 const toSilent = (value: Silent | string): Silent =>
@@ -82,8 +88,6 @@ export function between<A>(
   })
 }
 
-export const wrap = between
-
 export function prefix(
   open: Silent | string,
 ): <G extends GrammarInternal>(inner: G) => PreserveGrammar<G>
@@ -123,7 +127,8 @@ export const choice = <
 
 /**
  * {@link choice} whose printer selects the first branch that reads back to an
- * equal value. Reparses at every nested `choice`; keep it off hot paths.
+ * equal value. Each checked choice reparses its candidate output; nesting can
+ * multiply that work, so keep it off hot paths.
  */
 export const checkedChoice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
@@ -164,6 +169,7 @@ const repeatNode = <A>(
 ): Grammar<ReadonlyArray<A>> =>
   make({ _tag: "Many", inner, sep: separator, ...bounds(name, options) })
 
+/** Repeat an item within bounds. Each successful parse must consume input. */
 export const many: {
   <A>(inner: Grammar<A>, options?: RepeatOptions): Grammar<ReadonlyArray<A>>
   (options?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
@@ -171,6 +177,7 @@ export const many: {
   repeatNode("many", inner, empty, options),
 )
 
+/** Repeat an item with a silent separator. Each successful item parse must consume input. */
 export const sepBy: {
   <A>(
     inner: Grammar<A>,
@@ -236,6 +243,7 @@ export const matchValue = <
 export const take = (count: Ref<number>): Grammar<string> =>
   make({ _tag: "Take", count: assertInScope(count, "take") })
 
+/** Repeat an item a bound number of times. Each successful parse must consume input. */
 export const repeat: {
   <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
   (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
@@ -370,6 +378,12 @@ export const label: {
   <A>(inner: Grammar<A>, name: string): Grammar<A>
 } = F.dual(2, <A>(inner: Grammar<A>, name: string) => make({ _tag: "Label", inner, name }))
 
+/**
+ * Defer a grammar for recursive definitions. The thunk runs on first resolution
+ * and its result is cached. Parsing rejects recursion at the same input position;
+ * printing rejects recursion that reaches the same suspension without consuming
+ * a value, so recursive definitions must be productive.
+ */
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
   make({ _tag: "Suspend", thunk, name })
 
@@ -394,6 +408,10 @@ type StructValue<Fields extends StructFields> = {
   readonly [K in keyof Fields]: Type<Fields[K]>
 }
 
+/**
+ * Sequence fields and return an object. Printing requires exactly these own
+ * keys: missing, extra, and symbol keys are rejected.
+ */
 export const struct = <const Fields extends StructFields>(
   fields: Fields,
 ): Grammar<StructValue<Fields>> => {
@@ -448,7 +466,10 @@ type OnEntries<
     : never
 }
 
-const isIntegerKey = (key: string): boolean => String(Number.parseInt(key, 10)) === key
+const isArrayIndexKey = (key: string): boolean => {
+  const index = Number(key)
+  return Number.isInteger(index) && index >= 0 && index < 4_294_967_295 && String(index) === key
+}
 
 const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void => {
   const seen = new Set<MatchKey>()
@@ -485,7 +506,7 @@ export function choiceOn(
   const entries: ReadonlyArray<readonly [MatchKey, GrammarInternal]> = Array.isArray(cases)
     ? cases
     : Object.keys(cases).map((key) => {
-        if (isIntegerKey(key)) {
+        if (isArrayIndexKey(key)) {
           throw new RangeError(
             `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source. Pass an array of [key, grammar] entries instead.`,
           )
@@ -519,15 +540,37 @@ export const taggedChoice = <
   if (tag === "value") throw new RangeError('taggedChoice: tag name "value" is reserved')
   const keys = Object.keys(cases)
   if (keys.length === 0) throw new RangeError("taggedChoice: at least one case is required")
+  for (const key of keys) {
+    if (isArrayIndexKey(key)) {
+      throw new RangeError(
+        `taggedChoice: key ${JSON.stringify(key)} is an array index; JavaScript reorders such keys, so parse order would not match the source`,
+      )
+    }
+    if (!isGrammar(cases[key])) {
+      throw new TypeError(`taggedChoice: case ${JSON.stringify(key)} must be a grammar`)
+    }
+  }
   const branches = keys.map((key) =>
-    make({
-      _tag: "Transform",
-      inner: cases[key]!,
-      decode: (value) => Result.succeed({ [tag]: key, value }),
-      encode: (value) => Result.succeed(Object(value).value),
-      name: `${tag}=${preview(key)}`,
-      fidelity: "claimed-iso",
-    }),
+    resultTransform(
+      // SAFETY: taggedChoice's Cases constraint and the runtime check above require grammars.
+      cases[key] as Grammar<Type<Cases[keyof Cases]>>,
+      {
+        decode: (value) => Result.succeed({ [tag]: key, value }),
+        encode: (value) => {
+          if (!Predicate.isObject(value) || !Object.hasOwn(value, tag) || value[tag] !== key) {
+            return Result.fail({
+              message: `expected an object with ${tag} equal to ${preview(key)}`,
+            })
+          }
+          if (!Object.hasOwn(value, "value")) {
+            return Result.fail({ message: "expected an object with a value field" })
+          }
+          return Result.succeed(value.value)
+        },
+        name: `${tag}=${preview(key)}`,
+      },
+      "claimed-iso",
+    ),
   )
   return make({ _tag: "Choice", options: branches, on: { tag, keys } })
 }

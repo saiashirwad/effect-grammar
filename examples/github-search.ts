@@ -80,7 +80,7 @@ const QuerySchema = Schema.Union([
 
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
-const doubleQuoted = Grammar.wrap('"', Grammar.regex(/[^"]*/, "string content"), '"')
+const doubleQuoted = Grammar.between('"', Grammar.regex(/[^"]*/, "string content"), '"')
 const keyword = <const S extends string>(s: S) => Grammar.as(Grammar.literal(s), s)
 
 const compareValue = Grammar.gen(function* () {
@@ -140,7 +140,11 @@ const qualifier = Grammar.gen(function* () {
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group = Grammar.wrap("(", Grammar.wrap(Grammar.trivia, query, Grammar.trivia), ")").pipe(
+const group = Grammar.between(
+  "(",
+  Grammar.between(Grammar.trivia, query, Grammar.trivia),
+  ")",
+).pipe(
   Grammar.decodeTo(GroupSchema)({
     decode: (inner) => ({ kind: "group", inner }),
     encode: (g) => g.inner,
@@ -204,7 +208,7 @@ const andExpr = nary("and", andSep, notExpr)
 const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
 const orExpr = nary("or", orSep, andExpr)
 
-const whole = Grammar.wrap(Grammar.trivia, query, Grammar.trivia)
+const whole = Grammar.between(Grammar.trivia, query, Grammar.trivia)
 
 const pattern = (re: RegExp, identifier: string, message: string) =>
   Schema.String.check(Schema.isPattern(re, { identifier, message }))

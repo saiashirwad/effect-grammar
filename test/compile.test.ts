@@ -39,15 +39,14 @@ describe("validate", () => {
     const issues = G.validate(G.many(G.regex(/x*/, "xs")))
     assert.equal(issues.length, 1)
     assert.match(issues[0]!.message, /can match the empty string/)
-    assert.throws(() => G.compile(G.many(G.literal(""))), /can match the empty string/)
+    assert.throws(() => G.prepare(G.many(G.literal(""))), /can match the empty string/)
   })
 
-  it("does not claim a bounded repetition of an empty item matches empty", () => {
-    const inner = G.many(G.empty, { min: 1, max: 2 })
-    const outer = G.many(inner)
+  it("rejects bounded repetition of an empty item too", () => {
+    const grammar = G.many(G.empty, { min: 1, max: 2 })
 
-    assert.deepEqual(G.validate(outer), [])
-    assert.deepEqual(Result.getOrThrow(G.compile(outer).parse("")), [])
+    assert.match(G.validate(grammar)[0]!.message, /zero-width elements/)
+    assert.throws(() => G.prepare(grammar), /zero-width elements/)
   })
 
   it("detects that a zero-maximum repetition always matches empty", () => {
@@ -57,7 +56,7 @@ describe("validate", () => {
     const issues = G.validate(outer)
     assert.equal(issues.length, 1)
     assert.match(issues[0]!.message, /can match the empty string/)
-    assert.throws(() => G.compile(outer), /can match the empty string/)
+    assert.throws(() => G.prepare(outer), /can match the empty string/)
   })
 
   it("does not claim a fallible transform matches empty", () => {
@@ -73,7 +72,7 @@ describe("validate", () => {
     const grammar = G.many(nonempty.pipe(G.label("nonempty xs")))
 
     assert.deepEqual(G.validate(grammar), [])
-    assert.deepEqual(Result.getOrThrow(G.compile(grammar).parse("xx")), ["xx"])
+    assert.deepEqual(Result.getOrThrow(G.prepare(grammar).parse("xx")), ["xx"])
   })
 
   it("leaves an empty-producing transform to the runtime progress check", () => {
@@ -87,7 +86,7 @@ describe("validate", () => {
     const grammar = G.many(empty)
 
     assert.deepEqual(G.validate(grammar), [])
-    const parsed = G.compile(grammar).parse("")
+    const parsed = G.prepare(grammar).parse("")
     assert.equal(Result.isFailure(parsed), true)
     if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /consumes input/)
   })
@@ -109,7 +108,7 @@ describe("validate", () => {
     const issues = G.validate(grammar)
     assert.equal(issues.length, 1)
     assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-    assert.throws(() => G.compile(grammar), /the grammar has 1 issue/)
+    assert.throws(() => G.prepare(grammar), /the grammar has 1 issue/)
   })
 
   it("reports one issue when a delayed grammar repeats in one ref scope", () => {
@@ -145,18 +144,18 @@ describe("validate", () => {
   })
 })
 
-describe("compile", () => {
+describe("prepare", () => {
   it("returns prepared operations for a sound grammar", () => {
     const g = G.struct({ host: word, port: G.integer.pipe(G.prefix(":")) })
-    const compiled = G.compile(g)
-    assert.deepEqual(Result.getOrThrow(compiled.parse("h:80")), { host: "h", port: 80 })
-    assert.equal(Result.getOrThrow(compiled.print({ host: "h", port: 80 })), "h:80")
-    assert.equal(Result.getOrThrow(compiled.printChecked({ host: "h", port: 80 })), "h:80")
-    assert.equal(compiled.render, 'host:<word> port:(":" <integer>)')
+    const prepared = G.prepare(g)
+    assert.deepEqual(Result.getOrThrow(prepared.parse("h:80")), { host: "h", port: 80 })
+    assert.equal(Result.getOrThrow(prepared.print({ host: "h", port: 80 })), "h:80")
+    assert.equal(Result.getOrThrow(prepared.printChecked({ host: "h", port: 80 })), "h:80")
+    assert.equal(prepared.render, 'host:<word> port:(":" <integer>)')
   })
 
   it("throws on an invalid grammar", () => {
-    assert.throws(() => G.compile(escaped), /the grammar has 1 issue/)
+    assert.throws(() => G.prepare(escaped), /the grammar has 1 issue/)
   })
 })
 

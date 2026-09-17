@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -20,7 +28,7 @@ let tarball: string
 // declared subpath (like ./testing) is missing from the published package.
 describe("packaged exports", () => {
   beforeAll(() => {
-    workspace = mkdtempSync(join(tmpdir(), "effect-grammar-pack-"))
+    workspace = mkdtempSync(join(realpathSync(tmpdir()), "effect-grammar-pack-"))
     run("pnpm", ["build"], root)
     run("pnpm", ["pack", "--pack-destination", workspace], root)
     const packed = readdirSync(workspace).find((name) => name.endsWith(".tgz"))
@@ -59,8 +67,10 @@ describe("packaged exports", () => {
       "const root = await import('effect-grammar')",
       "const schema = await import('effect-grammar/Schema')",
       "const testing = await import('effect-grammar/testing')",
-      `for (const name of ${JSON.stringify(Object.keys(index))}) {`,
-      "  if (!(name in root)) throw new Error('missing export ' + name)",
+      `const expected = ${JSON.stringify(Object.keys(index).sort())}`,
+      "const actual = Object.keys(root).sort()",
+      "if (JSON.stringify(actual) !== JSON.stringify(expected)) {",
+      "  throw new Error('root exports differ: ' + JSON.stringify({ expected, actual }))",
       "}",
       "if (typeof schema.codec !== 'function') throw new Error('missing Schema.codec')",
       "if (typeof testing.assertPrintParse !== 'function') throw new Error('missing testing.assertPrintParse')",

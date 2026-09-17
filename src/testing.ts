@@ -7,12 +7,14 @@ import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 
 /**
- * Law helpers for `Grammar`s. The library removes unbound whitespace, so its
- * grammars do not round-trip text exactly. Two laws hold instead:
+ * Property helpers for checking a particular grammar. These properties are not
+ * guaranteed for every grammar: choices, transforms, and configured silent
+ * spellings can make printing lossy or non-idempotent.
  *
- * - `parse(print(value)) = value` — printing keeps a value's meaning.
- * - `print(parse(text)) = canonical(text)` — parsing then printing settles on
- *   one canonical form, and printing that form again does not change it.
+ * - `parse(print(value)) = value` checks a value round trip.
+ * - For accepted text, parse, print, and parse again preserve the value, and a
+ *   second print is unchanged. “Canonical” names that tested fixed-point
+ *   property; it is not a universal canonicalization guarantee.
  */
 
 const lawError = (message: string): Error => new Error(`grammar law: ${message}`)
@@ -26,9 +28,9 @@ export const assertPrintParse = <A>(grammar: Grammar<A>, value: A): void => {
 }
 
 /**
- * Assert that `text` parses and that `print(parse(text))` is canonical: parsing
- * the printed form yields an equal value, and printing it again is unchanged.
- * Returns the canonical text.
+ * Assert that `text` parses, that parsing its printed form yields an equal
+ * value, and that printing the result again is unchanged. Returns that stable
+ * printed form; this assertion does not imply universal canonicality.
  */
 export const assertParsePrintCanonical = <A>(grammar: Grammar<A>, text: string): string => {
   const parsed = parse(grammar, text)
@@ -80,8 +82,8 @@ export const checkPrintParse = <A>(
 }
 
 /**
- * Check `print(parse(text)) = canonical(text)` over an arbitrary of text.
- * Inputs that do not parse are skipped, so a loose generator is fine.
+ * Check the accepted-text value-preservation and print fixed-point properties
+ * over arbitrary text. Inputs that do not parse are skipped.
  */
 export const checkCanonicalization = <A>(
   grammar: Grammar<A>,

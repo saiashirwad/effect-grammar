@@ -110,7 +110,12 @@ const outputGen = (
   return text
 }
 
-const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): string | Failure => {
+const out = (
+  grammar: GrammarInternal,
+  value: Value,
+  env: Frame | undefined,
+  suspended: Set<Node> = new Set(),
+): string | Failure => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
@@ -118,14 +123,14 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
     case "Regex": {
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      node.re.lastIndex = 0
-      const match = node.re.exec(value)
-      if (match === null || match.index !== 0 || match[0].length !== value.length) {
+      const expression = new RegExp(node.source, `${node.flags}y`)
+      const match = expression.exec(value)
+      if (match === null || match[0].length !== value.length) {
         return fail({
           _tag: "InvalidValue",
           expected: node.name,
           actual: value,
-          detail: `${JSON.stringify(value)} does not match /${node.re.source}/`,
+          detail: `${JSON.stringify(value)} does not match /${node.source}/`,
         })
       }
       return value
@@ -240,8 +245,33 @@ const out = (grammar: GrammarInternal, value: Value, env: Frame | undefined): st
       return out(node.inner, node.printAs, env)
     case "Label":
       return out(node.inner, value, env)
-    case "Suspend":
-      return out(resolve(node), value, env)
+    case "Suspend": {
+      if (suspended.has(node)) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: "a productive recursive grammar",
+          actual: value,
+          detail: `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`} recursed without consuming a value`,
+        })
+      }
+      let target: GrammarInternal
+      try {
+        target = resolve(node)
+      } catch (error) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: "a valid suspended grammar",
+          actual: value,
+          detail: exceptionMessage(error),
+        })
+      }
+      suspended.add(node)
+      try {
+        return out(target, value, env, suspended)
+      } finally {
+        suspended.delete(node)
+      }
+    }
     case "Match": {
       const key = evaluate(node.scrutinee, env)
       if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
@@ -308,7 +338,7 @@ export const printUnknown = (
     : Result.succeed(result)
 }
 
-/** Write a value as canonical text. No round-trip guarantee; see {@link printCheckedUnknown}. */
+/** Print a value using the grammar's selected branches and configured spellings. This does not verify a round trip; see {@link printCheckedUnknown}. */
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   printUnknown(grammar, value)
 

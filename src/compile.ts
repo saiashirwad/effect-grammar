@@ -11,6 +11,7 @@ import type {
 } from "./core.ts"
 import { children, nodeOf, resolve } from "./core.ts"
 import type { ParseError, PrintError } from "./errors.ts"
+import { exceptionMessage } from "./errors.ts"
 import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 import { describe, render } from "./render.ts"
@@ -37,9 +38,7 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
     case "Literal":
       return node.value === "" ? "yes" : "no"
     case "Regex":
-      // `regex` always compiles with the sticky flag, so a match here is empty at 0.
-      node.re.lastIndex = 0
-      return node.re.exec("") === null ? "no" : "yes"
+      return new RegExp(node.source, `${node.flags}y`).exec("") === null ? "no" : "yes"
     case "Gen":
       return allMatchEmpty(
         node.steps.map((step) => step.grammar),
@@ -50,7 +49,7 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
     case "Choice": {
       let result: EmptyMatch = "no"
       for (const option of node.options) {
-        const match = matchesEmpty(option, seen)
+        const match = matchesEmpty(option, new Set(seen))
         if (match === "yes") return "yes"
         if (match === "unknown") result = "unknown"
       }
@@ -127,9 +126,9 @@ const walk = (
       return
     }
     case "Many":
-      if (node.max === Number.POSITIVE_INFINITY && matchesEmpty(node.inner, new Set()) === "yes") {
+      if (node.max > 0 && matchesEmpty(node.inner, new Set()) === "yes") {
         issues.push({
-          message: `unbounded repetition of ${describe(node.inner)}, which can match the empty string, so parsing could not make progress`,
+          message: `${node.max === Number.POSITIVE_INFINITY ? "unbounded repetition" : "repetition"} of ${describe(node.inner)}, which can match the empty string, so parsing and printing would disagree about zero-width elements`,
         })
       }
       break
@@ -139,7 +138,16 @@ const walk = (
       if (paths?.some((path) => sameScopePath(path, active))) return
       visiting.add(node)
       try {
-        for (const child of children(node)) walk(child, active, visiting, completed, issues)
+        let target: GrammarInternal
+        try {
+          target = resolve(node)
+        } catch (error) {
+          issues.push({
+            message: `invalid suspend: ${exceptionMessage(error)}`,
+          })
+          return
+        }
+        walk(target, active, visiting, completed, issues)
       } finally {
         visiting.delete(node)
       }
@@ -163,9 +171,10 @@ const walk = (
 
 /**
  * Check a grammar for staged errors that `parse` and `print` would otherwise
- * only report when they run: refs used outside their gen and unbounded
- * repetition of a grammar proven to match empty input. Returns the issues
- * these checks find; an empty array is not proof of all runtime behavior.
+ * only report when they run: refs used outside their gen and any nonzero
+ * repetition of a grammar proven to match empty input. Resolving suspensions
+ * may evaluate and cache their thunks. Returns the issues these checks find;
+ * an empty array is not proof of all runtime behavior.
  */
 export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> => {
   const issues: Array<GrammarIssue> = []
@@ -197,7 +206,7 @@ export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityE
   return entries
 }
 
-export interface Compiled<A> {
+export interface Prepared<A> {
   readonly parse: (text: string) => Result.Result<A, ParseError>
   readonly print: (value: A) => Result.Result<string, PrintError>
   readonly printChecked: (value: A) => Result.Result<string, PrintError>
@@ -206,15 +215,16 @@ export interface Compiled<A> {
 }
 
 /**
- * Validate a grammar once, then return prepared operations bound to it.
- * Throws if {@link validate} finds an issue. Other input, value, callback, and
- * round-trip failures can still occur when a prepared operation runs.
+ * Validate a grammar once, then return interpreter functions bound to it.
+ * This does not compile or optimize the grammar. Validation can resolve and
+ * cache suspended thunks, and throws if {@link validate} finds an issue. Other
+ * input, value, callback, and round-trip failures can still occur at runtime.
  */
-export const compile = <A>(grammar: Grammar<A>): Compiled<A> => {
+export const prepare = <A>(grammar: Grammar<A>): Prepared<A> => {
   const issues = validate(grammar)
   if (issues.length > 0) {
     throw new Error(
-      `compile: the grammar has ${issues.length} issue${issues.length === 1 ? "" : "s"}:\n  ${issues
+      `prepare: the grammar has ${issues.length} issue${issues.length === 1 ? "" : "s"}:\n  ${issues
         .map((issue) => issue.message)
         .join("\n  ")}`,
     )

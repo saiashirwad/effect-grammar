@@ -2,7 +2,7 @@ import { Equal, Predicate } from "effect"
 
 import type { Pattern, Value } from "./core.ts"
 import { bind, type Frame } from "./env.ts"
-import type { PrintIssue } from "./errors.ts"
+import { exceptionMessage, type PrintIssue } from "./errors.ts"
 
 export const unifyPattern = (
   pattern: Pattern,
@@ -21,11 +21,49 @@ export const unifyPattern = (
       if (!Predicate.isObject(value) || Array.isArray(value)) {
         return { _tag: "TypeMismatch", expected: "an object", actual: value }
       }
+      const fields = new Set<PropertyKey>(pattern.fields.map(([key]) => key))
+      let keys: ReadonlyArray<PropertyKey>
+      try {
+        keys = Reflect.ownKeys(value)
+        for (const key of keys) Object.getOwnPropertyDescriptor(value, key)
+      } catch (error) {
+        return {
+          _tag: "InvalidValue",
+          expected: `an inspectable object with exactly the fields ${[...fields].join(", ")}`,
+          actual: value,
+          detail: `could not inspect own fields: ${exceptionMessage(error)}`,
+        }
+      }
+      for (const key of keys) {
+        if (!fields.has(key)) {
+          return {
+            _tag: "InvalidValue",
+            expected: `exactly the fields ${[...fields].join(", ")}`,
+            actual: value,
+            detail: "unexpected own field",
+          }
+        }
+      }
       for (const [key, field] of pattern.fields) {
-        if (!Object.hasOwn(value, key)) {
+        if (!keys.includes(key)) {
           return { _tag: "AtPath", path: key, issue: { _tag: "MissingField", field: key } }
         }
-        const issue = unifyPattern(field, value[key], values)
+        let fieldValue: Value
+        try {
+          fieldValue = value[key]
+        } catch (error) {
+          return {
+            _tag: "AtPath",
+            path: key,
+            issue: {
+              _tag: "InvalidValue",
+              expected: "a readable field",
+              actual: value,
+              detail: exceptionMessage(error),
+            },
+          }
+        }
+        const issue = unifyPattern(field, fieldValue, values)
         if (issue !== undefined) return { _tag: "AtPath", path: key, issue }
       }
       return undefined

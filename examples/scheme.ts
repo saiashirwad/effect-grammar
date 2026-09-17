@@ -84,7 +84,7 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
 
 // `trivia` prints nothing, `spaces` prints one space: "(+ 1 2)" prints back as
 // "(+ 1 2)", not "(+12)".
-const list: Grammar.Grammar<List> = Grammar.wrap(
+const list = Grammar.between(
   Grammar.seq(Grammar.literal("("), Grammar.trivia),
   Grammar.sepBy(expr, Grammar.spaces),
   Grammar.seq(Grammar.trivia, Grammar.literal(")")),
@@ -102,7 +102,7 @@ const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
   }),
 )
 
-const document = Grammar.wrap(Grammar.trivia, expr, Grammar.trivia)
+const document = Grammar.between(Grammar.trivia, expr, Grammar.trivia)
 
 interface FormSpec {
   readonly min: number

@@ -9,7 +9,7 @@ type Nested = number | ReadonlyArray<Nested>
 const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
   Grammar.choice(
     Grammar.integer,
-    Grammar.wrap(
+    Grammar.between(
       Grammar.symbol("["),
       Grammar.sepBy(nested, Grammar.symbol(",")),
       Grammar.symbol("]"),

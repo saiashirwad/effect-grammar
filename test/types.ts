@@ -119,7 +119,7 @@ G.seq(G.literal("a"), G.integer)
 G.integer.pipe(G.as(1))
 
 // Silent composition stays silent.
-const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.wrap("<", G.symbol("b"), ">")))
+const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.between("<", G.symbol("b"), ">")))
 
 // A silent choice is not silent (it has no canonical print).
 // @ts-expect-error
