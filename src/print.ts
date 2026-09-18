@@ -110,6 +110,59 @@ const outputGen = (
   return text
 }
 
+const isByteString = (text: string): boolean => {
+  for (let index = 0; index < text.length; index++) {
+    if (text.charCodeAt(index) > 0xff) return false
+  }
+  return true
+}
+
+const outputMerge = (
+  node: Extract<Node, { _tag: "Merge" }>,
+  value: Value,
+  env: Frame | undefined,
+): string | Failure => {
+  if (!Predicate.isObject(value) || Array.isArray(value)) {
+    return fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
+  }
+  const fields = node.parts.flatMap((part) => part.keys)
+  let text = ""
+  try {
+    const own = Reflect.ownKeys(value)
+    if (own.some((key) => !Predicate.isString(key) || !fields.includes(key))) {
+      return fail({
+        _tag: "InvalidValue",
+        expected: `exactly the fields ${fields.join(", ")}`,
+        actual: value,
+        detail: "unexpected own field",
+      })
+    }
+    for (const part of node.parts) {
+      const slice: Record<string, Value> = {}
+      for (const key of part.keys) {
+        if (!own.includes(key)) continue
+        Object.defineProperty(slice, key, {
+          value: value[key],
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        })
+      }
+      const result = out(part.grammar, slice, env)
+      if (result instanceof Failure) return result
+      text += result
+    }
+  } catch (error) {
+    return fail({
+      _tag: "InvalidValue",
+      expected: `an inspectable object with exactly the fields ${fields.join(", ")}`,
+      actual: value,
+      detail: exceptionMessage(error),
+    })
+  }
+  return text
+}
+
 const out = (
   grammar: GrammarInternal,
   value: Value,
@@ -292,13 +345,17 @@ const out = (
       }
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      return value.length === count
-        ? value
-        : fail({
-            _tag: "InvalidValue",
-            expected: `${count} UTF-16 code units`,
-            actual: value,
-          })
+      if (value.length !== count) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: node.unit === "char" ? `${count} UTF-16 code units` : `${count} bytes`,
+          actual: value,
+        })
+      }
+      if (node.unit === "byte" && !isByteString(value)) {
+        return fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
+      }
+      return value
     }
     case "RepeatExact": {
       const count = evaluate(node.count, env)
@@ -325,6 +382,8 @@ const out = (
       }
       return text
     }
+    case "Merge":
+      return outputMerge(node, value, env)
   }
 }
 

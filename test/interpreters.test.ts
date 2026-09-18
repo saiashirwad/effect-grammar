@@ -118,6 +118,12 @@ const table = {
     value: { count: 3, bits: ["1", "0", "1"] },
     renderIncludes: "){",
   }),
+  Merge: row({
+    grammar: G.merge(G.struct({ n: G.integer }), G.struct({ w: word })),
+    text: "5ab",
+    value: { n: 5, w: "ab" },
+    render: "n:<integer> w:<word>",
+  }),
 } satisfies Record<Node["_tag"], Row>
 
 describe("interpreter table (parse / print / render / law per Node)", () => {

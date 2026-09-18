@@ -16,8 +16,16 @@ import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 import { describe, render } from "./render.ts"
 
-const exprScope = (expr: Expr): ScopeId =>
-  expr._tag === "Ref" ? expr.scope : exprScope(expr.object)
+const exprScope = (expr: Expr): ScopeId | undefined => {
+  switch (expr._tag) {
+    case "Ref":
+      return expr.scope
+    case "Prop":
+      return exprScope(expr.object)
+    case "Count":
+      return undefined
+  }
+}
 
 type EmptyMatch = "yes" | "no" | "unknown"
 
@@ -77,8 +85,15 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
       seen.delete(node)
       return empty
     }
-    case "Match":
     case "Take":
+      if (node.count._tag !== "Count") return "unknown"
+      return node.count.value === 0 ? "yes" : "no"
+    case "Merge":
+      return allMatchEmpty(
+        node.parts.map((part) => part.grammar),
+        seen,
+      )
+    case "Match":
     case "RepeatExact":
       return "unknown"
   }
@@ -101,7 +116,8 @@ const checkRef = (
   active: ReadonlyArray<ScopeId>,
   issues: Array<GrammarIssue>,
 ): void => {
-  if (!active.includes(exprScope(expr))) {
+  const scope = exprScope(expr)
+  if (scope !== undefined && !active.includes(scope)) {
     issues.push({
       message: `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
     })

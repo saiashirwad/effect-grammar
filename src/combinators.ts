@@ -1,7 +1,8 @@
-import { Equal, Function as F, Predicate, Result, Schema } from "effect"
+import { Equal, Function as F, Predicate, Result, Schema, type Types } from "effect"
 
 import {
   type Bounds,
+  type Expr,
   type Grammar,
   type GrammarInternal,
   type Fidelity,
@@ -10,6 +11,7 @@ import {
   isSilent,
   make,
   type MatchKey,
+  nodeOf,
   type Node,
   type Ref,
   type ScopeId,
@@ -19,7 +21,8 @@ import {
 } from "./core.ts"
 import { isCount } from "./env.ts"
 import { exceptionMessage, preview } from "./errors.ts"
-import { assertInScope } from "./gen.ts"
+import { assertInScope, gen } from "./gen.ts"
+import { describe } from "./render.ts"
 
 export { gen, type GenGrammar, get, seq } from "./gen.ts"
 
@@ -240,8 +243,17 @@ export const matchValue = <
     cases: uniqueCases(entries),
   })
 
-export const take = (count: Ref<number>): Grammar<string> =>
-  make({ _tag: "Take", count: assertInScope(count, "take") })
+const countExpr = (count: Ref<number> | number, where: string): Expr => {
+  if (!Predicate.isNumber(count)) return assertInScope(count, where)
+  if (!isCount(count)) throw new RangeError(`${where}: count must be a non-negative safe integer`)
+  return { _tag: "Count", value: count }
+}
+
+export const take = (count: Ref<number> | number): Grammar<string> =>
+  make({ _tag: "Take", count: countExpr(count, "take"), unit: "char" })
+
+export const takeBytes = (count: Ref<number> | number): Grammar<string> =>
+  make({ _tag: "Take", count: countExpr(count, "bytes"), unit: "byte" })
 
 /** Repeat an item a bound number of times. Each successful parse must consume input. */
 export const repeat: {
@@ -256,6 +268,7 @@ export interface TransformOptions<A, B> {
   readonly encode: (b: B) => A
   readonly is?: (value: B) => boolean
   readonly name?: string
+  readonly keys?: ReadonlyArray<string> | undefined
 }
 
 const attempt =
@@ -280,6 +293,7 @@ const plainTransform = <A, B>(
     encode: attempt(options.encode),
     is: options.is,
     name: options.name,
+    keys: options.keys,
     fidelity,
   })
 
@@ -306,6 +320,7 @@ export interface TransformOrFailOptions<A, B> {
   readonly encode: (b: B) => Result.Result<A, GrammarIssue>
   readonly is?: (value: B) => boolean
   readonly name?: string
+  readonly keys?: ReadonlyArray<string> | undefined
 }
 
 /** {@link transform} with directions that return a `Result`. No law is claimed. */
@@ -334,6 +349,26 @@ export const partialIso: {
   <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
 } = F.dual(2, <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>) =>
   resultTransform(inner, options, "partial"),
+)
+
+export const filter: {
+  <A, B extends A>(
+    refinement: (value: A) => value is B,
+    name: string,
+  ): (inner: Grammar<A>) => Grammar<B>
+  <A>(predicate: (value: A) => boolean, name: string): (inner: Grammar<A>) => Grammar<A>
+  <A, B extends A>(
+    inner: Grammar<A>,
+    refinement: (value: A) => value is B,
+    name: string,
+  ): Grammar<B>
+  <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string): Grammar<A>
+} = F.dual(3, <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string) =>
+  plainTransform(
+    inner,
+    { decode: F.identity<A>, encode: F.identity<A>, is: predicate, name, keys: keysOf(inner) },
+    "claimed-iso",
+  ),
 )
 
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
@@ -428,6 +463,82 @@ export const struct = <const Fields extends StructFields>(
     },
   })
 }
+
+const keysOf = (grammar: GrammarInternal): ReadonlyArray<string> | undefined => {
+  const node = nodeOf(grammar)
+  switch (node._tag) {
+    case "Gen":
+      return node.result._tag === "Object" ? node.result.fields.map(([key]) => key) : undefined
+    case "Transform":
+      return node.keys
+    case "Merge":
+      return node.parts.flatMap((part) => part.keys)
+    case "Wrap":
+    case "Label":
+      return keysOf(node.inner)
+    default:
+      return undefined
+  }
+}
+
+type MergeValue<Parts extends ReadonlyArray<GrammarInternal>> = Types.Simplify<
+  Types.UnionToIntersection<Type<Parts[number]>>
+>
+
+export const merge = <const Parts extends readonly [GrammarInternal, ...Array<GrammarInternal>]>(
+  ...parts: Parts
+): Grammar<MergeValue<Parts>> => {
+  const seen = new Set<string>()
+  return make({
+    _tag: "Merge",
+    parts: parts.map((grammar, index) => {
+      const keys = keysOf(grammar)
+      if (keys === undefined) {
+        throw new TypeError(
+          `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, or a transform that declares keys`,
+        )
+      }
+      for (const key of keys) {
+        if (seen.has(key)) throw new RangeError(`merge: duplicate field ${preview(key)}`)
+        seen.add(key)
+      }
+      return { grammar, keys }
+    }),
+  })
+}
+
+export const sized = (
+  length: Grammar<number>,
+  payload: (count: Ref<number>) => Grammar<string>,
+): Grammar<string> =>
+  gen(function* () {
+    const size = yield* length
+    const text = yield* payload(size)
+    return { size, text }
+  }).pipe(
+    iso({
+      decode: ({ text }) => text,
+      encode: (text: string) => ({ size: text.length, text }),
+    }),
+  )
+
+export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => sized(length, take)
+
+export const countPrefixed: {
+  <A>(item: Grammar<A>, count: Grammar<number>): Grammar<ReadonlyArray<A>>
+  (count: Grammar<number>): <A>(item: Grammar<A>) => Grammar<ReadonlyArray<A>>
+} = F.dual(2, <A>(item: Grammar<A>, count: Grammar<number>) =>
+  gen(function* () {
+    const size = yield* count
+    const items = yield* repeat(item, size)
+    return { size, items }
+  }).pipe(
+    iso({
+      decode: ({ items }) => items,
+      encode: (items: ReadonlyArray<A>) => ({ size: items.length, items }),
+    }),
+  ),
+)
 
 type TupleValue<Elements extends ReadonlyArray<GrammarInternal>> = {
   readonly [K in keyof Elements]: Type<Elements[K]>

@@ -1,4 +1,4 @@
-import { Result } from "effect"
+import { Predicate, Result } from "effect"
 
 import {
   type Grammar,
@@ -174,11 +174,22 @@ const go = (
     case "Take": {
       const count = evaluate(node.count, env)
       if (count === Unbound) return failAt(state, "a bound take count")
-      if (!isCount(count)) return failAt(state, `<char>{${preview(count)}}`)
-      if (state.input.length - state.pos < count) {
-        return failAt(state, `${count} chars`)
+      if (!isCount(count)) return failAt(state, `<${node.unit}>{${preview(count)}}`)
+      const available = state.input.length - state.pos
+      if (available < count) {
+        return failAt(
+          state,
+          node.unit === "char" ? `${count} chars` : `${count} bytes but only ${available} remain`,
+        )
       }
       const value = state.input.slice(state.pos, state.pos + count)
+      if (node.unit === "byte") {
+        for (let index = 0; index < count; index++) {
+          if (value.charCodeAt(index) > 0xff) {
+            return failAtPosition(state, state.pos + index, "a byte")
+          }
+        }
+      }
       state.pos += count
       return value
     }
@@ -195,6 +206,25 @@ const go = (
         values.push(value)
       }
       return values
+    }
+    case "Merge": {
+      const merged: Record<string, Value> = {}
+      for (const part of node.parts) {
+        const start = state.pos
+        const value = go(part.grammar, state, env)
+        if (value === Fail) return Fail
+        if (!Predicate.isObject(value)) return failAtPosition(state, start, "an object to merge")
+        for (const key of part.keys) {
+          if (!Object.hasOwn(value, key)) continue
+          Object.defineProperty(merged, key, {
+            value: value[key],
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          })
+        }
+      }
+      return merged
     }
   }
 }

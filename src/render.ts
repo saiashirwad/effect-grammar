@@ -79,6 +79,7 @@ const nameBindings = (
 
 const showExpr = (expr: Expr, context: Context): string => {
   if (expr._tag === "Ref") return context.names.get(expr.scope)?.get(expr.slot) ?? `$${expr.slot}`
+  if (expr._tag === "Count") return String(expr.value)
   const object = showExpr(expr.object, context)
   return Predicate.isString(expr.key) && /^[A-Za-z_$][\w$]*$/.test(expr.key)
     ? `${object}.${expr.key}`
@@ -186,12 +187,17 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
       }
     }
     case "Take":
-      return { precedence: AtomPrecedence, text: `<char>{${showExpr(node.count, context)}}` }
+      return {
+        precedence: AtomPrecedence,
+        text: `<${node.unit}>{${showExpr(node.count, context)}}`,
+      }
     case "RepeatExact":
       return {
         precedence: PostfixPrecedence,
         text: `(${show(node.inner, context).text}){${showExpr(node.count, context)}}`,
       }
+    case "Merge":
+      return sequence(node.parts.map((part) => show(part.grammar, context)))
   }
 }
 
