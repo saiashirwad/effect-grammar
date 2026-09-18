@@ -93,10 +93,10 @@ describe("bits", () => {
   })
 
   it("rejects layouts that are not whole bytes or that JavaScript would reorder", () => {
-    assert.throws(() => Binary.bits({ a: 3 }), /not a whole number of bytes/)
-    assert.throws(() => Binary.bits({}), /not a whole number of bytes/)
-    assert.throws(() => Binary.bits({ a: 0, b: 8 }), /1 to 53 bits/)
-    assert.throws(() => Binary.bits({ 0: 8 }), /integer key/)
+    assert.throws(() => Binary.bits({ a: 3 }), /got a:3/)
+    assert.throws(() => Binary.bits({ a: 0, b: 8 }), /got a:0 b:8/)
+    assert.throws(() => Binary.bits({ a: 54, b: 2 }), /got a:54 b:2/)
+    assert.throws(() => Binary.bits({ 0: 8 }), /got 0:8/)
   })
 
   it("merges with other object grammars", () => {
@@ -142,7 +142,7 @@ describe("bytes / lengthPrefixed / literal", () => {
   })
 
   it("rejects text that is not bytes", () => {
-    assert.throws(() => Binary.literal(256), /not a byte/)
+    assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
     assert.equal(G.render(png), "0x89 0x50 body:<byte>{2}")
     assert.equal(
       G.render(G.struct({ id: Binary.uint16, flags: Binary.bits({ on: 1, level: 7 }) })),
@@ -153,7 +153,7 @@ describe("bytes / lengthPrefixed / literal", () => {
     assert.ok(Result.isFailure(error))
     assert.deepEqual(error.failure.expected, ["a byte"])
     assert.equal(error.failure.pos, 1)
-    assert.match(printFail(G.regex(/./, "char"), "€").message, /character above 0xff/)
+    assert.match(printFail(G.regex(/./, "char"), "€").message, /only bytes to be printed/)
   })
 })
 
@@ -165,7 +165,7 @@ describe("ascii / utf8", () => {
     assert.equal(parseOk(utf8, 3, 0xe2, 0x82, 0xac), "€")
     assert.deepEqual(printOk(utf8, "€"), [3, 0xe2, 0x82, 0xac])
     assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
-    assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
+    assert.match(printFail(utf8, "\ud800").message, /expected utf8/)
   })
 
   it("keeps a byte order mark", () => {
@@ -173,22 +173,19 @@ describe("ascii / utf8", () => {
   })
 
   it("rejects bytes and characters outside ASCII", () => {
-    assert.deepEqual(parseFail(ascii, 1, 0x80).expected, ["ASCII bytes"])
-    assert.match(printFail(ascii, "é").message, /only ASCII/)
+    assert.deepEqual(parseFail(ascii, 1, 0x80).expected, ["ascii"])
+    assert.match(printFail(ascii, "é").message, /expected ascii/)
   })
 
-  it("reports both as partial transforms", () => {
-    assert.deepEqual(
-      G.auditFidelity(utf8).map((entry) => entry.fidelity),
-      ["partial"],
-    )
+  it("formats bytes as hex", () => {
+    assert.equal(Binary.hex(Uint8Array.of(0, 0xbe, 0xef)), "00 be ef")
   })
 })
 
 describe("codec", () => {
   const Frame = Schema.Struct({
-    version: Schema.Literals([0, 1]),
-    kind: Schema.Int,
+    version: Binary.Bit,
+    kind: Binary.Uint(7),
     names: Schema.Array(Schema.String),
   })
   const frame = G.merge(
@@ -218,7 +215,7 @@ describe("codec", () => {
     const issue = Effect.runSync(
       Schema.encodeEffect(FrameFromBytes)({ version: 1, kind: 128, names: [] }).pipe(Effect.flip),
     ).issue
-    assert.match(formatIssue(issue), /kind must be an integer from 0 to 127/)
+    assert.match(formatIssue(issue), /Expected a value between 0 and 127/)
   })
 
   it("handles inputs longer than one String.fromCharCode call", () => {

@@ -134,19 +134,20 @@ const header = Grammar.merge(
   Grammar.struct({ qdcount: Binary.uint16 }),
 )
 
+const { Bit, Uint16 } = Binary
 const Header = Binary.codec(
   header,
   Schema.Struct({
-    id: Schema.Int,
-    qr: Schema.Literals([0, 1]),
-    opcode: Schema.Int,
-    aa: Schema.Literals([0, 1]),
-    tc: Schema.Literals([0, 1]),
-    rd: Schema.Literals([0, 1]),
-    ra: Schema.Literals([0, 1]),
-    z: Schema.Int,
-    rcode: Schema.Int,
-    qdcount: Schema.Int,
+    id: Uint16,
+    qr: Bit,
+    opcode: Binary.Uint(4),
+    aa: Bit,
+    tc: Bit,
+    rd: Bit,
+    ra: Bit,
+    z: Binary.Uint(3),
+    rcode: Binary.Uint(4),
+    qdcount: Uint16,
   }),
 )
 
@@ -162,8 +163,10 @@ Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
 - `bytes(count)` reads a `Uint8Array` of a constant or previously bound length,
   `lengthPrefixed(length)` derives its prefix when printing, and
   `literal(...bytes)` matches a fixed sequence such as a magic number.
-- `ascii` and `utf8` turn a `Uint8Array` grammar into a string grammar. Both are
-  partial: invalid bytes fail to parse and unencodable strings fail to print.
+- `ascii` and `utf8` turn a `Uint8Array` grammar into a string grammar. Invalid
+  bytes fail to parse and unencodable strings fail to print.
+- `Bit`, `Uint(bits)`, `Uint8`, `Uint16`, and `Uint32` are schemas for the
+  values these grammars produce, and `hex(bytes)` formats bytes for display.
 - `parse`, `print`, `printChecked`, and `codec` mirror the text operations over
   `Uint8Array`. Parse failures report a byte offset and the byte found.
 

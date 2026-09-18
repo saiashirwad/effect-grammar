@@ -32,12 +32,8 @@ const query = Grammar.gen(function* () {
   return { header: head, questions }
 })
 
-const Bit = Schema.Literals([0, 1])
-const Uint = (size: number) =>
-  Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 ** size - 1 }))
-const Uint3 = Uint(3)
-const Nibble = Uint(4)
-const Uint16 = Uint(16)
+const { Bit, Uint16 } = Binary
+const Nibble = Binary.Uint(4)
 
 const DnsHeader = Schema.Struct({
   id: Uint16,
@@ -47,7 +43,7 @@ const DnsHeader = Schema.Struct({
   tc: Bit,
   rd: Bit,
   ra: Bit,
-  z: Uint3,
+  z: Binary.Uint(3),
   rcode: Nibble,
   qdcount: Uint16,
   ancount: Uint16,
@@ -65,8 +61,6 @@ const DnsQuery = Schema.Struct({
 export const HeaderFromUint8Array = Binary.codec(header, DnsHeader, { identifier: "DnsHeader" })
 export const QueryFromUint8Array = Binary.codec(query, DnsQuery, { identifier: "DnsQuery" })
 
-const hex = (bytes: Uint8Array) =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const report =
@@ -95,7 +89,7 @@ Effect.gen(function* () {
   yield* Console.log(`query   ${JSON.stringify(decoded.questions)}`)
 
   const encoded = yield* Schema.encodeEffect(QueryFromUint8Array)(decoded)
-  yield* Console.log(`encode  ${hex(encoded)}\n`)
+  yield* Console.log(`encode  ${Binary.hex(encoded)}\n`)
 
   yield* Schema.encodeEffect(QueryFromUint8Array)({
     ...decoded,

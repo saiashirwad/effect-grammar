@@ -7,7 +7,8 @@ Add byte-oriented grammars and the combinators they needed.
 - Add the `effect-grammar/Binary` export: `uint8`, `uint16`, `uint32`,
   `uint16le`, `uint32le`, `bits`, `bytes`, `lengthPrefixed`, `literal`, `ascii`,
   and `utf8`, with `parse`, `print`, `printChecked`, and `codec` over
-  `Uint8Array`. Parse failures report a byte offset.
+  `Uint8Array`, the `Bit` and `Uint` schemas, and `hex`. Parse failures report a
+  byte offset.
 - `take` accepts a constant count as well as a ref.
 - Add `lengthPrefixed` and `countPrefixed`, which derive the prefix from the
   value when printing.
