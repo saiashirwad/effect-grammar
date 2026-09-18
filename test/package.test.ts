@@ -65,6 +65,7 @@ describe("packaged exports", () => {
 
     const script = [
       "const root = await import('effect-grammar')",
+      "const binary = await import('effect-grammar/Binary')",
       "const schema = await import('effect-grammar/Schema')",
       "const testing = await import('effect-grammar/testing')",
       `const expected = ${JSON.stringify(Object.keys(index).sort())}`,
@@ -72,6 +73,7 @@ describe("packaged exports", () => {
       "if (JSON.stringify(actual) !== JSON.stringify(expected)) {",
       "  throw new Error('root exports differ: ' + JSON.stringify({ expected, actual }))",
       "}",
+      "if (typeof binary.bits !== 'function') throw new Error('missing Binary.bits')",
       "if (typeof schema.codec !== 'function') throw new Error('missing Schema.codec')",
       "if (typeof testing.assertPrintParse !== 'function') throw new Error('missing testing.assertPrintParse')",
       "let hidden = false",

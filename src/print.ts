@@ -11,7 +11,7 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
+import { caseFor, evaluate, type Frame, frame, isByteString, isCount, Unbound } from "./env.ts"
 import {
   describeRoundTrip,
   exceptionMessage,
@@ -108,13 +108,6 @@ const outputGen = (
     text += result
   }
   return text
-}
-
-const isByteString = (text: string): boolean => {
-  for (let index = 0; index < text.length; index++) {
-    if (text.charCodeAt(index) > 0xff) return false
-  }
-  return true
 }
 
 const outputMerge = (

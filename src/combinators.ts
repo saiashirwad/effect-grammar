@@ -28,6 +28,9 @@ export { gen, type GenGrammar, get, seq } from "./gen.ts"
 
 export const literal = (value: string): Silent => silent({ _tag: "Literal", value })
 
+export const namedLiteral = (value: string, name: string): Silent =>
+  silent({ _tag: "Literal", value, name })
+
 export const empty = literal("")
 
 /**
@@ -252,8 +255,8 @@ const countExpr = (count: Ref<number> | number, where: string): Expr => {
 export const take = (count: Ref<number> | number): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "take"), unit: "char" })
 
-export const takeBytes = (count: Ref<number> | number): Grammar<string> =>
-  make({ _tag: "Take", count: countExpr(count, "bytes"), unit: "byte" })
+export const takeBytes = (count: Ref<number> | number, name?: string): Grammar<string> =>
+  make({ _tag: "Take", count: countExpr(count, "bytes"), unit: "byte", name })
 
 /** Repeat an item a bound number of times. Each successful parse must consume input. */
 export const repeat: {

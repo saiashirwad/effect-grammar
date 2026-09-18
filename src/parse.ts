@@ -53,7 +53,7 @@ const go = (
       let current = state.pos
       while (current < end && state.input[current] === node.value[current - state.pos]) current++
       state.pos = current
-      return failAt(state, JSON.stringify(node.value))
+      return failAt(state, node.name ?? JSON.stringify(node.value))
     }
     case "Regex": {
       const expression = new RegExp(node.source, `${node.flags}y`)
@@ -177,9 +177,12 @@ const go = (
       if (!isCount(count)) return failAt(state, `<${node.unit}>{${preview(count)}}`)
       const available = state.input.length - state.pos
       if (available < count) {
+        const subject = node.name === undefined ? "" : `${node.name}: `
         return failAt(
           state,
-          node.unit === "char" ? `${count} chars` : `${count} bytes but only ${available} remain`,
+          node.unit === "char"
+            ? `${count} chars`
+            : `${subject}${count} bytes but only ${available} remain`,
         )
       }
       const value = state.input.slice(state.pos, state.pos + count)

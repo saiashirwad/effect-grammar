@@ -92,7 +92,7 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
     case "Literal":
       return {
         precedence: AtomPrecedence,
-        text: node.value === "" ? "" : JSON.stringify(node.value),
+        text: node.value === "" ? "" : (node.name ?? JSON.stringify(node.value)),
       }
     case "Regex":
       return { precedence: AtomPrecedence, text: `<${node.name}>` }
@@ -189,7 +189,10 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
     case "Take":
       return {
         precedence: AtomPrecedence,
-        text: `<${node.unit}>{${showExpr(node.count, context)}}`,
+        text:
+          node.name === undefined
+            ? `<${node.unit}>{${showExpr(node.count, context)}}`
+            : `<${node.name}>`,
       }
     case "RepeatExact":
       return {

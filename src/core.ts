@@ -76,7 +76,7 @@ export type Step =
   | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: GrammarInternal }
 
 export type Node =
-  | { readonly _tag: "Literal"; readonly value: string }
+  | { readonly _tag: "Literal"; readonly value: string; readonly name?: string | undefined }
   | {
       readonly _tag: "Regex"
       readonly source: string
@@ -129,7 +129,12 @@ export type Node =
       resolved?: GrammarInternal | undefined
     }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | { readonly _tag: "Take"; readonly count: Expr; readonly unit: TakeUnit }
+  | {
+      readonly _tag: "Take"
+      readonly count: Expr
+      readonly unit: TakeUnit
+      readonly name?: string | undefined
+    }
   | {
       readonly _tag: "Merge"
       readonly parts: ReadonlyArray<{

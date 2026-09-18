@@ -81,3 +81,10 @@ export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
 
 export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
+
+export const isByteString = (text: string): boolean => {
+  for (let index = 0; index < text.length; index++) {
+    if (text.charCodeAt(index) > 0xff) return false
+  }
+  return true
+}

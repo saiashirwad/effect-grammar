@@ -7,7 +7,7 @@ import { parse } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
 import { render } from "./render.ts"
 
-const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue => {
+export const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue => {
   if (issue._tag === "AtPath") {
     return new SchemaIssue.Pointer([issue.path], printIssueToSchema(actual, issue.issue))
   }

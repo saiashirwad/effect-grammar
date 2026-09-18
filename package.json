@@ -30,6 +30,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./Binary": {
+      "types": "./dist/binary.d.ts",
+      "import": "./dist/binary.js"
+    },
     "./Schema": {
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js"
