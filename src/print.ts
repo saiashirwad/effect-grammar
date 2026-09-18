@@ -17,7 +17,7 @@ import {
   evaluate,
   type Frame,
   frame,
-  isByteString,
+  nonByte,
   isCount,
   Unbound,
 } from "./env.ts"
@@ -342,7 +342,7 @@ const out = (
           actual: value,
         })
       }
-      if (node.unit === "byte" && !isByteString(value)) {
+      if (node.unit === "byte" && nonByte.test(value)) {
         return fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
       }
       return value

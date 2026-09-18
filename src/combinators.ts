@@ -28,9 +28,6 @@ export { gen, type GenGrammar, get, seq } from "./gen.ts"
 
 export const literal = (value: string): Silent => silent({ _tag: "Literal", value })
 
-export const namedLiteral = (value: string, name: string): Silent =>
-  silent({ _tag: "Literal", value, name })
-
 export const empty = literal("")
 
 /**
@@ -509,22 +506,22 @@ export const merge = <const Parts extends readonly [GrammarInternal, ...Array<Gr
   return make({ _tag: "Merge", parts })
 }
 
-export const sized = (
+export const prefixedBy = (
   length: Grammar<number>,
-  payload: (count: Ref<number>) => Grammar<string>,
+  take: (length: Ref<number>) => Grammar<string>,
 ): Grammar<string> =>
   gen(function* () {
     const size = yield* length
-    const text = yield* payload(size)
-    return { size, text }
+    const body = yield* take(size)
+    return { size, body }
   }).pipe(
     iso({
-      decode: ({ text }) => text,
-      encode: (text: string) => ({ size: text.length, text }),
+      decode: ({ body }) => body,
+      encode: (body: string) => ({ size: body.length, body }),
     }),
   )
 
-export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => sized(length, take)
+export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => prefixedBy(length, take)
 
 export const countPrefixed: {
   <A>(item: Grammar<A>, count: Grammar<number>): Grammar<ReadonlyArray<A>>

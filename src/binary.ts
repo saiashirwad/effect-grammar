@@ -1,13 +1,19 @@
-import { Effect, Predicate, Result, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import { Predicate, Result, Schema } from "effect"
 
-import { iso, namedLiteral, sized, takeBytes } from "./combinators.ts"
-import type { Grammar, GrammarInternal, Ref, Silent, Value } from "./core.ts"
-import { isByteString } from "./env.ts"
+import { type CodecOptions, codecFrom } from "./codec.ts"
+import { iso, prefixedBy, takeBytes } from "./combinators.ts"
+import {
+  type Grammar,
+  type GrammarInternal,
+  type Ref,
+  type Silent,
+  silent,
+  type Value,
+} from "./core.ts"
+import { nonByte } from "./env.ts"
 import { PrintError } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
-import { render } from "./render.ts"
-import { type CodecOptions, printIssueToSchema } from "./schema.ts"
 
 export const hex = (bytes: Iterable<number>): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
@@ -123,16 +129,17 @@ export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> =>
   takeBytes(count).pipe(asBytes)
 
 export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> =>
-  sized(length, takeBytes).pipe(asBytes)
+  prefixedBy(length, takeBytes).pipe(asBytes)
 
 export const literal = (...values: ReadonlyArray<number>): Silent => {
   if (values.some((value) => !Schema.is(Uint8)(value))) {
     throw new RangeError(`literal: expected bytes, got ${values.join(", ")}`)
   }
-  return namedLiteral(
-    toText(Uint8Array.from(values)),
-    values.map((value) => `0x${hex([value])}`).join(" "),
-  )
+  return silent({
+    _tag: "Literal",
+    value: toText(Uint8Array.from(values)),
+    name: values.map((value) => `0x${hex([value])}`).join(" "),
+  })
 }
 
 export const ascii = iso<Uint8Array, string>({
@@ -162,43 +169,39 @@ export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<
       new ParseError({ offset: pos, expected, found: found?.charCodeAt(0) }),
   )
 
-const printBytes = (
-  grammar: GrammarInternal,
-  value: Value,
-  checked: boolean,
-): Result.Result<Uint8Array, PrintError> =>
-  Result.flatMap((checked ? printCheckedUnknown : printUnknown)(grammar, value), (binary) =>
-    isByteString(binary)
-      ? Result.succeed(toBytes(binary))
-      : Result.fail(
-          new PrintError({
-            issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value },
-          }),
-        ),
-  )
+const printBytes =
+  (printer: typeof printUnknown) =>
+  (grammar: GrammarInternal, value: Value): Result.Result<Uint8Array, PrintError> =>
+    Result.flatMap(printer(grammar, value), (binary) =>
+      nonByte.test(binary)
+        ? Result.fail(
+            new PrintError({
+              issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value },
+            }),
+          )
+        : Result.succeed(toBytes(binary)),
+    )
 
-export const print = <A>(grammar: Grammar<A>, value: A) => printBytes(grammar, value, false)
+const printUnchecked = printBytes(printUnknown)
+const printVerified = printBytes(printCheckedUnknown)
 
-export const printChecked = <A>(grammar: Grammar<A>, value: A) => printBytes(grammar, value, true)
+export const print: <A>(grammar: Grammar<A>, value: A) => Result.Result<Uint8Array, PrintError> =
+  printUnchecked
+
+export const printChecked: typeof print = printVerified
 
 export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,
   options?: CodecOptions,
-) =>
-  Schema.Uint8Array.pipe(
-    Schema.decodeTo(
-      target,
-      SchemaTransformation.transformOrFail<S["Encoded"], Uint8Array>({
-        decode: (input) =>
-          Effect.fromResult(parse(grammar, input)).pipe(
-            Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message }, input)),
-          ),
-        encode: (value) =>
-          Effect.fromResult(printBytes(grammar, value, options?.roundTrip !== "off")).pipe(
-            Effect.mapError((error) => printIssueToSchema(value, error.issue)),
-          ),
-      }),
-    ),
-    Schema.annotate({ identifier: options?.identifier, description: render(grammar) }),
+) => {
+  const printer = options?.roundTrip === "off" ? printUnchecked : printVerified
+  return codecFrom(
+    Schema.Uint8Array,
+    target,
+    grammar,
+    options?.identifier,
+    (input) => parse(grammar, input),
+    (value) => printer(grammar, value),
   )
+}

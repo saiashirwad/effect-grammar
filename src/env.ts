@@ -97,5 +97,3 @@ export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
 export const nonByte = /[^\0-\xff]/
-
-export const isByteString = (text: string): boolean => !nonByte.test(text)
