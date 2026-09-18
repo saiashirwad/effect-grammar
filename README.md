@@ -86,6 +86,19 @@ advance the cursor; zero-width items fail rather than loop. `validate`/`prepare`
 report repetitions whose item can be proved to match empty input, but validation
 is intentionally not a proof of all behavior.
 
+`take(count)` reads a fixed number of UTF-16 code units; the count is a number
+or a ref bound earlier in the same `gen`. `lengthPrefixed(length)` and
+`countPrefixed(item, count)` parse a prefix and then that many characters or
+items, and derive the prefix from the value when printing, so the value does not
+carry it. `filter(predicate, name)` keeps a grammar's value only when the
+predicate accepts it, in both directions.
+
+`merge(...parts)` sequences grammars that produce objects and flattens their
+fields into one object. Each part must have statically known fields: a `struct`,
+a `gen` that returns an object, another `merge`, or a transform that declares
+`keys`. Printing splits the value by those fields, so errors keep flat paths.
+Duplicate fields are rejected on construction.
+
 `suspend(() => grammar)` enables recursive definitions. Its thunk is evaluated
 lazily on first resolution and the resolved grammar is cached. Direct left
 recursion at the same parse position and recursive printing that does not
@@ -104,8 +117,61 @@ Use `printChecked` or the helpers from `effect-grammar/testing` to test the
 values and accepted texts relevant to your grammar. These are properties to
 verify, not laws guaranteed for every grammar.
 
+## Binary
+
+`effect-grammar/Binary` applies the same grammars to a `Uint8Array`. Bytes pass
+through the engine as a binary string with one code unit per byte, so every core
+combinator composes with the byte-oriented ones.
+
+```ts
+import { Schema } from "effect"
+import * as Grammar from "effect-grammar"
+import * as Binary from "effect-grammar/Binary"
+
+const header = Grammar.merge(
+  Grammar.struct({ id: Binary.uint16 }),
+  Binary.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 }),
+  Grammar.struct({ qdcount: Binary.uint16 }),
+)
+
+const Header = Binary.codec(
+  header,
+  Schema.Struct({
+    id: Schema.Int,
+    qr: Schema.Literals([0, 1]),
+    opcode: Schema.Int,
+    aa: Schema.Literals([0, 1]),
+    tc: Schema.Literals([0, 1]),
+    rd: Schema.Literals([0, 1]),
+    ra: Schema.Literals([0, 1]),
+    z: Schema.Int,
+    rcode: Schema.Int,
+    qdcount: Schema.Int,
+  }),
+)
+
+Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
+// { id: 48879, qr: 0, opcode: 0, aa: 0, tc: 0, rd: 1, ra: 0, z: 0, rcode: 0, qdcount: 1 }
+```
+
+- `uint8`, `uint16`, and `uint32` are big-endian; `uint16le` and `uint32le` are
+  little-endian.
+- `bits(layout)` splits a whole number of bytes into named fields, first field
+  highest. A one-bit field has type `0 | 1`; wider fields are numbers of up to
+  53 bits. Printing rejects a field that does not fit its width.
+- `bytes(count)` reads a `Uint8Array` of a constant or previously bound length,
+  `lengthPrefixed(length)` derives its prefix when printing, and
+  `literal(...bytes)` matches a fixed sequence such as a magic number.
+- `ascii` and `utf8` turn a `Uint8Array` grammar into a string grammar. Both are
+  partial: invalid bytes fail to parse and unencodable strings fail to print.
+- `parse`, `print`, `printChecked`, and `codec` mirror the text operations over
+  `Uint8Array`. Parse failures report a byte offset and the byte found.
+
+A grammar that prints a character above `0xff` cannot be encoded and fails to
+print.
+
 ## Examples
 
 The `examples/` directory includes endpoint and connection-string grammars,
 JSON, HTTP ranges, IP addresses, recursive Scheme syntax, contextual printing,
-and Schema error integration.
+Schema error integration, and a binary DNS message codec.
