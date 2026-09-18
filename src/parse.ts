@@ -9,7 +9,18 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { bind, caseFor, evaluate, type Frame, frame, isCount, materialize, Unbound } from "./env.ts"
+import {
+  bind,
+  caseFor,
+  copyFields,
+  evaluate,
+  type Frame,
+  frame,
+  isCount,
+  materialize,
+  nonByte,
+  Unbound,
+} from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./render.ts"
 
@@ -177,21 +188,14 @@ const go = (
       if (!isCount(count)) return failAt(state, `<${node.unit}>{${preview(count)}}`)
       const available = state.input.length - state.pos
       if (available < count) {
-        const subject = node.name === undefined ? "" : `${node.name}: `
-        return failAt(
-          state,
-          node.unit === "char"
-            ? `${count} chars`
-            : `${subject}${count} bytes but only ${available} remain`,
-        )
+        if (node.unit === "char") return failAt(state, `${count} chars`)
+        const expected = `${count} bytes but only ${available} remain`
+        return failAt(state, node.name === undefined ? expected : `${node.name}: ${expected}`)
       }
       const value = state.input.slice(state.pos, state.pos + count)
       if (node.unit === "byte") {
-        for (let index = 0; index < count; index++) {
-          if (value.charCodeAt(index) > 0xff) {
-            return failAtPosition(state, state.pos + index, "a byte")
-          }
-        }
+        const index = value.search(nonByte)
+        if (index !== -1) return failAtPosition(state, state.pos + index, "a byte")
       }
       state.pos += count
       return value
@@ -217,15 +221,7 @@ const go = (
         const value = go(part.grammar, state, env)
         if (value === Fail) return Fail
         if (!Predicate.isObject(value)) return failAtPosition(state, start, "an object to merge")
-        for (const key of part.keys) {
-          if (!Object.hasOwn(value, key)) continue
-          Object.defineProperty(merged, key, {
-            value: value[key],
-            writable: true,
-            enumerable: true,
-            configurable: true,
-          })
-        }
+        copyFields(merged, value, part.keys)
       }
       return merged
     }

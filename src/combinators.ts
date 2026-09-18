@@ -367,11 +367,13 @@ export const filter: {
   ): Grammar<B>
   <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string): Grammar<A>
 } = F.dual(3, <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string) =>
-  plainTransform(
-    inner,
-    { decode: F.identity<A>, encode: F.identity<A>, is: predicate, name, keys: keysOf(inner) },
-    "claimed-iso",
-  ),
+  iso(inner, {
+    decode: F.identity,
+    encode: F.identity,
+    is: predicate,
+    name,
+    keys: keysOf(inner),
+  }),
 )
 
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
@@ -489,25 +491,22 @@ type MergeValue<Parts extends ReadonlyArray<GrammarInternal>> = Types.Simplify<
 >
 
 export const merge = <const Parts extends readonly [GrammarInternal, ...Array<GrammarInternal>]>(
-  ...parts: Parts
+  ...grammars: Parts
 ): Grammar<MergeValue<Parts>> => {
-  const seen = new Set<string>()
-  return make({
-    _tag: "Merge",
-    parts: parts.map((grammar, index) => {
-      const keys = keysOf(grammar)
-      if (keys === undefined) {
-        throw new TypeError(
-          `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, or a transform that declares keys`,
-        )
-      }
-      for (const key of keys) {
-        if (seen.has(key)) throw new RangeError(`merge: duplicate field ${preview(key)}`)
-        seen.add(key)
-      }
-      return { grammar, keys }
-    }),
+  const parts = grammars.map((grammar, index) => {
+    const keys = keysOf(grammar)
+    if (keys === undefined) {
+      throw new TypeError(
+        `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, or a transform that declares keys`,
+      )
+    }
+    return { grammar, keys }
   })
+  assertUniqueKeys(
+    parts.flatMap((part) => part.keys),
+    "merge",
+  )
+  return make({ _tag: "Merge", parts })
 }
 
 export const sized = (

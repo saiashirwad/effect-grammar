@@ -174,7 +174,7 @@ const walk = (
       checkRef(node.scrutinee, "match", active, issues)
       break
     case "Take":
-      checkRef(node.count, "take", active, issues)
+      checkRef(node.count, node.unit === "char" ? "take" : "bytes", active, issues)
       break
     case "RepeatExact":
       checkRef(node.count, "repeat", active, issues)

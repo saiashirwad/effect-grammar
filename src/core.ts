@@ -39,8 +39,6 @@ export type Expr =
   | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
   | { readonly _tag: "Count"; readonly value: number }
 
-export type TakeUnit = "char" | "byte"
-
 export type Pattern =
   | RefExpr
   | { readonly _tag: "Const"; readonly value: Value }
@@ -132,7 +130,7 @@ export type Node =
   | {
       readonly _tag: "Take"
       readonly count: Expr
-      readonly unit: TakeUnit
+      readonly unit: "char" | "byte"
       readonly name?: string | undefined
     }
   | {

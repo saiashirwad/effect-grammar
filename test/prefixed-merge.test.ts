@@ -47,6 +47,12 @@ describe("filter", () => {
     assert.equal(parseOk(a, "a"), "a")
     assert.deepEqual(G.auditFidelity(a), [])
   })
+
+  it("supports the data-first form", () => {
+    const positive = G.filter(G.integer, (n) => n > 0, "positive")
+    assert.equal(parseOk(positive, "7"), 7)
+    assert.deepEqual(parseFail(positive, "0").expected, ["positive"])
+  })
 })
 
 describe("lengthPrefixed / countPrefixed", () => {
@@ -64,7 +70,7 @@ describe("lengthPrefixed / countPrefixed", () => {
     assert.deepEqual(parseOk(words, "2:ab;cd;"), ["ab", "cd"])
     assert.equal(printOk(words, ["x", "y", "z"]), "3:x;y;z;")
     assertRoundTrip(words, [])
-    parseFail(words, "3:ab;cd;")
+    assert.deepEqual(parseFail(words, "3:ab;cd;").expected, ["word"])
   })
 
   it("supports the data-last form", () => {
@@ -90,13 +96,24 @@ describe("merge", () => {
     assertRoundTrip(point, { x: -3, y: 0, name: "q" })
   })
 
-  it("reports a field by its flat path", () => {
+  it("reports a missing field by its flat path", () => {
     // SAFETY: deliberately omitting y to show the printer reports the flat path.
     const missing = { x: 1, name: "p" } as G.Type<typeof point>
     assert.match(printFail(point, missing).message, /^\.y: missing field/)
+  })
+
+  it("rejects unknown and unreadable fields", () => {
     // SAFETY: deliberately adding z to show unknown fields are rejected.
     const extra = { x: 1, y: 2, name: "p", z: 3 } as G.Type<typeof point>
     assert.match(printFail(point, extra).message, /unexpected own field/)
+    const unreadable = {
+      x: 1,
+      y: 2,
+      get name(): string {
+        throw new Error("boom")
+      },
+    }
+    assert.match(printFail(point, unreadable).message, /readable fields: boom/)
   })
 
   it("nests, and sees through filter and transforms that declare keys", () => {
@@ -121,7 +138,7 @@ describe("merge", () => {
     assert.throws(() => G.merge(G.struct({ x: G.integer }), G.integer), /no known fields/)
     assert.throws(
       () => G.merge(G.struct({ x: G.integer }), G.struct({ x: word })),
-      /duplicate field "x"/,
+      /duplicate key "x"/,
     )
   })
 })

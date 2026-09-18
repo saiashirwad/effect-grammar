@@ -11,7 +11,16 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, isByteString, isCount, Unbound } from "./env.ts"
+import {
+  caseFor,
+  copyFields,
+  evaluate,
+  type Frame,
+  frame,
+  isByteString,
+  isCount,
+  Unbound,
+} from "./env.ts"
 import {
   describeRoundTrip,
   exceptionMessage,
@@ -20,7 +29,7 @@ import {
   type PrintIssue,
 } from "./errors.ts"
 import { reparse } from "./parse.ts"
-import { unifyPattern } from "./pattern.ts"
+import { ownKeys, unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
 
 class Failure {
@@ -115,43 +124,31 @@ const outputMerge = (
   value: Value,
   env: Frame | undefined,
 ): string | Failure => {
-  if (!Predicate.isObject(value) || Array.isArray(value)) {
+  if (!Predicate.isObject(value)) {
     return fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
   }
-  const fields = node.parts.flatMap((part) => part.keys)
+  const keys = ownKeys(
+    value,
+    node.parts.flatMap((part) => part.keys),
+  )
+  if (!Array.isArray(keys)) return fail(keys)
+
   let text = ""
-  try {
-    const own = Reflect.ownKeys(value)
-    if (own.some((key) => !Predicate.isString(key) || !fields.includes(key))) {
+  for (const part of node.parts) {
+    const fields: Record<string, Value> = {}
+    try {
+      copyFields(fields, value, part.keys)
+    } catch (error) {
       return fail({
         _tag: "InvalidValue",
-        expected: `exactly the fields ${fields.join(", ")}`,
+        expected: "readable fields",
         actual: value,
-        detail: "unexpected own field",
+        detail: exceptionMessage(error),
       })
     }
-    for (const part of node.parts) {
-      const slice: Record<string, Value> = {}
-      for (const key of part.keys) {
-        if (!own.includes(key)) continue
-        Object.defineProperty(slice, key, {
-          value: value[key],
-          writable: true,
-          enumerable: true,
-          configurable: true,
-        })
-      }
-      const result = out(part.grammar, slice, env)
-      if (result instanceof Failure) return result
-      text += result
-    }
-  } catch (error) {
-    return fail({
-      _tag: "InvalidValue",
-      expected: `an inspectable object with exactly the fields ${fields.join(", ")}`,
-      actual: value,
-      detail: exceptionMessage(error),
-    })
+    const result = out(part.grammar, fields, env)
+    if (result instanceof Failure) return result
+    text += result
   }
   return text
 }
