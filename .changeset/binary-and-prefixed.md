@@ -15,5 +15,5 @@ Add byte-oriented grammars and the combinators they needed.
 - Add `filter`, which constrains a grammar's value with a predicate in both
   directions.
 - Add `merge`, which flattens object grammars into one object and keeps flat
-  field paths in print errors. Transform options accept `keys` so `merge` can
-  see through a transform.
+  field paths in print errors. Its parts are structs, object-returning gens,
+  other merges, `Binary.bits`, or a `filter` over one of those.

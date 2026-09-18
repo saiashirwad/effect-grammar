@@ -1,7 +1,7 @@
 import { Predicate, Result, Schema } from "effect"
 
 import { type CodecOptions, codecFrom } from "./codec.ts"
-import { iso, prefixedBy, takeBytes } from "./combinators.ts"
+import { iso, partialIso, prefixedBy, takeBytes, withKeys } from "./combinators.ts"
 import {
   type Grammar,
   type GrammarInternal,
@@ -15,12 +15,16 @@ import { PrintError } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
 
-export const hex = (bytes: Iterable<number>): string =>
+export const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
 
 export const Bit = Schema.Literals([0, 1])
-export const Uint = (size: number) =>
-  Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 ** size - 1 }))
+export const Uint = (size: number) => {
+  if (!Number.isInteger(size) || size < 1 || size > 53) {
+    throw new RangeError(`Uint: expected a width of 1 to 53 bits, got ${size}`)
+  }
+  return Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 ** size - 1 }))
+}
 export const Uint8 = Uint(8)
 export const Uint16 = Uint(16)
 export const Uint32 = Uint(32)
@@ -33,7 +37,7 @@ export class ParseError extends Schema.TaggedError<ParseError>()("BinaryParseErr
   override get message(): string {
     const expected =
       this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
-    const found = this.found === undefined ? "end of input" : `0x${hex([this.found])}`
+    const found = this.found === undefined ? "end of input" : `0x${hex(Uint8Array.of(this.found))}`
     return `byte ${this.offset}: expected ${expected}, found ${found}`
   }
 }
@@ -95,27 +99,35 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
     )
   }
   let shift = BigInt(width)
-  const slots = fields.map(([key, size]) => ({ key, size, shift: (shift -= BigInt(size)) }))
+  const slots = fields.map(([key, size]) => ({
+    key,
+    size,
+    shift: (shift -= BigInt(size)),
+    fits: Schema.is(Uint(size)),
+  }))
 
-  return word(width / 8, name).pipe(
+  const grammar = word(width / 8, name).pipe(
     iso({
       name,
-      keys: Object.keys(layout),
       decode: (value) =>
         // SAFETY: slots holds every key of the layout, each within its declared width.
         Object.fromEntries(
           slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
         ) as Bits<Layout>,
-      encode: (value: Bits<Layout>) =>
-        slots.reduce((result, { key, size, shift }) => {
+      encode: (value: Bits<Layout>) => {
+        const extra = Reflect.ownKeys(value).find((key) => !Object.hasOwn(layout, key))
+        if (extra !== undefined) throw new RangeError(`unexpected field ${String(extra)}`)
+        return slots.reduce((result, { key, size, shift, fits }) => {
           const field = value[key]
-          if (!Schema.is(Uint(size))(field)) {
+          if (!fits(field)) {
             throw new RangeError(`${key} must be an integer from 0 to ${2 ** size - 1}`)
           }
           return result | (BigInt(field) << shift)
-        }, 0n),
+        }, 0n)
+      },
     }),
   )
+  return withKeys(grammar, Object.keys(layout))
 }
 
 const asBytes = iso<string, Uint8Array>({
@@ -138,7 +150,7 @@ export const literal = (...values: ReadonlyArray<number>): Silent => {
   return silent({
     _tag: "Literal",
     value: toText(Uint8Array.from(values)),
-    name: values.map((value) => `0x${hex([value])}`).join(" "),
+    name: values.map((value) => `0x${hex(Uint8Array.of(value))}`).join(" "),
   })
 }
 
@@ -149,17 +161,21 @@ export const ascii = iso<Uint8Array, string>({
   encode: toBytes,
 })
 
-export const utf8 = iso<Uint8Array, string>({
+export const utf8 = partialIso<Uint8Array, string>({
   name: "utf8",
-  is: (value) => value.isWellFormed(),
   decode: (value) => {
     try {
-      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value)
+      return Result.succeed(
+        new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value),
+      )
     } catch {
-      throw new TypeError("valid UTF-8")
+      return Result.fail({ message: "valid UTF-8" })
     }
   },
-  encode: (value) => new TextEncoder().encode(value),
+  encode: (value) =>
+    value.isWellFormed()
+      ? Result.succeed(new TextEncoder().encode(value))
+      : Result.fail({ message: "expected a string without lone surrogates" }),
 })
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>

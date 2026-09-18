@@ -57,6 +57,20 @@ describe("unsigned integers", () => {
   })
 })
 
+describe("Uint", () => {
+  it("accepts exactly the values that fit the width", () => {
+    assert.ok(Schema.is(Binary.Uint(1))(1))
+    assert.ok(!Schema.is(Binary.Uint(1))(2))
+    assert.ok(Schema.is(Binary.Uint(53))(Number.MAX_SAFE_INTEGER))
+    assert.ok(!Schema.is(Binary.Uint(53))(2 ** 53))
+    assert.ok(!Schema.is(Binary.Uint(8))(1.5))
+  })
+
+  it("rejects widths a number cannot hold exactly", () => {
+    for (const size of [0, -1, 1.5, 54]) assert.throws(() => Binary.Uint(size), /1 to 53 bits/)
+  })
+})
+
 describe("bits", () => {
   const flags = Binary.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 })
 
@@ -78,6 +92,16 @@ describe("bits", () => {
     assert.deepEqual(parseOk(wide, ...printOk(wide, value)), value)
   })
 
+  it("rejects fields outside the layout when printing unchecked", () => {
+    const byte = Binary.bits({ a: 8 })
+    // SAFETY: deliberately adding a field to show the printer rejects it.
+    const extra = { a: 1, extra: true } as G.Type<typeof byte>
+    assert.match(printFail(byte, extra).message, /unexpected field extra/)
+    // SAFETY: deliberately adding a symbol field to show the printer rejects it.
+    const symbolic = { a: 1, [Symbol("s")]: 1 } as G.Type<typeof byte>
+    assert.match(printFail(byte, symbolic).message, /unexpected field Symbol\(s\)/)
+  })
+
   it("names the field that does not fit", () => {
     const value = { qr: 1, opcode: 16, aa: 0, tc: 0, rd: 0, ra: 0, z: 0, rcode: 0 } as const
     assert.match(printFail(flags, value).message, /opcode must be an integer from 0 to 15/)
@@ -85,10 +109,11 @@ describe("bits", () => {
 
   it("reports truncated input with the bytes that remain", () => {
     const error = parseFail(flags, 0x85)
-    assert.equal(error.offset, 0)
+    assert.equal(error.offset, 1)
+    assert.equal(error.found, undefined)
     assert.equal(
       error.message,
-      "byte 0: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4: 2 bytes but only 1 remain, found 0x85",
+      "byte 1: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4: 2 bytes but only 1 remain, found end of input",
     )
   })
 
@@ -165,7 +190,7 @@ describe("ascii / utf8", () => {
     assert.equal(parseOk(utf8, 3, 0xe2, 0x82, 0xac), "€")
     assert.deepEqual(printOk(utf8, "€"), [3, 0xe2, 0x82, 0xac])
     assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
-    assert.match(printFail(utf8, "\ud800").message, /expected utf8/)
+    assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
   })
 
   it("keeps a byte order mark", () => {
@@ -175,6 +200,11 @@ describe("ascii / utf8", () => {
   it("rejects bytes and characters outside ASCII", () => {
     assert.deepEqual(parseFail(ascii, 1, 0x80).expected, ["ascii"])
     assert.match(printFail(ascii, "é").message, /expected ascii/)
+  })
+
+  it("reports utf8 as partial and ascii as a guarded inverse", () => {
+    assert.deepEqual(G.auditFidelity(utf8), [{ name: "utf8", fidelity: "partial" }])
+    assert.deepEqual(G.auditFidelity(ascii), [])
   })
 
   it("formats bytes as hex", () => {
@@ -208,7 +238,10 @@ describe("codec", () => {
     const issue = Effect.runSync(
       Schema.decodeEffect(FrameFromBytes)(wire.slice(0, 6)).pipe(Effect.flip),
     ).issue
-    assert.match(formatIssue(issue), /byte 5: expected 2 bytes but only 1 remain, found 0x62/)
+    assert.match(
+      formatIssue(issue),
+      /byte 6: expected 2 bytes but only 1 remain, found end of input/,
+    )
   })
 
   it("reports encode failures by field path", () => {

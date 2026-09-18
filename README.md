@@ -88,15 +88,16 @@ is intentionally not a proof of all behavior.
 
 `take(count)` reads a fixed number of UTF-16 code units; the count is a number
 or a ref bound earlier in the same `gen`. `lengthPrefixed(length)` and
-`countPrefixed(item, count)` parse a prefix and then that many characters or
-items, and derive the prefix from the value when printing, so the value does not
-carry it. `filter(predicate, name)` keeps a grammar's value only when the
+`countPrefixed(item, count)` parse a prefix and then that many UTF-16 code units
+or items, and derive the prefix from the value when printing, so the value does
+not carry it. `filter(predicate, name)` keeps a grammar's value only when the
 predicate accepts it, in both directions.
 
 `merge(...parts)` sequences grammars that produce objects and flattens their
 fields into one object. Each part must have statically known fields: a `struct`,
-a `gen` that returns an object, another `merge`, or a transform that declares
-`keys`. Printing splits the value by those fields, so errors keep flat paths.
+a `gen` that returns an object, another `merge`, `Binary.bits`, or a `filter`
+over any of these. A general transform is rejected, because its fields cannot be
+known. Printing splits the value by those fields, so errors keep flat paths.
 Duplicate fields are rejected on construction.
 
 `suspend(() => grammar)` enables recursive definitions. Its thunk is evaluated
@@ -161,14 +162,17 @@ Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
   highest. A one-bit field has type `0 | 1`; wider fields are numbers of up to
   53 bits. Printing rejects a field that does not fit its width.
 - `bytes(count)` reads a `Uint8Array` of a constant or previously bound length,
-  `lengthPrefixed(length)` derives its prefix when printing, and
+  `lengthPrefixed(length)` derives its prefix, a byte count, when printing, and
   `literal(...bytes)` matches a fixed sequence such as a magic number.
 - `ascii` and `utf8` turn a `Uint8Array` grammar into a string grammar. Invalid
-  bytes fail to parse and unencodable strings fail to print.
-- `Bit`, `Uint(bits)`, `Uint8`, `Uint16`, and `Uint32` are schemas for the
-  values these grammars produce, and `hex(bytes)` formats bytes for display.
+  bytes fail to parse and unencodable strings fail to print; `auditFidelity`
+  lists `utf8` as partial.
+- `Bit`, `Uint(bits)` for 1 to 53 bits, `Uint8`, `Uint16`, and `Uint32` are
+  schemas for the values these grammars produce, and `hex(bytes)` formats a
+  `Uint8Array` for display.
 - `parse`, `print`, `printChecked`, and `codec` mirror the text operations over
-  `Uint8Array`. Parse failures report a byte offset and the byte found.
+  `Uint8Array`. Parse failures report a byte offset and the byte found; input
+  that ends inside a fixed-width field fails at the end of the input.
 
 A grammar that prints a character above `0xff` cannot be encoded and fails to
 print.

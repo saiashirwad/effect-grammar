@@ -268,7 +268,6 @@ export interface TransformOptions<A, B> {
   readonly encode: (b: B) => A
   readonly is?: (value: B) => boolean
   readonly name?: string
-  readonly keys?: ReadonlyArray<string> | undefined
 }
 
 const attempt =
@@ -293,7 +292,6 @@ const plainTransform = <A, B>(
     encode: attempt(options.encode),
     is: options.is,
     name: options.name,
-    keys: options.keys,
     fidelity,
   })
 
@@ -320,7 +318,6 @@ export interface TransformOrFailOptions<A, B> {
   readonly encode: (b: B) => Result.Result<A, GrammarIssue>
   readonly is?: (value: B) => boolean
   readonly name?: string
-  readonly keys?: ReadonlyArray<string> | undefined
 }
 
 /** {@link transform} with directions that return a `Result`. No law is claimed. */
@@ -364,13 +361,10 @@ export const filter: {
   ): Grammar<B>
   <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string): Grammar<A>
 } = F.dual(3, <A>(inner: Grammar<A>, predicate: (value: A) => boolean, name: string) =>
-  iso(inner, {
-    decode: F.identity,
-    encode: F.identity,
-    is: predicate,
-    name,
-    keys: keysOf(inner),
-  }),
+  withKeys(
+    iso(inner, { decode: F.identity, encode: F.identity, is: predicate, name }),
+    keysOf(inner),
+  ),
 )
 
 export interface DecodeToOptions<A, T> extends Omit<TransformOptions<A, T>, "is"> {
@@ -483,6 +477,14 @@ const keysOf = (grammar: GrammarInternal): ReadonlyArray<string> | undefined => 
   }
 }
 
+export const withKeys = <A>(
+  grammar: Grammar<A>,
+  keys: ReadonlyArray<string> | undefined,
+): Grammar<A> => {
+  const node = nodeOf(grammar)
+  return keys === undefined || node._tag !== "Transform" ? grammar : make({ ...node, keys })
+}
+
 type MergeValue<Parts extends ReadonlyArray<GrammarInternal>> = Types.Simplify<
   Types.UnionToIntersection<Type<Parts[number]>>
 >
@@ -494,7 +496,7 @@ export const merge = <const Parts extends readonly [GrammarInternal, ...Array<Gr
     const keys = keysOf(grammar)
     if (keys === undefined) {
       throw new TypeError(
-        `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, or a transform that declares keys`,
+        `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, another merge, or Binary.bits`,
       )
     }
     return { grammar, keys }

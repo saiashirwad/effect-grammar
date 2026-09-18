@@ -190,7 +190,11 @@ const go = (
       if (available < count) {
         if (node.unit === "char") return failAt(state, `${count} chars`)
         const expected = `${count} bytes but only ${available} remain`
-        return failAt(state, node.name === undefined ? expected : `${node.name}: ${expected}`)
+        return failAtPosition(
+          state,
+          state.input.length,
+          node.name === undefined ? expected : `${node.name}: ${expected}`,
+        )
       }
       const value = state.input.slice(state.pos, state.pos + count)
       if (node.unit === "byte") {

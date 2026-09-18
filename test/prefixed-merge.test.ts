@@ -116,22 +116,19 @@ describe("merge", () => {
     assert.match(printFail(point, unreadable).message, /readable fields: boom/)
   })
 
-  it("nests, and sees through filter and transforms that declare keys", () => {
-    const tagged = G.literal("!").pipe(
-      G.as("bang" as const),
-      G.iso({
-        decode: (kind) => ({ kind }),
-        encode: ({ kind }: { readonly kind: "bang" }) => kind,
-        keys: ["kind"],
-      }),
-    )
+  it("nests and sees through filter", () => {
     const nested = G.merge(
       point.pipe(G.filter((value) => value.x >= 0, "a point right of the origin")),
-      tagged,
+      G.struct({ kind: word.pipe(G.prefix("!")) }),
     )
     const value: G.Type<typeof nested> = { x: 1, y: 2, name: "p", kind: "bang" }
-    assert.deepEqual(parseOk(nested, "1,2;p!"), value)
-    assert.equal(printOk(nested, value), "1,2;p!")
+    assert.deepEqual(parseOk(nested, "1,2;p!bang"), value)
+    assert.equal(printOk(nested, value), "1,2;p!bang")
+  })
+
+  it("rejects a transform, whose fields it cannot know", () => {
+    const wrapped = word.pipe(G.iso({ decode: (w) => ({ w }), encode: ({ w }) => w }))
+    assert.throws(() => G.merge(G.struct({ x: G.integer }), wrapped), /no known fields/)
   })
 
   it("rejects parts without known fields and duplicate fields", () => {
