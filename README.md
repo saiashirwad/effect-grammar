@@ -135,20 +135,19 @@ const header = Grammar.merge(
   Grammar.struct({ qdcount: Binary.uint16 }),
 )
 
-const { Bit, Uint16 } = Binary
 const Header = Binary.codec(
   header,
   Schema.Struct({
-    id: Uint16,
-    qr: Bit,
+    id: Binary.Uint16,
+    qr: Binary.Bit,
     opcode: Binary.Uint(4),
-    aa: Bit,
-    tc: Bit,
-    rd: Bit,
-    ra: Bit,
+    aa: Binary.Bit,
+    tc: Binary.Bit,
+    rd: Binary.Bit,
+    ra: Binary.Bit,
     z: Binary.Uint(3),
     rcode: Binary.Uint(4),
-    qdcount: Uint16,
+    qdcount: Binary.Uint16,
   }),
 )
 

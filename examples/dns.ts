@@ -1,65 +1,62 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import * as Binary from "../src/binary.ts"
-import * as Grammar from "../src/index.ts"
+import * as B from "../src/binary.ts"
+import * as G from "../src/index.ts"
 
-const header = Grammar.merge(
-  Grammar.struct({ id: Binary.uint16 }),
-  Binary.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 }),
-  Grammar.struct({
-    qdcount: Binary.uint16,
-    ancount: Binary.uint16,
-    nscount: Binary.uint16,
-    arcount: Binary.uint16,
+const header = G.merge(
+  G.struct({ id: B.uint16 }),
+  B.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 }),
+  G.struct({
+    qdcount: B.uint16,
+    ancount: B.uint16,
+    nscount: B.uint16,
+    arcount: B.uint16,
   }),
 )
 
-const label = Binary.uint8.pipe(
-  Grammar.filter((length) => length >= 1 && length <= 63, "label length"),
-  Binary.lengthPrefixed,
-  Binary.ascii,
+const label = B.uint8.pipe(
+  G.filter((length) => length >= 1 && length <= 63, "label length"),
+  B.lengthPrefixed,
+  B.ascii,
 )
 
-const question = Grammar.struct({
-  qname: Grammar.many(label).pipe(Grammar.suffix(Binary.literal(0))),
-  qtype: Binary.uint16,
-  qclass: Binary.uint16,
+const question = G.struct({
+  qname: G.many(label).pipe(G.suffix(B.literal(0))),
+  qtype: B.uint16,
+  qclass: B.uint16,
 })
 
-const query = Grammar.gen(function* () {
+const query = G.gen(function* () {
   const head = yield* header
-  const questions = yield* Grammar.repeat(question, head.qdcount)
+  const questions = yield* G.repeat(question, head.qdcount)
   return { header: head, questions }
 })
 
-const { Bit, Uint16 } = Binary
-const Nibble = Binary.Uint(4)
-
 const DnsHeader = Schema.Struct({
-  id: Uint16,
-  qr: Bit,
-  opcode: Nibble,
-  aa: Bit,
-  tc: Bit,
-  rd: Bit,
-  ra: Bit,
-  z: Binary.Uint(3),
-  rcode: Nibble,
-  qdcount: Uint16,
-  ancount: Uint16,
-  nscount: Uint16,
-  arcount: Uint16,
+  id: B.Uint16,
+  qr: B.Bit,
+  opcode: B.Uint(4),
+  aa: B.Bit,
+  tc: B.Bit,
+  rd: B.Bit,
+  ra: B.Bit,
+  z: B.Uint(3),
+  rcode: B.Uint(4),
+  qdcount: B.Uint16,
+  ancount: B.Uint16,
+  nscount: B.Uint16,
+  arcount: B.Uint16,
 })
 
 const DnsQuery = Schema.Struct({
   header: DnsHeader,
   questions: Schema.Array(
-    Schema.Struct({ qname: Schema.Array(Schema.String), qtype: Uint16, qclass: Uint16 }),
+    Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.Uint16, qclass: B.Uint16 }),
   ),
 })
 
-export const HeaderFromUint8Array = Binary.codec(header, DnsHeader, { identifier: "DnsHeader" })
-export const QueryFromUint8Array = Binary.codec(query, DnsQuery, { identifier: "DnsQuery" })
+export const HeaderFromUint8Array = B.codec(header, DnsHeader, { identifier: "DnsHeader" })
+export const QueryFromUint8Array = B.codec(query, DnsQuery, { identifier: "DnsQuery" })
 
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
@@ -80,7 +77,7 @@ const packet = Uint8Array.from([
 ])
 
 Effect.gen(function* () {
-  yield* Console.log(`grammar ${Grammar.render(query)}\n`)
+  yield* Console.log(`grammar ${G.render(query)}\n`)
 
   const head = yield* Schema.decodeEffect(HeaderFromUint8Array)(packet.slice(0, 12))
   yield* Console.log(`header  ${yield* headerJson(head)}`)
@@ -89,7 +86,7 @@ Effect.gen(function* () {
   yield* Console.log(`query   ${yield* questionsJson(decoded.questions)}`)
 
   const encoded = yield* Schema.encodeEffect(QueryFromUint8Array)(decoded)
-  yield* Console.log(`encode  ${Binary.hex(encoded)}\n`)
+  yield* Console.log(`encode  ${B.hex(encoded)}\n`)
 
   yield* Schema.encodeEffect(QueryFromUint8Array)({
     ...decoded,
