@@ -21,7 +21,7 @@ const label = Binary.uint8.pipe(
 )
 
 const question = Grammar.struct({
-  qname: Grammar.many(label, { min: 1 }).pipe(Grammar.suffix(Binary.literal(0))),
+  qname: Grammar.many(label).pipe(Grammar.suffix(Binary.literal(0))),
   qtype: Binary.uint16,
   qclass: Binary.uint16,
 })
