@@ -72,6 +72,8 @@ reparses to an equal value. `choiceOn(tag, cases)` instead dispatches printing
 from an existing discriminant field; parsing is still ordered and can remain
 ambiguous. `taggedChoice(tag, cases)` wraps each branch's value as
 `{ [tag]: key, value }` and dispatches by that generated tag.
+`literals(...strings)` is an ordered choice of strings whose value is the string
+that matched.
 
 For explicit branch order or number/boolean discriminants, pass `choiceOn` an
 array of `[key, grammar]` entries. Object-form `choiceOn` and `taggedChoice`
@@ -86,8 +88,9 @@ advance the cursor; zero-width items fail rather than loop. `validate`/`prepare`
 report repetitions whose item can be proved to match empty input, but validation
 is intentionally not a proof of all behavior.
 
-`take(count)` reads a fixed number of UTF-16 code units; the count is a number
-or a ref bound earlier in the same `gen`. `lengthPrefixed(length)` and
+`take(count)` reads a fixed number of UTF-16 code units and
+`repeat(item, count)` a fixed number of items; the count is a number or a ref
+bound earlier in the same `gen`. `lengthPrefixed(length)` and
 `countPrefixed(item, count)` parse a prefix and then that many UTF-16 code units
 or items, and derive the prefix from the value when printing, so the value does
 not carry it. `filter(predicate, name)` keeps a grammar's value only when the
@@ -155,8 +158,13 @@ Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
 // { id: 48879, qr: 0, opcode: 0, aa: 0, tc: 0, rd: 1, ra: 0, z: 0, rcode: 0, qdcount: 1 }
 ```
 
-- `uint8`, `uint16`, and `uint32` are big-endian; `uint16le` and `uint32le` are
-  little-endian.
+- `uint8` to `uint64`, `int8` to `int64`, `float32`, and `float64` are
+  big-endian; the `le` suffix, as in `uint16le`, reads little-endian. 64-bit
+  integers are bigints. `float32` prints only numbers that single precision
+  holds exactly.
+- `varuint` is unsigned LEB128 and `varint` its zigzag-encoded signed form, both
+  within the safe integer range. Parsing accepts padded encodings; printing
+  writes the shortest one.
 - `bits(layout)` splits a whole number of bytes into named fields, first field
   highest. A one-bit field has type `0 | 1`; wider fields are numbers of up to
   53 bits. Printing rejects a field that does not fit its width.
@@ -166,9 +174,9 @@ Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
 - `ascii` and `utf8` turn a `Uint8Array` grammar into a string grammar. Invalid
   bytes fail to parse and unencodable strings fail to print; `auditFidelity`
   lists `utf8` as partial.
-- `Bit`, `Uint(bits)` for 1 to 53 bits, `Uint8`, `Uint16`, and `Uint32` are
-  schemas for the values these grammars produce, and `hex(bytes)` formats a
-  `Uint8Array` for display.
+- `Bit`, `Uint(bits)` and `Int(bits)` for 1 to 53 bits, `Uint8` to `Uint64`, and
+  `Int8` to `Int64` are schemas for the values these grammars produce, and
+  `hex(bytes)` formats a `Uint8Array` for display.
 - `parse`, `print`, `printChecked`, and `codec` mirror the text operations over
   `Uint8Array`. Parse failures report a byte offset and the byte found; input
   that ends inside a fixed-width field fails at the end of the input.
