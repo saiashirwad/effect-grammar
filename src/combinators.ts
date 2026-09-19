@@ -485,9 +485,12 @@ export const withKeys = <A>(
   return keys === undefined || node._tag !== "Transform" ? grammar : make({ ...node, keys })
 }
 
-type MergeValue<Parts extends ReadonlyArray<GrammarInternal>> = Types.Simplify<
-  Types.UnionToIntersection<Type<Parts[number]>>
->
+type MergeValue<Parts extends ReadonlyArray<GrammarInternal>> =
+  Types.UnionToIntersection<
+    { [K in keyof Parts]: { readonly value: Type<Parts[K]> } }[number]
+  > extends { readonly value: infer Value }
+    ? Types.Simplify<Value>
+    : never
 
 export const merge = <const Parts extends readonly [GrammarInternal, ...Array<GrammarInternal>]>(
   ...grammars: Parts

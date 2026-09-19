@@ -140,6 +140,13 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
     }),
   )
+
+  it.effect("does not let ascii claim a number in a choice", () =>
+    Effect.sync(() => {
+      const either = G.choice(Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii), Binary.uint8)
+      assert.deepEqual(printOk(either, 65), [65])
+    }),
+  )
 })
 
 describe("codec", () => {

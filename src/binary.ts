@@ -156,7 +156,7 @@ export const literal = (...values: ReadonlyArray<number>): Silent => {
 
 export const ascii = iso<Uint8Array, string>({
   name: "ascii",
-  is: (value) => /^[\0-\x7f]*$/.test(value),
+  is: (value) => Predicate.isString(value) && /^[\0-\x7f]*$/.test(value),
   decode: toText,
   encode: toBytes,
 })
