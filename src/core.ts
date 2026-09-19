@@ -112,6 +112,8 @@ export type Node =
       readonly name?: string | undefined
       readonly keys?: ReadonlyArray<string> | undefined
       readonly fidelity: Fidelity
+      /** Decoding accepts every inner match, so the transform matches empty input when its inner grammar does. */
+      readonly total?: boolean | undefined
     }
   | {
       readonly _tag: "Skip"

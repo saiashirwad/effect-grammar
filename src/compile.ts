@@ -73,8 +73,11 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
     }
     case "Optional":
       return "yes"
-    case "Transform":
-      return "unknown"
+    case "Transform": {
+      // A transform consumes what its inner grammar does, but its decode may reject an empty match.
+      const inner = matchesEmpty(node.inner, seen)
+      return inner === "yes" && node.total !== true ? "unknown" : inner
+    }
     case "Label":
     case "Skip":
       return matchesEmpty(node.inner, seen)
@@ -125,6 +128,18 @@ const checkRef = (
   }
 }
 
+const checkProgress = (
+  inner: GrammarInternal,
+  repetition: string,
+  issues: Array<GrammarIssue>,
+): void => {
+  if (matchesEmpty(inner, new Set()) === "yes") {
+    issues.push({
+      message: `${repetition} of ${describe(inner)}, which can match the empty string, so parsing and printing would disagree about zero-width elements`,
+    })
+  }
+}
+
 const sameScopePath = (left: ReadonlyArray<ScopeId>, right: ReadonlyArray<ScopeId>): boolean =>
   left.length === right.length && left.every((scope, index) => scope === right[index])
 
@@ -143,10 +158,12 @@ const walk = (
       return
     }
     case "Many":
-      if (node.max > 0 && matchesEmpty(node.inner, new Set()) === "yes") {
-        issues.push({
-          message: `${node.max === Number.POSITIVE_INFINITY ? "unbounded repetition" : "repetition"} of ${describe(node.inner)}, which can match the empty string, so parsing and printing would disagree about zero-width elements`,
-        })
+      if (node.max > 0) {
+        checkProgress(
+          node.inner,
+          node.max === Number.POSITIVE_INFINITY ? "unbounded repetition" : "repetition",
+          issues,
+        )
       }
       break
     case "Suspend":
@@ -179,6 +196,10 @@ const walk = (
       break
     case "RepeatExact":
       checkRef(node.count, "repeat", active, issues)
+      // A bound count may be zero at run time, but like `many` with a max it is checked anyway.
+      if (node.count._tag !== "Count" || node.count.value > 0) {
+        checkProgress(node.inner, "repetition", issues)
+      }
       break
     default:
       break

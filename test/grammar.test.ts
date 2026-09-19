@@ -765,6 +765,15 @@ describe("as / flag / skip", () => {
     }),
   )
 
+  it.effect("literals tries longer strings first, whatever order they are listed in", () =>
+    Effect.sync(() => {
+      const op = G.literals("", ">", "<", ">=")
+      assert.equal(parseOk(op, ">="), ">=")
+      assert.equal(parseOk(op, ""), "")
+      assert.equal(G.render(G.literals(">", "<", ">=")), '(">=" | ">" | "<")')
+    }),
+  )
+
   it.effect("flag is presence as a boolean", () =>
     Effect.sync(() => {
       const g = G.gen(function* () {

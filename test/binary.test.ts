@@ -85,6 +85,10 @@ describe("varints", () => {
         "a varuint within the safe integer range",
       ])
       assert.deepEqual(parseFail(Binary.varuint, 0x80).expected, ["varuint"])
+      assert.equal(parseOk(Binary.varuint, 0x81, ...Array(7).fill(0x80), 0x00), 1)
+      assert.deepEqual(parseFail(Binary.varuint, ...Array(9).fill(0xff), 0x01).expected, [
+        "a varuint within the safe integer range",
+      ])
       assert.match(printFail(Binary.varuint, -1).message, /non-negative safe integer/)
     }),
   )
@@ -97,6 +101,10 @@ describe("varints", () => {
         assert.equal(parseOk(Binary.varint, ...printOk(Binary.varint, value)), value)
       }
       assert.match(printFail(Binary.varint, 2 ** 52).message, /-\(2 \*\* 52\) to 2 \*\* 52 - 1/)
+      assert.deepEqual(parseFail(Binary.varint, 0x80).expected, ["varint"])
+      assert.deepEqual(parseFail(Binary.varint, ...Array(7).fill(0xff), 0x7f).expected, [
+        "a varint from -(2 ** 52) to 2 ** 52 - 1",
+      ])
     }),
   )
 })
@@ -201,11 +209,38 @@ describe("bytes / lengthPrefixed / literal", () => {
     }),
   )
 
-  it.effect("shows bytes as hex in print errors, including inside a value", () =>
+  it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
       const either = G.choice(Binary.bytes(1), G.struct({ body: Binary.bytes(1) }))
-      assert.match(printFail(either, Uint8Array.of(7, 0xab)).message, /<07 ab>/)
-      assert.match(printFail(either, { body: Uint8Array.of(7, 0xab) }).message, /"body":"<07 ab>"/)
+      assert.equal(
+        printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message,
+        "expected 1 bytes, got <07 ab>",
+      )
+      assert.equal(
+        printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
+        [
+          'no choice branch accepts {"body":<07 ab>}:',
+          '  expected bytes, got {"body":<07 ab>}',
+          "  .body: expected 1 bytes, got <07 ab>",
+        ].join("\n"),
+      )
+      assert.match(printFail(either, Buffer.from([7, 0xab])).message, /accepts <07 ab>:/)
+      // A string that merely looks like hex stays quoted.
+      // SAFETY: deliberately printing a string where bytes are expected.
+      assert.match(printFail(either, "<07 ab>" as never).message, /accepts "<07 ab>":/)
+    }),
+  )
+
+  it.effect("shows a bigint inside a value in print errors", () =>
+    Effect.sync(() => {
+      const either = G.choice(
+        Binary.uint8,
+        G.struct({ id: Binary.uint64, tags: G.repeat(Binary.int64, 1) }),
+      )
+      assert.match(
+        printFail(either, { id: -1n, tags: [5n] }).message,
+        /no choice branch accepts \{"id":-1n,"tags":\[5n\]\}:/,
+      )
     }),
   )
 

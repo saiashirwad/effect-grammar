@@ -72,8 +72,9 @@ reparses to an equal value. `choiceOn(tag, cases)` instead dispatches printing
 from an existing discriminant field; parsing is still ordered and can remain
 ambiguous. `taggedChoice(tag, cases)` wraps each branch's value as
 `{ [tag]: key, value }` and dispatches by that generated tag.
-`literals(...strings)` is an ordered choice of strings whose value is the string
-that matched.
+`literals(...strings)` is a choice of strings whose value is the string that
+matched. It tries longer strings first, so `literals(">", ">=")` still reads
+`>=`.
 
 For explicit branch order or number/boolean discriminants, pass `choiceOn` an
 array of `[key, grammar]` entries. Object-form `choiceOn` and `taggedChoice`
@@ -162,9 +163,10 @@ Schema.decodeSync(Header)(Uint8Array.of(0xbe, 0xef, 0x01, 0x00, 0x00, 0x01))
   big-endian; the `le` suffix, as in `uint16le`, reads little-endian. 64-bit
   integers are bigints. `float32` prints only numbers that single precision
   holds exactly.
-- `varuint` is unsigned LEB128 and `varint` its zigzag-encoded signed form, both
-  within the safe integer range. Parsing accepts padded encodings; printing
-  writes the shortest one.
+- `varuint` is unsigned LEB128 within the safe integer range, and `varint` its
+  zigzag-encoded signed form for integers from `-(2 ** 52)` to `2 ** 52 - 1`.
+  Parsing accepts padded encodings of any length; printing writes the shortest
+  one.
 - `bits(layout)` splits a whole number of bytes into named fields, first field
   highest. A one-bit field has type `0 | 1`; wider fields are numbers of up to
   53 bits. Printing rejects a field that does not fit its width.

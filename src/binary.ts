@@ -10,15 +10,17 @@ import {
   silent,
   type Value,
 } from "./core.ts"
-import { isCount, nonByte } from "./env.ts"
+import { isCount, nonByte, toBytes } from "./env.ts"
 import { describeExpected, hex, PrintError } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
 
 export { hex } from "./errors.ts"
 
+const isWidth = (size: number): boolean => Number.isInteger(size) && size >= 1 && size <= 53
+
 const assertWidth = (name: string, size: number): void => {
-  if (!Number.isInteger(size) || size < 1 || size > 53) {
+  if (!isWidth(size)) {
     throw new RangeError(`${name}: expected a width of 1 to 53 bits, got ${size}`)
   }
 }
@@ -64,9 +66,6 @@ const toText = (bytes: Uint8Array): string => {
   return binary
 }
 
-const toBytes = (binary: string): Uint8Array =>
-  Uint8Array.from(binary, (char) => char.charCodeAt(0))
-
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
   takeBytes(size, name).pipe(
     iso({
@@ -84,36 +83,40 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
     }),
   )
 
+const integer = <A extends number | bigint>(
+  size: number,
+  name: string,
+  schema: Schema.Codec<A>,
+  decode: (value: bigint) => A,
+  littleEndian: boolean,
+): Grammar<A> =>
+  word(size, name, littleEndian).pipe(iso({ name, decode, encode: BigInt, is: Schema.is(schema) }))
+
 const uint = (size: number, name: string, littleEndian = false): Grammar<number> =>
-  word(size, name, littleEndian).pipe(
-    iso({ name, decode: Number, encode: BigInt, is: Schema.is(Uint(8 * size)) }),
-  )
+  integer(size, name, Uint(8 * size), Number, littleEndian)
 
 const int = (size: number, name: string, littleEndian = false): Grammar<number> =>
-  word(size, name, littleEndian).pipe(
-    iso({
-      name,
-      decode: (value) => Number(BigInt.asIntN(8 * size, value)),
-      encode: BigInt,
-      is: Schema.is(Int(8 * size)),
-    }),
+  integer(
+    size,
+    name,
+    Int(8 * size),
+    (value) => Number(BigInt.asIntN(8 * size, value)),
+    littleEndian,
   )
 
 const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
-  word(8, name, littleEndian).pipe(
-    iso({ name, decode: F.identity, encode: F.identity, is: Schema.is(Uint64) }),
-  )
+  integer(8, name, Uint64, F.identity, littleEndian)
 
 const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
-  word(8, name, littleEndian).pipe(
-    iso({
-      name,
-      decode: (value) => BigInt.asIntN(64, value),
-      encode: F.identity,
-      is: Schema.is(Int64),
-    }),
-  )
+  integer(8, name, Int64, (value) => BigInt.asIntN(64, value), littleEndian)
 
+// Floats are read and written through one shared view, so a value costs no allocation.
+const scratch = new DataView(new ArrayBuffer(8))
+
+/**
+ * Every NaN prints as the quiet NaN the engine writes, so a payload or a
+ * signalling NaN in the input does not survive parsing and printing again.
+ */
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
   takeBytes(size, name).pipe(
     iso({
@@ -122,14 +125,19 @@ const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number>
       is: (value) =>
         Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)),
       decode: (binary) => {
-        const view = new DataView(toBytes(binary).buffer)
-        return size === 4 ? view.getFloat32(0, littleEndian) : view.getFloat64(0, littleEndian)
+        for (let index = 0; index < size; index++) scratch.setUint8(index, binary.charCodeAt(index))
+        return size === 4
+          ? scratch.getFloat32(0, littleEndian)
+          : scratch.getFloat64(0, littleEndian)
       },
       encode: (value) => {
-        const view = new DataView(new ArrayBuffer(size))
-        if (size === 4) view.setFloat32(0, value, littleEndian)
-        else view.setFloat64(0, value, littleEndian)
-        return toText(new Uint8Array(view.buffer))
+        if (size === 4) scratch.setFloat32(0, value, littleEndian)
+        else scratch.setFloat64(0, value, littleEndian)
+        let binary = ""
+        for (let index = 0; index < size; index++) {
+          binary += String.fromCharCode(scratch.getUint8(index))
+        }
+        return binary
       },
     }),
   )
@@ -155,41 +163,61 @@ export const float64 = float(8, "float64")
 export const float32le = float(4, "float32le", true)
 export const float64le = float(8, "float64le", true)
 
+// No length cap: a value too wide for a number is left for decoding to reject by range.
+const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
+
+/** The encoded number, or a value outside the safe integer range when it is too large to hold. */
+const fromLeb128 = (binary: string): number => {
+  let value = 0
+  for (let index = binary.length - 1; index >= 0; index--) {
+    value = value * 128 + (binary.charCodeAt(index) & 0x7f)
+  }
+  return value
+}
+
+const toLeb128 = (value: number): string => {
+  let binary = ""
+  let rest = value
+  while (rest >= 128) {
+    binary += String.fromCharCode((rest % 128) | 0x80)
+    rest = Math.floor(rest / 128)
+  }
+  return binary + String.fromCharCode(rest)
+}
+
 /**
  * Unsigned LEB128 within the safe integer range. Parsing accepts padded
- * encodings of up to eight bytes; printing writes the shortest one.
+ * encodings of any length; printing writes the shortest one.
  */
-export const varuint = regex(/[\x80-\xff]{0,7}[\0-\x7f]/, "varuint").pipe(
+export const varuint = leb128("varuint").pipe(
   partialIso({
     name: "varuint",
     decode: (binary) => {
-      const value = toBytes(binary).reduceRight((rest, byte) => rest * 128 + (byte & 0x7f), 0)
+      const value = fromLeb128(binary)
       return Number.isSafeInteger(value)
         ? Result.succeed(value)
         : Result.fail({ message: "a varuint within the safe integer range" })
     },
-    encode: (value) => {
-      if (!isCount(value)) return Result.fail({ message: "expected a non-negative safe integer" })
-      const bytes: Array<number> = []
-      let rest = value
-      while (rest >= 128) {
-        bytes.push((rest % 128) | 0x80)
-        rest = Math.floor(rest / 128)
-      }
-      bytes.push(rest)
-      return Result.succeed(toText(Uint8Array.from(bytes)))
-    },
+    encode: (value) =>
+      isCount(value)
+        ? Result.succeed(toLeb128(value))
+        : Result.fail({ message: "expected a non-negative safe integer" }),
   }),
 )
 
 /** Zigzag-encoded LEB128, as in protobuf `sint64`, for integers from -(2 ** 52) to 2 ** 52 - 1. */
-export const varint = varuint.pipe(
+export const varint = leb128("varint").pipe(
   partialIso({
     name: "varint",
-    decode: (value) => Result.succeed(value % 2 === 0 ? value / 2 : -(value + 1) / 2),
+    decode: (binary) => {
+      const value = fromLeb128(binary)
+      return Number.isSafeInteger(value)
+        ? Result.succeed(value % 2 === 0 ? value / 2 : -(value + 1) / 2)
+        : Result.fail({ message: "a varint from -(2 ** 52) to 2 ** 52 - 1" })
+    },
     encode: (value) =>
       Number.isSafeInteger(value) && value >= -(2 ** 52) && value < 2 ** 52
-        ? Result.succeed(value < 0 ? -2 * value - 1 : 2 * value)
+        ? Result.succeed(toLeb128(value < 0 ? -2 * value - 1 : 2 * value))
         : Result.fail({ message: "expected an integer from -(2 ** 52) to 2 ** 52 - 1" }),
   }),
 )
@@ -204,12 +232,7 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
   const fields = Object.entries(layout)
   const name = fields.map(([key, size]) => `${key}:${size}`).join(" ")
   const width = fields.reduce((total, [, size]) => total + size, 0)
-  if (
-    width % 8 !== 0 ||
-    fields.some(
-      ([key, size]) => /^\d+$/.test(key) || !Number.isInteger(size) || size < 1 || size > 53,
-    )
-  ) {
+  if (width % 8 !== 0 || fields.some(([key, size]) => /^\d+$/.test(key) || !isWidth(size))) {
     throw new RangeError(
       `bits: expected non-integer field names, widths of 1 to 53 bits, and a whole number of bytes, got ${name}`,
     )

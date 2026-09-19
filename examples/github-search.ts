@@ -89,7 +89,7 @@ const compareValue = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(CompareValueSchema)({
     decode: ({ op, value }) => ({ kind: "compare", op, value }),
-    encode: (v) => v,
+    encode: ({ op, value }) => ({ op, value }),
   }),
 )
 
@@ -104,7 +104,7 @@ const rangeValue = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(RangeValueSchema)({
     decode: ({ from, to }) => ({ kind: "range", from, to }),
-    encode: (v) => v,
+    encode: ({ from, to }) => ({ from, to }),
   }),
 )
 
@@ -133,7 +133,7 @@ const qualifier = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(QualifierSchema)({
     decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
-    encode: (q) => q,
+    encode: ({ negate, key, value }) => ({ negate, key, value }),
   }),
 )
 

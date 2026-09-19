@@ -284,6 +284,7 @@ const plainTransform = <A, B>(
   inner: Grammar<A>,
   options: TransformOptions<A, B>,
   fidelity: Fidelity,
+  total?: boolean,
 ): Grammar<B> =>
   make({
     _tag: "Transform",
@@ -293,6 +294,7 @@ const plainTransform = <A, B>(
     is: options.is,
     name: options.name,
     fidelity,
+    total,
   })
 
 const resultTransform = <A, B>(
@@ -386,23 +388,30 @@ export const as: {
   <const V>(value: V): (inner: Silent) => Grammar<V>
   <const V>(inner: Silent, value: V): Grammar<V>
 } = F.dual(2, <const V>(inner: Silent, value: V) =>
-  iso(inner, {
-    decode: () => value,
-    encode: () => undefined,
-    is: (input) => Equal.equals(input, value),
-    name: preview(value),
-  }),
+  plainTransform(
+    inner,
+    {
+      decode: () => value,
+      encode: () => undefined,
+      is: (input) => Equal.equals(input, value),
+      name: preview(value),
+    },
+    "claimed-iso",
+    true,
+  ),
 )
 
 /**
- * Ordered string alternatives whose value is the matched string. As with
- * `choice`, list a longer literal before any literal that is its prefix.
+ * String alternatives whose value is the matched string. Longer strings are
+ * tried first whatever order they are listed in, so a string is never shadowed
+ * by one of its own prefixes; strings of equal length keep their listed order.
  */
 export const literals = <const Values extends readonly [string, ...Array<string>]>(
   ...values: Values
 ): Grammar<Values[number]> => {
   if (values.length === 0) throw new RangeError("literals: at least one value is required")
-  return make({ _tag: "Choice", options: values.map((value) => as(literal(value), value)) })
+  const longestFirst = values.toSorted((left, right) => right.length - left.length)
+  return make({ _tag: "Choice", options: longestFirst.map((value) => as(literal(value), value)) })
 }
 
 export const flag = (value: Silent | string): Grammar<boolean> =>
