@@ -1,5 +1,6 @@
+import { describe, it } from "@effect/vitest"
+import { Effect } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
-import { describe, it } from "vitest"
 
 import * as Grammar from "../src/index.ts"
 import { assertRoundTrip } from "./helpers.ts"
@@ -55,38 +56,46 @@ const endpointArb = FastCheck.record({
 })
 
 describe("round-trip law: parse(print(a)) == a", () => {
-  it("integer", () => {
-    FastCheck.assert(
-      FastCheck.property(
-        FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }),
-        (n) => {
-          assertRoundTrip(Grammar.integer, n)
-        },
-      ),
-    )
-  })
+  it.effect("integer", () =>
+    Effect.sync(() => {
+      FastCheck.assert(
+        FastCheck.property(
+          FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }),
+          (n) => {
+            assertRoundTrip(Grammar.integer, n)
+          },
+        ),
+      )
+    }),
+  )
 
-  it("nested integer lists with lexemes", () => {
-    FastCheck.assert(
-      FastCheck.property(nestedArb, (value) => {
-        assertRoundTrip(nested, value)
-      }),
-    )
-  })
+  it.effect("nested integer lists with lexemes", () =>
+    Effect.sync(() => {
+      FastCheck.assert(
+        FastCheck.property(nestedArb, (value) => {
+          assertRoundTrip(nested, value)
+        }),
+      )
+    }),
+  )
 
-  it("gen grammar with optional and repeated bindings", () => {
-    FastCheck.assert(
-      FastCheck.property(endpointArb, (value) => {
-        assertRoundTrip(endpoint, value)
-      }),
-    )
-  })
+  it.effect("gen grammar with optional and repeated bindings", () =>
+    Effect.sync(() => {
+      FastCheck.assert(
+        FastCheck.property(endpointArb, (value) => {
+          assertRoundTrip(endpoint, value)
+        }),
+      )
+    }),
+  )
 
-  it("gen grammar with a length prefix", () => {
-    FastCheck.assert(
-      FastCheck.property(FastCheck.string({ maxLength: 64 }), (payload) => {
-        assertRoundTrip(netstring, { length: payload.length, payload })
-      }),
-    )
-  })
+  it.effect("gen grammar with a length prefix", () =>
+    Effect.sync(() => {
+      FastCheck.assert(
+        FastCheck.property(FastCheck.string({ maxLength: 64 }), (payload) => {
+          assertRoundTrip(netstring, { length: payload.length, payload })
+        }),
+      )
+    }),
+  )
 })

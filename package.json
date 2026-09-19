@@ -64,6 +64,7 @@
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
     "@effect/language-service": "^0.87.2",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/tsgo": "0.38.0",
     "@effect/vitest": "4.0.0-rc.112",
     "@oxlint/plugins": "1.80.0",
