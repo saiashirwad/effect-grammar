@@ -1,3 +1,5 @@
+// https://x.com/dillon_mulroy/status/1930248688716169588
+
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as B from "../src/binary.ts"
