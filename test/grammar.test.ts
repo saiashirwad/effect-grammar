@@ -396,6 +396,23 @@ describe("take / repeat", () => {
       assert.equal(G.render(g), 'n:<integer> "/" items:(<letter>){n}')
     }),
   )
+
+  it.effect("repeat accepts a constant count", () =>
+    Effect.sync(() => {
+      const pair = G.repeat(G.regex(/[a-z]/, "letter"), 2)
+      assert.deepEqual(parseOk(pair, "ab"), ["a", "b"])
+      assert.deepEqual(parseFail(pair, "a").expected, ["letter"])
+      assert.equal(printOk(pair, ["x", "y"]), "xy")
+      assert.match(printFail(pair, ["x"]).message, /2/)
+      assert.equal(G.render(pair), "(<letter>){2}")
+      assert.throws(
+        () => G.repeat(G.integer, -1),
+        /repeat: count must be a non-negative safe integer/,
+      )
+      assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 0))).length, 1)
+      assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 1))), [])
+    }),
+  )
 })
 
 describe("wrap / prefix / suffix", () => {
@@ -732,6 +749,28 @@ describe("as / flag / skip", () => {
       assert.equal(printOk(g, true), "yes")
       assert.equal(printOk(g, false), "no")
       assertRoundTrip(g, false)
+    }),
+  )
+
+  it.effect("literals yields the matched string and prints only its own strings", () =>
+    Effect.sync(() => {
+      const op = G.literals(">=", ">")
+      assert.equal(parseOk(op, ">="), ">=")
+      assert.equal(parseOk(op, ">"), ">")
+      assert.equal(printOk(op, ">"), ">")
+      assert.deepEqual(parseFail(op, "<").expected, ['">="', '">"'])
+      // SAFETY: deliberately printing a string outside the union.
+      assert.match(printFail(op, "<" as Grammar.Type<typeof op>).message, /expected ">"/)
+      assert.equal(G.render(op), '(">=" | ">")')
+    }),
+  )
+
+  it.effect("literals tries longer strings first, whatever order they are listed in", () =>
+    Effect.sync(() => {
+      const op = G.literals("", ">", "<", ">=")
+      assert.equal(parseOk(op, ">="), ">=")
+      assert.equal(parseOk(op, ""), "")
+      assert.equal(G.render(G.literals(">", "<", ">=")), '(">=" | ">" | "<")')
     }),
   )
 

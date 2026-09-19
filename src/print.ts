@@ -19,6 +19,7 @@ import {
   frame,
   nonByte,
   isCount,
+  toBytes,
   Unbound,
 } from "./env.ts"
 import {
@@ -335,17 +336,18 @@ const out = (
       }
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      if (value.length !== count) {
-        return fail({
-          _tag: "InvalidValue",
-          expected: node.unit === "char" ? `${count} UTF-16 code units` : `${count} bytes`,
-          actual: value,
-        })
+      if (node.unit === "char") {
+        return value.length === count
+          ? value
+          : fail({ _tag: "InvalidValue", expected: `${count} UTF-16 code units`, actual: value })
       }
-      if (node.unit === "byte" && nonByte.test(value)) {
+      if (nonByte.test(value)) {
         return fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
       }
-      return value
+      // A binary string is an encoding detail, so the error shows the bytes it stands for.
+      return value.length === count
+        ? value
+        : fail({ _tag: "InvalidValue", expected: `${count} bytes`, actual: toBytes(value) })
     }
     case "RepeatExact": {
       const count = evaluate(node.count, env)

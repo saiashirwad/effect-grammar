@@ -57,6 +57,24 @@ describe("validate", () => {
     }),
   )
 
+  it.effect("checks the item of a repeat unless its constant count is zero", () =>
+    Effect.sync(() => {
+      const item = G.optional(G.literal("a"))
+      assert.match(G.validate(G.repeat(item, 2))[0]!.message, /zero-width elements/)
+      assert.throws(() => G.prepare(G.countPrefixed(item, G.integer)), /zero-width elements/)
+      assert.deepEqual(G.validate(G.repeat(item, 0)), [])
+    }),
+  )
+
+  it.effect("sees through a transform that cannot match empty, and through a constant", () =>
+    Effect.sync(() => {
+      assert.match(G.validate(G.many(G.many(G.integer)))[0]!.message, /zero-width elements/)
+      assert.match(G.validate(G.many(G.literals("", "a")))[0]!.message, /zero-width elements/)
+      assert.match(G.validate(G.many(G.flag("-")))[0]!.message, /zero-width elements/)
+      assert.deepEqual(G.validate(G.many(G.literals("a", "b"))), [])
+    }),
+  )
+
   it.effect("detects that a zero-maximum repetition always matches empty", () =>
     Effect.sync(() => {
       const inner = G.many(G.empty, { max: 0 })

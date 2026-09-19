@@ -97,3 +97,7 @@ export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
 export const nonByte = /[^\0-\xff]/
+
+/** The bytes of a binary string, one per character; call only once `nonByte` has ruled out wider ones. */
+export const toBytes = (binary: string): Uint8Array =>
+  Uint8Array.from(binary, (char) => char.charCodeAt(0))

@@ -19,10 +19,7 @@ const netstring = Grammar.gen(function* () {
 })
 
 const header = Grammar.gen(function* () {
-  const kind = yield* Grammar.choice(
-    Grammar.literal("text").pipe(Grammar.as("text")),
-    Grammar.literal("bits").pipe(Grammar.as("bits")),
-  )
+  const kind = yield* Grammar.literals("text", "bits")
   yield* Grammar.literal("/")
   const size = yield* Grammar.integer
   return { kind, size }

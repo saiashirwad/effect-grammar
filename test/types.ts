@@ -1,6 +1,6 @@
 import * as G from "../src/index.ts"
 
-const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
+const kindOf = G.literals("a", "b")
 
 // `value` is reserved for the tagged branch payload.
 // @ts-expect-error taggedChoice cannot use "value" as its tag
@@ -183,8 +183,8 @@ const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
   v: "a",
 }
-// choiceOn also accepts ordered [key, grammar] entries.
-const onEntries = G.choiceOn("kind", [["plain", plainTagged]] as const)
+// choiceOnEntries takes ordered [key, grammar] entries.
+const onEntries = G.choiceOnEntries("kind", [["plain", plainTagged]] as const)
 const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
 void onEntriesValue
 void onValue

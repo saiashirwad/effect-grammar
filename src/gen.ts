@@ -76,24 +76,22 @@ const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
 const isRef = (value: Value): value is RefBase<unknown> =>
   Predicate.isObject(value) && refs.has(value)
 
-export const assertInScope = (ref: RefBase<unknown>, where: string): Expr => {
+const openEntry = (ref: RefBase<unknown>, where: string): RefEntry => {
   const entry = entryOf(ref)
   if (!entry.scope.open) {
     throw new Error(
       `${where}: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built`,
     )
   }
-  return entry.expr
+  return entry
 }
 
+export const assertInScope = (ref: RefBase<unknown>, where: string): Expr =>
+  openEntry(ref, where).expr
+
 export const get = <A, K extends keyof A>(ref: Ref<A>, key: K): Ref<A[K]> => {
-  const entry = entryOf(ref)
-  if (!entry.scope.open) {
-    throw new Error(
-      "get: this ref is out of scope; a ref can only be used inside the gen that bound it, while that gen is being built",
-    )
-  }
-  return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
+  const { expr, scope } = openEntry(ref, "get")
+  return refFor({ _tag: "Prop", object: expr, key }, scope)
 }
 
 const isPlainObject = <T extends object>(value: T): boolean => {

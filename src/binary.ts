@@ -1,7 +1,7 @@
-import { Predicate, Result, Schema } from "effect"
+import { Function as F, Predicate, Result, Schema } from "effect"
 
 import { type CodecOptions, codecFrom } from "./codec.ts"
-import { iso, partialIso, prefixedBy, takeBytes, withKeys } from "./combinators.ts"
+import { iso, partialIso, prefixedBy, regex, takeBytes, withKeys } from "./combinators.ts"
 import {
   type Grammar,
   type GrammarInternal,
@@ -10,24 +10,44 @@ import {
   silent,
   type Value,
 } from "./core.ts"
-import { nonByte } from "./env.ts"
-import { PrintError } from "./errors.ts"
+import { isCount, nonByte, toBytes } from "./env.ts"
+import { describeExpected, hex, PrintError } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
 
-export const hex = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
+export { hex } from "./errors.ts"
+
+const isWidth = (size: number): boolean => Number.isInteger(size) && size >= 1 && size <= 53
+
+const assertWidth = (name: string, size: number): void => {
+  if (!isWidth(size)) {
+    throw new RangeError(`${name}: expected a width of 1 to 53 bits, got ${size}`)
+  }
+}
 
 export const Bit = Schema.Literals([0, 1])
 export const Uint = (size: number) => {
-  if (!Number.isInteger(size) || size < 1 || size > 53) {
-    throw new RangeError(`Uint: expected a width of 1 to 53 bits, got ${size}`)
-  }
+  assertWidth("Uint", size)
   return Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 ** size - 1 }))
+}
+export const Int = (size: number) => {
+  assertWidth("Int", size)
+  return Schema.Int.check(
+    Schema.isBetween({ minimum: -(2 ** (size - 1)), maximum: 2 ** (size - 1) - 1 }),
+  )
 }
 export const Uint8 = Uint(8)
 export const Uint16 = Uint(16)
 export const Uint32 = Uint(32)
+export const Int8 = Int(8)
+export const Int16 = Int(16)
+export const Int32 = Int(32)
+export const Uint64 = Schema.BigInt.check(
+  Schema.isBetweenBigInt({ minimum: 0n, maximum: 2n ** 64n - 1n }),
+)
+export const Int64 = Schema.BigInt.check(
+  Schema.isBetweenBigInt({ minimum: -(2n ** 63n), maximum: 2n ** 63n - 1n }),
+)
 
 export class ParseError extends Schema.TaggedError<ParseError>()("BinaryParseError", {
   offset: Schema.Finite,
@@ -35,10 +55,8 @@ export class ParseError extends Schema.TaggedError<ParseError>()("BinaryParseErr
   found: Schema.UndefinedOr(Schema.Finite),
 }) {
   override get message(): string {
-    const expected =
-      this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
     const found = this.found === undefined ? "end of input" : `0x${hex(Uint8Array.of(this.found))}`
-    return `byte ${this.offset}: expected ${expected}, found ${found}`
+    return `byte ${this.offset}: expected ${describeExpected(this.expected)}, found ${found}`
   }
 }
 
@@ -48,9 +66,6 @@ const toText = (bytes: Uint8Array): string => {
   return binary
 }
 
-const toBytes = (binary: string): Uint8Array =>
-  Uint8Array.from(binary, (char) => char.charCodeAt(0))
-
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
   takeBytes(size, name).pipe(
     iso({
@@ -58,6 +73,7 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
         const bytes = littleEndian ? toBytes(binary).reverse() : toBytes(binary)
         return bytes.reduce((value, byte) => (value << 8n) | BigInt(byte), 0n)
       },
+      // A negative value is written as its two's complement.
       encode: (value) => {
         const bytes = Uint8Array.from({ length: size }, (_, index) =>
           Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))),
@@ -67,16 +83,144 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
     }),
   )
 
+const integer = <A extends number | bigint>(
+  size: number,
+  name: string,
+  schema: Schema.Codec<A>,
+  decode: (value: bigint) => A,
+  littleEndian: boolean,
+): Grammar<A> =>
+  word(size, name, littleEndian).pipe(iso({ name, decode, encode: BigInt, is: Schema.is(schema) }))
+
 const uint = (size: number, name: string, littleEndian = false): Grammar<number> =>
-  word(size, name, littleEndian).pipe(
-    iso({ name, decode: Number, encode: BigInt, is: Schema.is(Uint(8 * size)) }),
+  integer(size, name, Uint(8 * size), Number, littleEndian)
+
+const int = (size: number, name: string, littleEndian = false): Grammar<number> =>
+  integer(
+    size,
+    name,
+    Int(8 * size),
+    (value) => Number(BigInt.asIntN(8 * size, value)),
+    littleEndian,
+  )
+
+const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
+  integer(8, name, Uint64, F.identity, littleEndian)
+
+const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
+  integer(8, name, Int64, (value) => BigInt.asIntN(64, value), littleEndian)
+
+// Floats are read and written through one shared view, so a value costs no allocation.
+const scratch = new DataView(new ArrayBuffer(8))
+
+/**
+ * Every NaN prints as the quiet NaN the engine writes, so a payload or a
+ * signalling NaN in the input does not survive parsing and printing again.
+ */
+const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
+  takeBytes(size, name).pipe(
+    iso({
+      name,
+      // A float32 holds only the numbers that survive rounding to single precision.
+      is: (value) =>
+        Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)),
+      decode: (binary) => {
+        for (let index = 0; index < size; index++) scratch.setUint8(index, binary.charCodeAt(index))
+        return size === 4
+          ? scratch.getFloat32(0, littleEndian)
+          : scratch.getFloat64(0, littleEndian)
+      },
+      encode: (value) => {
+        if (size === 4) scratch.setFloat32(0, value, littleEndian)
+        else scratch.setFloat64(0, value, littleEndian)
+        let binary = ""
+        for (let index = 0; index < size; index++) {
+          binary += String.fromCharCode(scratch.getUint8(index))
+        }
+        return binary
+      },
+    }),
   )
 
 export const uint8 = uint(1, "uint8")
 export const uint16 = uint(2, "uint16")
 export const uint32 = uint(4, "uint32")
+export const uint64 = uint64Of("uint64")
 export const uint16le = uint(2, "uint16le", true)
 export const uint32le = uint(4, "uint32le", true)
+export const uint64le = uint64Of("uint64le", true)
+
+export const int8 = int(1, "int8")
+export const int16 = int(2, "int16")
+export const int32 = int(4, "int32")
+export const int64 = int64Of("int64")
+export const int16le = int(2, "int16le", true)
+export const int32le = int(4, "int32le", true)
+export const int64le = int64Of("int64le", true)
+
+export const float32 = float(4, "float32")
+export const float64 = float(8, "float64")
+export const float32le = float(4, "float32le", true)
+export const float64le = float(8, "float64le", true)
+
+// No length cap: a value too wide for a number is left for decoding to reject by range.
+const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
+
+/** The encoded number, or a value outside the safe integer range when it is too large to hold. */
+const fromLeb128 = (binary: string): number => {
+  let value = 0
+  for (let index = binary.length - 1; index >= 0; index--) {
+    value = value * 128 + (binary.charCodeAt(index) & 0x7f)
+  }
+  return value
+}
+
+const toLeb128 = (value: number): string => {
+  let binary = ""
+  let rest = value
+  while (rest >= 128) {
+    binary += String.fromCharCode((rest % 128) | 0x80)
+    rest = Math.floor(rest / 128)
+  }
+  return binary + String.fromCharCode(rest)
+}
+
+/**
+ * Unsigned LEB128 within the safe integer range. Parsing accepts padded
+ * encodings of any length; printing writes the shortest one.
+ */
+export const varuint = leb128("varuint").pipe(
+  partialIso({
+    name: "varuint",
+    decode: (binary) => {
+      const value = fromLeb128(binary)
+      return Number.isSafeInteger(value)
+        ? Result.succeed(value)
+        : Result.fail({ message: "a varuint within the safe integer range" })
+    },
+    encode: (value) =>
+      isCount(value)
+        ? Result.succeed(toLeb128(value))
+        : Result.fail({ message: "expected a non-negative safe integer" }),
+  }),
+)
+
+/** Zigzag-encoded LEB128, as in protobuf `sint64`, for integers from -(2 ** 52) to 2 ** 52 - 1. */
+export const varint = leb128("varint").pipe(
+  partialIso({
+    name: "varint",
+    decode: (binary) => {
+      const value = fromLeb128(binary)
+      return Number.isSafeInteger(value)
+        ? Result.succeed(value % 2 === 0 ? value / 2 : -(value + 1) / 2)
+        : Result.fail({ message: "a varint from -(2 ** 52) to 2 ** 52 - 1" })
+    },
+    encode: (value) =>
+      Number.isSafeInteger(value) && value >= -(2 ** 52) && value < 2 ** 52
+        ? Result.succeed(toLeb128(value < 0 ? -2 * value - 1 : 2 * value))
+        : Result.fail({ message: "expected an integer from -(2 ** 52) to 2 ** 52 - 1" }),
+  }),
+)
 
 export type BitLayout = Readonly<Record<string, number>>
 
@@ -88,12 +232,7 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
   const fields = Object.entries(layout)
   const name = fields.map(([key, size]) => `${key}:${size}`).join(" ")
   const width = fields.reduce((total, [, size]) => total + size, 0)
-  if (
-    width % 8 !== 0 ||
-    fields.some(
-      ([key, size]) => /^\d+$/.test(key) || !Number.isInteger(size) || size < 1 || size > 53,
-    )
-  ) {
+  if (width % 8 !== 0 || fields.some(([key, size]) => /^\d+$/.test(key) || !isWidth(size))) {
     throw new RangeError(
       `bits: expected non-integer field names, widths of 1 to 53 bits, and a whole number of bytes, got ${name}`,
     )

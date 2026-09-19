@@ -2,6 +2,9 @@ import { Predicate, Schema } from "effect"
 
 import type { Value } from "./core.ts"
 
+export const describeExpected = (expected: ReadonlyArray<string>): string =>
+  expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
+
 export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   pos: Schema.Finite,
   line: Schema.Finite,
@@ -11,9 +14,7 @@ export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
 }) {
   override get message(): string {
     const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
-    const expected =
-      this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
-    return `line ${this.line}, column ${this.column}: expected ${expected}, found ${found}`
+    return `line ${this.line}, column ${this.column}: expected ${describeExpected(this.expected)}, found ${found}`
   }
 }
 
@@ -111,9 +112,34 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   }
 }
 
+export const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
+
+/**
+ * `JSON.stringify`, except that bytes show as `<07 ab>` and a bigint as `5n`,
+ * unquoted so neither reads as a string. A replacer cannot do this: its result
+ * is quoted, and `toJSON` turns a `Buffer` into an object before it runs.
+ */
+const show = (value: Value, seen: ReadonlyArray<Value>): string | undefined => {
+  if (Predicate.isBigInt(value)) return `${value}n`
+  if (Predicate.isUint8Array(value)) return `<${hex(value)}>`
+  if (seen.includes(value)) throw new TypeError("circular value")
+  if (Array.isArray(value)) {
+    return `[${Array.from(value, (item: Value) => show(item, [...seen, value]) ?? "null").join(",")}]`
+  }
+  if (!Predicate.isObject(value) || Predicate.isFunction(value["toJSON"])) {
+    return JSON.stringify(value)
+  }
+  const fields = Object.entries(value).flatMap(([key, field]) => {
+    const text = show(field, [...seen, value])
+    return text === undefined ? [] : [`${JSON.stringify(key)}:${text}`]
+  })
+  return `{${fields.join(",")}}`
+}
+
 export const preview = <T>(value: T): string => {
   try {
-    return JSON.stringify(value) ?? String(value)
+    return show(value, []) ?? String(value)
   } catch {
     try {
       return String(value)

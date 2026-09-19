@@ -81,16 +81,15 @@ const QuerySchema = Schema.Union([
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
 const doubleQuoted = Grammar.between('"', Grammar.regex(/[^"]*/, "string content"), '"')
-const keyword = <const S extends string>(s: S) => Grammar.as(Grammar.literal(s), s)
 
 const compareValue = Grammar.gen(function* () {
-  const op = yield* Grammar.choice(keyword(">="), keyword("<="), keyword(">"), keyword("<"))
+  const op = yield* Grammar.literals(">=", "<=", ">", "<")
   const value = yield* token("compare value")
   return { op, value }
 }).pipe(
   Grammar.decodeTo(CompareValueSchema)({
     decode: ({ op, value }) => ({ kind: "compare", op, value }),
-    encode: (v) => v,
+    encode: ({ op, value }) => ({ op, value }),
   }),
 )
 
@@ -105,7 +104,7 @@ const rangeValue = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(RangeValueSchema)({
     decode: ({ from, to }) => ({ kind: "range", from, to }),
-    encode: (v) => v,
+    encode: ({ from, to }) => ({ from, to }),
   }),
 )
 
@@ -134,7 +133,7 @@ const qualifier = Grammar.gen(function* () {
 }).pipe(
   Grammar.decodeTo(QualifierSchema)({
     decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
-    encode: (q) => q,
+    encode: ({ negate, key, value }) => ({ negate, key, value }),
   }),
 )
 
