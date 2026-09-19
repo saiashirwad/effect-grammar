@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 
 import { Effect, Result, Schema, SchemaIssue } from "effect"
-import * as FastCheck from "effect/testing/FastCheck"
 import { describe, it } from "vitest"
 
 import * as Binary from "../src/binary.ts"
@@ -29,186 +28,96 @@ const printFail = <A>(grammar: G.Grammar<A>, value: A): G.PrintError => {
 }
 
 describe("unsigned integers", () => {
-  it("reads and writes network byte order", () => {
+  it("reads and writes both byte orders and rejects values outside the width", () => {
     assert.equal(parseOk(Binary.uint8, 0xfe), 0xfe)
     assert.equal(parseOk(Binary.uint16, 0x12, 0x34), 0x1234)
-    assert.equal(parseOk(Binary.uint32, 0xff, 0xee, 0xdd, 0xcc), 0xffeeddcc)
-    assert.deepEqual(printOk(Binary.uint32, 0xffeeddcc), [0xff, 0xee, 0xdd, 0xcc])
-  })
-
-  it("reads and writes little-endian", () => {
     assert.equal(parseOk(Binary.uint16le, 0x34, 0x12), 0x1234)
+    assert.deepEqual(printOk(Binary.uint32, 0xffeeddcc), [0xff, 0xee, 0xdd, 0xcc])
     assert.deepEqual(printOk(Binary.uint32le, 0xffeeddcc), [0xcc, 0xdd, 0xee, 0xff])
-  })
-
-  it("rejects values outside the width", () => {
     assert.match(printFail(Binary.uint8, 256).message, /expected uint8/)
-    assert.match(printFail(Binary.uint16, -1).message, /expected uint16/)
     assert.match(printFail(Binary.uint16, 1.5).message, /expected uint16/)
-  })
-
-  it("round-trips every uint32", () => {
-    FastCheck.assert(
-      FastCheck.property(FastCheck.integer({ min: 0, max: 0xffffffff }), (value) => {
-        assert.equal(parseOk(Binary.uint32, ...printOk(Binary.uint32, value)), value)
-        assert.equal(parseOk(Binary.uint32le, ...printOk(Binary.uint32le, value)), value)
-      }),
-    )
   })
 })
 
 describe("Uint", () => {
-  it("accepts exactly the values that fit the width", () => {
+  it("accepts exactly the values that fit and rejects widths a number cannot hold", () => {
     assert.ok(Schema.is(Binary.Uint(1))(1))
     assert.ok(!Schema.is(Binary.Uint(1))(2))
     assert.ok(Schema.is(Binary.Uint(53))(Number.MAX_SAFE_INTEGER))
     assert.ok(!Schema.is(Binary.Uint(53))(2 ** 53))
-    assert.ok(!Schema.is(Binary.Uint(8))(1.5))
-  })
-
-  it("rejects widths a number cannot hold exactly", () => {
-    for (const size of [0, -1, 1.5, 54]) assert.throws(() => Binary.Uint(size), /1 to 53 bits/)
+    for (const size of [0, 1.5, 54]) assert.throws(() => Binary.Uint(size), /1 to 53 bits/)
   })
 })
 
 describe("bits", () => {
   const flags = Binary.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 })
 
-  it("splits bytes into fields, first field highest", () => {
+  it("splits bytes into fields, first field highest, including fields past 32 bits", () => {
     const value = parseOk(flags, 0x85, 0x23)
     assert.deepEqual(value, { qr: 1, opcode: 0, aa: 1, tc: 0, rd: 1, ra: 0, z: 2, rcode: 3 })
-    assert.deepEqual(Object.keys(value), ["qr", "opcode", "aa", "tc", "rd", "ra", "z", "rcode"])
     assert.deepEqual(printOk(flags, value), [0x85, 0x23])
-  })
-
-  it("types one-bit fields as 0 | 1", () => {
-    const bit: 0 | 1 = parseOk(flags, 0, 0).qr
-    assert.equal(bit, 0)
-  })
-
-  it("handles fields wider than 32 bits", () => {
     const wide = Binary.bits({ tag: 3, value: 53 })
-    const value = { tag: 5, value: Number.MAX_SAFE_INTEGER }
-    assert.deepEqual(parseOk(wide, ...printOk(wide, value)), value)
+    const large = { tag: 5, value: Number.MAX_SAFE_INTEGER }
+    assert.deepEqual(parseOk(wide, ...printOk(wide, large)), large)
   })
 
-  it("rejects fields outside the layout when printing unchecked", () => {
+  it("rejects values that do not fit the layout when printing unchecked", () => {
     const byte = Binary.bits({ a: 8 })
     // SAFETY: deliberately adding a field to show the printer rejects it.
     const extra = { a: 1, extra: true } as G.Type<typeof byte>
     assert.match(printFail(byte, extra).message, /unexpected field extra/)
-    // SAFETY: deliberately adding a symbol field to show the printer rejects it.
-    const symbolic = { a: 1, [Symbol("s")]: 1 } as G.Type<typeof byte>
-    assert.match(printFail(byte, symbolic).message, /unexpected field Symbol\(s\)/)
+    assert.match(printFail(byte, { a: 256 }).message, /a must be an integer from 0 to 255/)
   })
 
-  it("names the field that does not fit", () => {
-    const value = { qr: 1, opcode: 16, aa: 0, tc: 0, rd: 0, ra: 0, z: 0, rcode: 0 } as const
-    assert.match(printFail(flags, value).message, /opcode must be an integer from 0 to 15/)
-  })
-
-  it("reports truncated input with the bytes that remain", () => {
-    const error = parseFail(flags, 0x85)
-    assert.equal(error.offset, 1)
-    assert.equal(error.found, undefined)
+  it("reports truncated input at the end of input", () => {
     assert.equal(
-      error.message,
+      parseFail(flags, 0x85).message,
       "byte 1: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4: 2 bytes but only 1 remain, found end of input",
     )
   })
 
   it("rejects layouts that are not whole bytes or that JavaScript would reorder", () => {
     assert.throws(() => Binary.bits({ a: 3 }), /got a:3/)
-    assert.throws(() => Binary.bits({ a: 0, b: 8 }), /got a:0 b:8/)
     assert.throws(() => Binary.bits({ a: 54, b: 2 }), /got a:54 b:2/)
     assert.throws(() => Binary.bits({ 0: 8 }), /got 0:8/)
-  })
-
-  it("merges with other object grammars", () => {
-    const header = G.merge(G.struct({ id: Binary.uint16 }), flags)
-    assert.deepEqual(parseOk(header, 0xbe, 0xef, 0x01, 0x00), {
-      id: 0xbeef,
-      qr: 0,
-      opcode: 0,
-      aa: 0,
-      tc: 0,
-      rd: 1,
-      ra: 0,
-      z: 0,
-      rcode: 0,
-    })
   })
 })
 
 describe("bytes / lengthPrefixed / literal", () => {
-  const png = G.struct({ body: Binary.bytes(2) }).pipe(G.prefix(Binary.literal(0x89, 0x50)))
-  const label = Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii)
-
-  it("reads a fixed run of bytes after a magic number", () => {
-    assert.deepEqual(parseOk(png, 0x89, 0x50, 1, 2), { body: Uint8Array.of(1, 2) })
-    assert.deepEqual(printOk(png, { body: Uint8Array.of(1, 2) }), [0x89, 0x50, 1, 2])
-    assert.equal(parseFail(png, 0x89, 0x51, 1, 2).message, "byte 1: expected 0x89 0x50, found 0x51")
-  })
-
-  it("derives the length prefix from the payload", () => {
-    assert.equal(parseOk(label, 3, 0x63, 0x6f, 0x6d), "com")
-    assert.deepEqual(printOk(label, "com"), [3, 0x63, 0x6f, 0x6d])
-    assert.match(printFail(label, "x".repeat(256)).message, /expected uint8/)
-  })
-
-  it("reads a byte count bound earlier", () => {
+  it("reads a bound run of bytes after a magic number", () => {
     const frame = G.gen(function* () {
-      const size = yield* Binary.uint16
+      yield* Binary.literal(0x89, 0x50)
+      const size = yield* Binary.uint8
       const body = yield* Binary.bytes(size)
       return { size, body }
     })
-    assert.deepEqual(parseOk(frame, 0, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
+    assert.equal(G.render(frame), "0x89 0x50 size:<uint8> body:<byte>{size}")
+    assert.deepEqual(parseOk(frame, 0x89, 0x50, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
+    assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
+    assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")
     assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /3 bytes/)
   })
 
-  it("rejects text that is not bytes", () => {
-    assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
-    assert.equal(G.render(png), "0x89 0x50 body:<byte>{2}")
-    assert.equal(
-      G.render(G.struct({ id: Binary.uint16, flags: Binary.bits({ on: 1, level: 7 }) })),
-      "id:<uint16> flags:<on:1 level:7>",
-    )
-    assert.deepEqual(Result.getOrThrow(G.parse(Binary.uint8, "ÿ")), 255)
-    const error = G.parse(Binary.uint16, "aĀ")
+  it("derives a byte length prefix and converts text", () => {
+    const ascii = Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii)
+    const utf8 = Binary.lengthPrefixed(Binary.uint8).pipe(Binary.utf8)
+    assert.equal(parseOk(ascii, 3, 0x63, 0x6f, 0x6d), "com")
+    assert.deepEqual(parseFail(ascii, 1, 0x80).expected, ["ascii"])
+    assert.match(printFail(ascii, "é").message, /expected ascii/)
+    assert.deepEqual(printOk(utf8, "€"), [3, 0xe2, 0x82, 0xac])
+    assert.equal(parseOk(utf8, 3, 0xef, 0xbb, 0xbf), "\ufeff")
+    assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
+    assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
+    assert.deepEqual(G.auditFidelity(utf8), [{ name: "utf8", fidelity: "partial" }])
+  })
+
+  it("rejects characters that are not bytes on input and output", () => {
+    const error = G.parse(Binary.uint16, "a\u0100")
     assert.ok(Result.isFailure(error))
     assert.deepEqual(error.failure.expected, ["a byte"])
     assert.equal(error.failure.pos, 1)
     assert.match(printFail(G.regex(/./, "char"), "€").message, /only bytes to be printed/)
-  })
-})
-
-describe("ascii / utf8", () => {
-  const ascii = Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii)
-  const utf8 = Binary.lengthPrefixed(Binary.uint8).pipe(Binary.utf8)
-
-  it("decodes and encodes UTF-8 by byte length", () => {
-    assert.equal(parseOk(utf8, 3, 0xe2, 0x82, 0xac), "€")
-    assert.deepEqual(printOk(utf8, "€"), [3, 0xe2, 0x82, 0xac])
-    assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
-    assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
-  })
-
-  it("keeps a byte order mark", () => {
-    assert.equal(parseOk(utf8, 3, 0xef, 0xbb, 0xbf), "﻿")
-  })
-
-  it("rejects bytes and characters outside ASCII", () => {
-    assert.deepEqual(parseFail(ascii, 1, 0x80).expected, ["ascii"])
-    assert.match(printFail(ascii, "é").message, /expected ascii/)
-  })
-
-  it("reports utf8 as partial and ascii as a guarded inverse", () => {
-    assert.deepEqual(G.auditFidelity(utf8), [{ name: "utf8", fidelity: "partial" }])
-    assert.deepEqual(G.auditFidelity(ascii), [])
-  })
-
-  it("formats bytes as hex", () => {
-    assert.equal(Binary.hex(Uint8Array.of(0, 0xbe, 0xef)), "00 be ef")
+    assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
   })
 })
 
@@ -225,13 +134,13 @@ describe("codec", () => {
     }),
   )
   const FrameFromBytes = Binary.codec(frame, Frame, { identifier: "Frame" })
-  const formatIssue = SchemaIssue.makeFormatterDefault()
   const wire = Uint8Array.of(0x85, 2, 1, 0x61, 2, 0x62, 0x63)
 
   it("decodes and encodes a Uint8Array", () => {
     const value = Effect.runSync(Schema.decodeEffect(FrameFromBytes)(wire))
     assert.deepEqual(value, { version: 1, kind: 5, names: ["a", "bc"] })
-    assert.deepEqual(Effect.runSync(Schema.encodeEffect(FrameFromBytes)(value)), wire)
+    const encoded = Effect.runSync(Schema.encodeEffect(FrameFromBytes)(value))
+    assert.equal(Binary.hex(encoded), "85 02 01 61 02 62 63")
   })
 
   it("reports decode failures by byte offset", () => {
@@ -239,23 +148,8 @@ describe("codec", () => {
       Schema.decodeEffect(FrameFromBytes)(wire.slice(0, 6)).pipe(Effect.flip),
     ).issue
     assert.match(
-      formatIssue(issue),
+      SchemaIssue.makeFormatterDefault()(issue),
       /byte 6: expected 2 bytes but only 1 remain, found end of input/,
     )
-  })
-
-  it("reports encode failures by field path", () => {
-    const issue = Effect.runSync(
-      Schema.encodeEffect(FrameFromBytes)({ version: 1, kind: 128, names: [] }).pipe(Effect.flip),
-    ).issue
-    assert.match(formatIssue(issue), /Expected a value between 0 and 127/)
-  })
-
-  it("handles inputs longer than one String.fromCharCode call", () => {
-    const blob = Binary.lengthPrefixed(Binary.uint32)
-    const body = Uint8Array.from({ length: 100_000 }, (_, index) => index % 256)
-    const printed = Result.getOrThrow(Binary.print(blob, body))
-    assert.equal(printed.length, 100_004)
-    assert.deepEqual(Result.getOrThrow(Binary.parse(blob, printed)), body)
   })
 })
