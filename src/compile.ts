@@ -86,6 +86,8 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
       return empty
     }
     case "Take":
+    case "RepeatExact":
+      // A repeated item must consume input, so as with take only a zero count matches empty.
       if (node.count._tag !== "Count") return "unknown"
       return node.count.value === 0 ? "yes" : "no"
     case "Merge":
@@ -94,7 +96,6 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
         seen,
       )
     case "Match":
-    case "RepeatExact":
       return "unknown"
   }
 }

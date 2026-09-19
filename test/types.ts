@@ -1,6 +1,6 @@
 import * as G from "../src/index.ts"
 
-const kindOf = G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b")))
+const kindOf = G.literals("a", "b")
 
 // `value` is reserved for the tagged branch payload.
 // @ts-expect-error taggedChoice cannot use "value" as its tag

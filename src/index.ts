@@ -23,6 +23,7 @@ export {
   lengthPrefixed,
   lexeme,
   literal,
+  literals,
   many,
   match,
   matchValue,

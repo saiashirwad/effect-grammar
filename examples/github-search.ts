@@ -81,10 +81,9 @@ const QuerySchema = Schema.Union([
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
 const doubleQuoted = Grammar.between('"', Grammar.regex(/[^"]*/, "string content"), '"')
-const keyword = <const S extends string>(s: S) => Grammar.as(Grammar.literal(s), s)
 
 const compareValue = Grammar.gen(function* () {
-  const op = yield* Grammar.choice(keyword(">="), keyword("<="), keyword(">"), keyword("<"))
+  const op = yield* Grammar.literals(">=", "<=", ">", "<")
   const value = yield* token("compare value")
   return { op, value }
 }).pipe(

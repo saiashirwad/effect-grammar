@@ -255,12 +255,12 @@ export const take = (count: Ref<number> | number): Grammar<string> =>
 export const takeBytes = (count: Ref<number> | number, name?: string): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "bytes"), unit: "byte", name })
 
-/** Repeat an item a bound number of times. Each successful parse must consume input. */
+/** Repeat an item a constant or bound number of times. Each successful parse must consume input. */
 export const repeat: {
-  <A>(inner: Grammar<A>, count: Ref<number>): Grammar<ReadonlyArray<A>>
-  (count: Ref<number>): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
-} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number>) =>
-  make({ _tag: "RepeatExact", count: assertInScope(count, "repeat"), inner }),
+  <A>(inner: Grammar<A>, count: Ref<number> | number): Grammar<ReadonlyArray<A>>
+  (count: Ref<number> | number): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
+} = F.dual(dataFirst, <A>(inner: Grammar<A>, count: Ref<number> | number) =>
+  make({ _tag: "RepeatExact", count: countExpr(count, "repeat"), inner }),
 )
 
 export interface TransformOptions<A, B> {
@@ -393,6 +393,17 @@ export const as: {
     name: preview(value),
   }),
 )
+
+/**
+ * Ordered string alternatives whose value is the matched string. As with
+ * `choice`, list a longer literal before any literal that is its prefix.
+ */
+export const literals = <const Values extends readonly [string, ...Array<string>]>(
+  ...values: Values
+): Grammar<Values[number]> => {
+  if (values.length === 0) throw new RangeError("literals: at least one value is required")
+  return make({ _tag: "Choice", options: values.map((value) => as(literal(value), value)) })
+}
 
 export const flag = (value: Silent | string): Grammar<boolean> =>
   choice(as(toSilent(value), true), as(empty, false))
