@@ -2,6 +2,9 @@ import { Predicate, Schema } from "effect"
 
 import type { Value } from "./core.ts"
 
+export const describeExpected = (expected: ReadonlyArray<string>): string =>
+  expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
+
 export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   pos: Schema.Finite,
   line: Schema.Finite,
@@ -11,9 +14,7 @@ export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
 }) {
   override get message(): string {
     const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
-    const expected =
-      this.expected.length === 1 ? this.expected[0] : `one of ${this.expected.join(", ")}`
-    return `line ${this.line}, column ${this.column}: expected ${expected}, found ${found}`
+    return `line ${this.line}, column ${this.column}: expected ${describeExpected(this.expected)}, found ${found}`
   }
 }
 
@@ -111,9 +112,15 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   }
 }
 
+export const hex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
+
+const bytesAsHex = (_key: string, value: Value): Value =>
+  Predicate.isUint8Array(value) ? `<${hex(value)}>` : value
+
 export const preview = <T>(value: T): string => {
   try {
-    return JSON.stringify(value) ?? String(value)
+    return JSON.stringify(value, bytesAsHex) ?? String(value)
   } catch {
     try {
       return String(value)

@@ -41,6 +41,66 @@ describe("unsigned integers", () => {
   )
 })
 
+describe("signed and 64-bit integers", () => {
+  it.effect("reads and writes two's complement and rejects values outside the width", () =>
+    Effect.sync(() => {
+      assert.equal(parseOk(Binary.int8, 0x80), -128)
+      assert.equal(parseOk(Binary.int16le, 0xfe, 0xff), -2)
+      assert.deepEqual(printOk(Binary.int32, -2), [0xff, 0xff, 0xff, 0xfe])
+      assert.match(printFail(Binary.int8, 128).message, /expected int8/)
+      assert.deepEqual(printOk(Binary.uint64le, 2n ** 64n - 2n), [0xfe, ...Array(7).fill(0xff)])
+      assert.deepEqual(printOk(Binary.int64, -(2n ** 63n)), [0x80, 0, 0, 0, 0, 0, 0, 0])
+      assert.equal(parseOk(Binary.int64, ...Array(8).fill(0xff)), -1n)
+      assert.match(printFail(Binary.uint64, -1n).message, /expected uint64/)
+      assert.match(printFail(Binary.int64, 2n ** 63n).message, /expected int64/)
+    }),
+  )
+})
+
+describe("floats", () => {
+  it.effect("round-trips IEEE 754 values and refuses to round a float32", () =>
+    Effect.sync(() => {
+      assert.deepEqual(printOk(Binary.float32, -1.5), [0xbf, 0xc0, 0, 0])
+      assert.deepEqual(
+        printOk(Binary.float64le, 0.1),
+        [0x9a, 0x99, 0x99, 0x99, 0x99, 0x99, 0xb9, 0x3f],
+      )
+      assert.equal(parseOk(Binary.float32le, 0, 0, 0x80, 0x7f), Number.POSITIVE_INFINITY)
+      assert.ok(Object.is(parseOk(Binary.float64, ...printOk(Binary.float64, -0)), -0))
+      assert.ok(Number.isNaN(parseOk(Binary.float32, ...printOk(Binary.float32, Number.NaN))))
+      assert.match(printFail(Binary.float32, 0.1).message, /expected float32/)
+    }),
+  )
+})
+
+describe("varints", () => {
+  it.effect("prints the shortest LEB128 form and reads padded ones", () =>
+    Effect.sync(() => {
+      assert.deepEqual(printOk(Binary.varuint, 300), [0xac, 0x02])
+      assert.equal(parseOk(Binary.varuint, 0x80, 0x00), 0)
+      const max = printOk(Binary.varuint, Number.MAX_SAFE_INTEGER)
+      assert.equal(max.length, 8)
+      assert.equal(parseOk(Binary.varuint, ...max), Number.MAX_SAFE_INTEGER)
+      assert.deepEqual(parseFail(Binary.varuint, ...Array(7).fill(0xff), 0x7f).expected, [
+        "a varuint within the safe integer range",
+      ])
+      assert.deepEqual(parseFail(Binary.varuint, 0x80).expected, ["varuint"])
+      assert.match(printFail(Binary.varuint, -1).message, /non-negative safe integer/)
+    }),
+  )
+
+  it.effect("zigzags signed values across the whole range it accepts", () =>
+    Effect.sync(() => {
+      assert.deepEqual(printOk(Binary.varint, -1), [0x01])
+      assert.deepEqual(printOk(Binary.varint, 1), [0x02])
+      for (const value of [-(2 ** 52), 2 ** 52 - 1]) {
+        assert.equal(parseOk(Binary.varint, ...printOk(Binary.varint, value)), value)
+      }
+      assert.match(printFail(Binary.varint, 2 ** 52).message, /-\(2 \*\* 52\) to 2 \*\* 52 - 1/)
+    }),
+  )
+})
+
 describe("Uint", () => {
   it.effect("accepts exactly the values that fit and rejects widths a number cannot hold", () =>
     Effect.sync(() => {
@@ -138,6 +198,14 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.equal(error.failure.pos, 1)
       assert.match(printFail(G.regex(/./, "char"), "€").message, /only bytes to be printed/)
       assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
+    }),
+  )
+
+  it.effect("shows bytes as hex in print errors, including inside a value", () =>
+    Effect.sync(() => {
+      const either = G.choice(Binary.bytes(1), G.struct({ body: Binary.bytes(1) }))
+      assert.match(printFail(either, Uint8Array.of(7, 0xab)).message, /<07 ab>/)
+      assert.match(printFail(either, { body: Uint8Array.of(7, 0xab) }).message, /"body":"<07 ab>"/)
     }),
   )
 
