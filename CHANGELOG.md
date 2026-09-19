@@ -1,5 +1,84 @@
 # effect-grammar
 
+## 1.0.0
+
+### Major Changes
+
+- [#11](https://github.com/saiashirwad/effect-grammar/pull/11) [`fae4dc2`](https://github.com/saiashirwad/effect-grammar/commit/fae4dc2bee3f5cfe046d715cf2bdc0aedfb452ec) Thanks [@saiashirwad](https://github.com/saiashirwad)! - Make the round-trip law first-class, and ship the testing, validation, and
+  packaging around it.
+
+  This release intentionally removes the old `compile` function and `Compiled`
+  type. Migrate `compile(grammar)` to `prepare(grammar)` and `Compiled<A>` to
+  `Prepared<A>`. `prepare` validates once and returns interpreters bound to the
+  grammar; it does not compile or otherwise optimize them.
+
+  The old `wrap` helper is also removed. Replace `wrap(open, inner, close)` with
+  `between(open, inner, close)`. This rename is a breaking API change; `prefix`
+  and `suffix` remain available for one-sided delimiters.
+
+  - Add `printChecked`, which prints a value, parses the output back, and fails
+    unless it reads as an equal value. This is the whole-grammar round-trip
+    guarantee. `print` stays unchecked.
+  - Replace `print(grammar, value, { verify: true })` with per-choice printer
+    selection: `checkedChoice(...branches)` picks the first branch whose text
+    parses back. The old `verify` option, which never checked dispatched
+    (`choiceOn`) choices, is gone.
+  - `codec` verifies the round trip on encode by default; pass
+    `{ roundTrip: "off" }` to skip it.
+  - Add `choiceOnEntries`, which is `choiceOn` over an array of `[key, grammar]`
+    entries, for an explicit parse order and number or boolean discriminants.
+    `choiceOn` now rejects JavaScript array-index keys, whose enumeration order
+    would otherwise change branch priority.
+  - Distinguish transformations by the law they claim: `iso` (claimed inverse),
+    `partialIso` (fallible, agrees where both succeed), and `decodeTo` (Schema
+    guarded) alongside the law-free `transform` and `transformOrFail`.
+    `auditFidelity` lists the transforms that claim no inverse.
+  - Add `validate` and `prepare` to report staged errors — refs used outside their
+    gen, and any nonzero repetition whose item is proven to match empty input —
+    before parse or print. These checks are conservative, not proof of all runtime
+    behavior. `choiceOn` and `matchValue` reject duplicate keys on construction.
+  - Add the `effect-grammar/testing` export with `assertPrintParse`,
+    `assertParsePrintCanonical`, `checkPrintParse`, and `checkCanonicalization`.
+    The build now cleans `dist` first, so the package no longer ships stale
+    modules, and a packaged-export test guards the published entry points.
+
+### Minor Changes
+
+- [#24](https://github.com/saiashirwad/effect-grammar/pull/24) [`51d23bb`](https://github.com/saiashirwad/effect-grammar/commit/51d23bb1d489e0fe8a3b6ef1898cea5d32a7feb2) Thanks [@saiashirwad](https://github.com/saiashirwad)! - Add byte-oriented grammars and the combinators they needed.
+
+  - Add the `effect-grammar/Binary` export: `uint8`, `uint16`, `uint32`,
+    `uint16le`, `uint32le`, `bits`, `bytes`, `lengthPrefixed`, `literal`, `ascii`,
+    and `utf8`, with `parse`, `print`, `printChecked`, and `codec` over
+    `Uint8Array`, the `Bit` and `Uint` schemas, and `hex`. Parse failures report a
+    byte offset.
+  - `take` accepts a constant count as well as a ref.
+  - Add `lengthPrefixed` and `countPrefixed`, which derive the prefix from the
+    value when printing.
+  - Add `filter`, which constrains a grammar's value with a predicate in both
+    directions.
+  - Add `merge`, which flattens object grammars into one object and keeps flat
+    field paths in print errors. Its parts are structs, object-returning gens,
+    other merges, `Binary.bits`, or a `filter` over one of those.
+
+- [#25](https://github.com/saiashirwad/effect-grammar/pull/25) [`41fe8d1`](https://github.com/saiashirwad/effect-grammar/commit/41fe8d1f6aa2bafe4c6017a2540a3929c4e14053) Thanks [@saiashirwad](https://github.com/saiashirwad)! - Round out the binary number grammars and add two small combinators.
+
+  - `effect-grammar/Binary` adds `int8` to `int64`, `uint64`, `float32`,
+    `float64`, their `le` variants, and the LEB128 `varuint` and zigzag `varint`,
+    with the `Int`, `Int8`, `Int16`, `Int32`, `Uint64`, and `Int64` schemas.
+    64-bit integers are bigints.
+  - `repeat` accepts a constant count as well as a ref. `validate` can prove that
+    `repeat(item, 0)` matches empty input, and reports any other `repeat` whose
+    item matches empty input, as it does for `many`.
+  - Add `literals`, a choice of strings whose value is the matched string. Longer
+    strings are tried first, so none is shadowed by its own prefix.
+  - `validate` sees through transforms: one over a grammar that cannot match empty
+    input cannot either, and `as`, `flag`, and `literals` match empty input when
+    their literal does.
+  - Print errors show a `Uint8Array` or `Buffer` as `<07 ab>` and a bigint as
+    `5n`, at any depth in the value, instead of an indexed object or
+    `[object Object]`. A byte run of the wrong length reports its bytes rather
+    than a binary string.
+
 ## 0.4.0
 
 ### Minor Changes
