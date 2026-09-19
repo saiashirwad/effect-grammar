@@ -67,12 +67,12 @@ const report =
   (title: string) =>
   <A, R>(effect: Effect.Effect<A, Schema.SchemaError, R>) =>
     effect.pipe(
-      Effect.match({
-        onSuccess: (value) => `${title}  →  ${JSON.stringify(value)}`,
-        onFailure: (error) => `${title}  →  ${formatIssue(error.issue)}`,
-      }),
-      Effect.flatMap(Console.log),
+      Effect.flip,
+      Effect.flatMap((error) => Console.log(`${title}  →  ${formatIssue(error.issue)}`)),
     )
+
+const headerJson = Schema.encodeEffect(Schema.fromJsonString(DnsHeader))
+const questionsJson = Schema.encodeEffect(Schema.fromJsonString(DnsQuery.fields.questions))
 
 const packet = Uint8Array.from([
   0xbe, 0xef, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x65, 0x78, 0x61,
@@ -83,10 +83,10 @@ Effect.gen(function* () {
   yield* Console.log(`grammar ${Grammar.render(query)}\n`)
 
   const head = yield* Schema.decodeEffect(HeaderFromUint8Array)(packet.slice(0, 12))
-  yield* Console.log(`header  ${JSON.stringify(head)}`)
+  yield* Console.log(`header  ${yield* headerJson(head)}`)
 
   const decoded = yield* Schema.decodeEffect(QueryFromUint8Array)(packet)
-  yield* Console.log(`query   ${JSON.stringify(decoded.questions)}`)
+  yield* Console.log(`query   ${yield* questionsJson(decoded.questions)}`)
 
   const encoded = yield* Schema.encodeEffect(QueryFromUint8Array)(decoded)
   yield* Console.log(`encode  ${Binary.hex(encoded)}\n`)
