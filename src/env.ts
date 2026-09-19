@@ -37,10 +37,30 @@ export const lookup = (env: Frame | undefined, ref: RefExpr): BoundValue => {
 
 export const evaluate = (expr: Expr, env: Frame | undefined): BoundValue => {
   if (expr._tag === "Ref") return lookup(env, expr)
+  if (expr._tag === "Count") return expr.value
 
   const object = evaluate(expr.object, env)
   if (object === Unbound || !Predicate.isObject(object)) return Unbound
   return Object.hasOwn(object, expr.key) ? object[expr.key] : Unbound
+}
+
+export const defineField = (object: Record<string, Value>, key: string, value: Value): void => {
+  Object.defineProperty(object, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+export const copyFields = (
+  target: Record<string, Value>,
+  source: Readonly<Record<string, Value>>,
+  keys: ReadonlyArray<string>,
+): void => {
+  for (const key of keys) {
+    if (Object.hasOwn(source, key)) defineField(target, key, source[key])
+  }
 }
 
 export const materialize = (pattern: Pattern, env: Frame): BoundValue => {
@@ -54,12 +74,7 @@ export const materialize = (pattern: Pattern, env: Frame): BoundValue => {
       for (const [key, field] of pattern.fields) {
         const value = materialize(field, env)
         if (value === Unbound) return Unbound
-        Object.defineProperty(object, key, {
-          value,
-          writable: true,
-          enumerable: true,
-          configurable: true,
-        })
+        defineField(object, key, value)
       }
       return object
     }
@@ -80,3 +95,5 @@ export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
 
 export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
+
+export const nonByte = /[^\0-\xff]/

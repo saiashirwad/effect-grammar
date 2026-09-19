@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 
-import { describe, it } from "vitest"
+import { describe, it } from "@effect/vitest"
+import { Effect } from "effect"
 
 import type { Node } from "../src/core.ts"
 import * as G from "../src/index.ts"
@@ -118,25 +119,37 @@ const table = {
     value: { count: 3, bits: ["1", "0", "1"] },
     renderIncludes: "){",
   }),
+  Merge: row({
+    grammar: G.merge(G.struct({ n: G.integer }), G.struct({ w: word })),
+    text: "5ab",
+    value: { n: 5, w: "ab" },
+    render: "n:<integer> w:<word>",
+  }),
 } satisfies Record<Node["_tag"], Row>
 
 describe("interpreter table (parse / print / render / law per Node)", () => {
   for (const [tag, entry] of Object.entries(table)) {
     describe(tag, () => {
-      it("parses the sample text", () => {
-        assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
-      })
+      it.effect("parses the sample text", () =>
+        Effect.sync(() => {
+          assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
+        }),
+      )
 
-      it("renders", () => {
-        const rendered = G.render(entry.grammar)
-        assert.ok(rendered.length > 0)
-        if (entry.render !== undefined) assert.equal(rendered, entry.render)
-        if (entry.renderIncludes !== undefined) assert.ok(rendered.includes(entry.renderIncludes))
-      })
+      it.effect("renders", () =>
+        Effect.sync(() => {
+          const rendered = G.render(entry.grammar)
+          assert.ok(rendered.length > 0)
+          if (entry.render !== undefined) assert.equal(rendered, entry.render)
+          if (entry.renderIncludes !== undefined) assert.ok(rendered.includes(entry.renderIncludes))
+        }),
+      )
 
-      it("obeys parse(print(value)) = value", () => {
-        assertPrintParse(entry.grammar, entry.value)
-      })
+      it.effect("obeys parse(print(value)) = value", () =>
+        Effect.sync(() => {
+          assertPrintParse(entry.grammar, entry.value)
+        }),
+      )
     })
   }
 })

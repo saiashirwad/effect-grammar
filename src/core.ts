@@ -37,6 +37,7 @@ export interface RefExpr {
 export type Expr =
   | RefExpr
   | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
+  | { readonly _tag: "Count"; readonly value: number }
 
 export type Pattern =
   | RefExpr
@@ -73,7 +74,7 @@ export type Step =
   | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: GrammarInternal }
 
 export type Node =
-  | { readonly _tag: "Literal"; readonly value: string }
+  | { readonly _tag: "Literal"; readonly value: string; readonly name?: string | undefined }
   | {
       readonly _tag: "Regex"
       readonly source: string
@@ -109,6 +110,7 @@ export type Node =
       readonly encode: (b: never) => Result.Result<Value, GrammarIssue>
       readonly is?: ((value: never) => boolean) | undefined
       readonly name?: string | undefined
+      readonly keys?: ReadonlyArray<string> | undefined
       readonly fidelity: Fidelity
     }
   | {
@@ -125,7 +127,19 @@ export type Node =
       resolved?: GrammarInternal | undefined
     }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | { readonly _tag: "Take"; readonly count: Expr }
+  | {
+      readonly _tag: "Take"
+      readonly count: Expr
+      readonly unit: "char" | "byte"
+      readonly name?: string | undefined
+    }
+  | {
+      readonly _tag: "Merge"
+      readonly parts: ReadonlyArray<{
+        readonly grammar: GrammarInternal
+        readonly keys: ReadonlyArray<string>
+      }>
+    }
   | { readonly _tag: "RepeatExact"; readonly count: Expr; readonly inner: GrammarInternal }
 
 export type Bound<A> = [A] extends [void] ? void : Ref<A>
@@ -254,5 +268,7 @@ export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
       return [resolve(node)]
     case "Match":
       return node.cases.map((matchCase) => matchCase.grammar)
+    case "Merge":
+      return node.parts.map((part) => part.grammar)
   }
 }

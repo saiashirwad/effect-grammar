@@ -11,7 +11,16 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, isCount, Unbound } from "./env.ts"
+import {
+  caseFor,
+  copyFields,
+  evaluate,
+  type Frame,
+  frame,
+  nonByte,
+  isCount,
+  Unbound,
+} from "./env.ts"
 import {
   describeRoundTrip,
   exceptionMessage,
@@ -20,7 +29,7 @@ import {
   type PrintIssue,
 } from "./errors.ts"
 import { reparse } from "./parse.ts"
-import { unifyPattern } from "./pattern.ts"
+import { ownKeys, unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
 
 class Failure {
@@ -105,6 +114,40 @@ const outputGen = (
         step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
       return fail(path === undefined ? result.issue : issueAt(result.issue, path))
     }
+    text += result
+  }
+  return text
+}
+
+const outputMerge = (
+  node: Extract<Node, { _tag: "Merge" }>,
+  value: Value,
+  env: Frame | undefined,
+): string | Failure => {
+  if (!Predicate.isObject(value)) {
+    return fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
+  }
+  const keys = ownKeys(
+    value,
+    node.parts.flatMap((part) => part.keys),
+  )
+  if (!Array.isArray(keys)) return fail(keys)
+
+  let text = ""
+  for (const part of node.parts) {
+    const fields: Record<string, Value> = {}
+    try {
+      copyFields(fields, value, part.keys)
+    } catch (error) {
+      return fail({
+        _tag: "InvalidValue",
+        expected: "readable fields",
+        actual: value,
+        detail: exceptionMessage(error),
+      })
+    }
+    const result = out(part.grammar, fields, env)
+    if (result instanceof Failure) return result
     text += result
   }
   return text
@@ -292,13 +335,17 @@ const out = (
       }
       if (!Predicate.isString(value))
         return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      return value.length === count
-        ? value
-        : fail({
-            _tag: "InvalidValue",
-            expected: `${count} UTF-16 code units`,
-            actual: value,
-          })
+      if (value.length !== count) {
+        return fail({
+          _tag: "InvalidValue",
+          expected: node.unit === "char" ? `${count} UTF-16 code units` : `${count} bytes`,
+          actual: value,
+        })
+      }
+      if (node.unit === "byte" && nonByte.test(value)) {
+        return fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
+      }
+      return value
     }
     case "RepeatExact": {
       const count = evaluate(node.count, env)
@@ -325,6 +372,8 @@ const out = (
       }
       return text
     }
+    case "Merge":
+      return outputMerge(node, value, env)
   }
 }
 

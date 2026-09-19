@@ -188,3 +188,19 @@ const onEntries = G.choiceOn("kind", [["plain", plainTagged]] as const)
 const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
 void onEntriesValue
 void onValue
+
+type Variant = { readonly kind: "a"; readonly n: 0 } | { readonly kind: "b"; readonly n: number }
+const variant = G.filter(
+  G.struct({
+    kind: G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b"))),
+    n: G.integer,
+  }),
+  (value): value is Variant => value.kind === "b" || value.n === 0,
+  "variant",
+)
+const merged = G.merge(variant, G.struct({ id: G.integer }))
+const mergedValue: G.Type<typeof merged> = { kind: "b", n: 42, id: 7 }
+// @ts-expect-error kind "a" requires n to be 0
+const mergedBad: G.Type<typeof merged> = { kind: "a", n: 42, id: 7 }
+void mergedValue
+void mergedBad

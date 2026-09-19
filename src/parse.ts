@@ -1,4 +1,4 @@
-import { Result } from "effect"
+import { Predicate, Result } from "effect"
 
 import {
   type Grammar,
@@ -9,7 +9,18 @@ import {
   unsafeToNever,
   type Value,
 } from "./core.ts"
-import { bind, caseFor, evaluate, type Frame, frame, isCount, materialize, Unbound } from "./env.ts"
+import {
+  bind,
+  caseFor,
+  copyFields,
+  evaluate,
+  type Frame,
+  frame,
+  isCount,
+  materialize,
+  nonByte,
+  Unbound,
+} from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./render.ts"
 
@@ -53,7 +64,7 @@ const go = (
       let current = state.pos
       while (current < end && state.input[current] === node.value[current - state.pos]) current++
       state.pos = current
-      return failAt(state, JSON.stringify(node.value))
+      return failAt(state, node.name ?? JSON.stringify(node.value))
     }
     case "Regex": {
       const expression = new RegExp(node.source, `${node.flags}y`)
@@ -174,11 +185,22 @@ const go = (
     case "Take": {
       const count = evaluate(node.count, env)
       if (count === Unbound) return failAt(state, "a bound take count")
-      if (!isCount(count)) return failAt(state, `<char>{${preview(count)}}`)
-      if (state.input.length - state.pos < count) {
-        return failAt(state, `${count} chars`)
+      if (!isCount(count)) return failAt(state, `<${node.unit}>{${preview(count)}}`)
+      const available = state.input.length - state.pos
+      if (available < count) {
+        if (node.unit === "char") return failAt(state, `${count} chars`)
+        const expected = `${count} bytes but only ${available} remain`
+        return failAtPosition(
+          state,
+          state.input.length,
+          node.name === undefined ? expected : `${node.name}: ${expected}`,
+        )
       }
       const value = state.input.slice(state.pos, state.pos + count)
+      if (node.unit === "byte") {
+        const index = value.search(nonByte)
+        if (index !== -1) return failAtPosition(state, state.pos + index, "a byte")
+      }
       state.pos += count
       return value
     }
@@ -195,6 +217,17 @@ const go = (
         values.push(value)
       }
       return values
+    }
+    case "Merge": {
+      const merged: Record<string, Value> = {}
+      for (const part of node.parts) {
+        const start = state.pos
+        const value = go(part.grammar, state, env)
+        if (value === Fail) return Fail
+        if (!Predicate.isObject(value)) return failAtPosition(state, start, "an object to merge")
+        copyFields(merged, value, part.keys)
+      }
+      return merged
     }
   }
 }
