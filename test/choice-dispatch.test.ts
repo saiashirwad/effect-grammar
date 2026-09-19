@@ -112,7 +112,7 @@ describe("choiceOn prints by reading the tag", () => {
 
   it.effect("accepts ordered [key, grammar] entries", () =>
     Effect.sync(() => {
-      const entries = G.choiceOn("kind", [
+      const entries = G.choiceOnEntries("kind", [
         ["plain", plain],
         ["hashed", hashed],
       ] as const)

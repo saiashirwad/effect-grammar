@@ -7,6 +7,7 @@ export {
   checkedChoice,
   choice,
   choiceOn,
+  choiceOnEntries,
   countPrefixed,
   decodeTo,
   type DecodeToOptions,

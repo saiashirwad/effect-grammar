@@ -614,50 +614,61 @@ const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void =>
   }
 }
 
-/**
- * Alternatives dispatched by a discriminant field. Parsing tries the branches
- * in order; printing reads `value[tag]` and prints with the branch of that key,
- * so it never picks the wrong printer. It does not remove parse ambiguity: two
- * branches may still parse the same text.
- *
- * Pass an object for string keys, or an array of `[key, grammar]` entries for
- * an explicit order and number or boolean discriminants. The object form
- * rejects integer-like keys, which JavaScript reorders.
- */
-export function choiceOn<
-  const Tag extends string,
-  const Cases extends Readonly<Record<string, GrammarInternal>>,
->(tag: Tag, cases: Cases & OnCases<Tag, Cases>): Grammar<Type<Cases[keyof Cases]>>
-export function choiceOn<
-  const Tag extends string,
-  const Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
->(tag: Tag, entries: Entries & OnEntries<Tag, Entries>): Grammar<Type<Entries[number][1]>>
-export function choiceOn(
+const dispatchedChoice = <A>(
   tag: string,
-  cases:
-    | Readonly<Record<string, GrammarInternal>>
-    | ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
-): GrammarInternal {
-  const entries: ReadonlyArray<readonly [MatchKey, GrammarInternal]> = Array.isArray(cases)
-    ? cases
-    : Object.keys(cases).map((key) => {
-        if (isArrayIndexKey(key)) {
-          throw new RangeError(
-            `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source. Pass an array of [key, grammar] entries instead.`,
-          )
-        }
-        // SAFETY: Array.isArray ruled out the entries form, so cases is the record here.
-        return [key, (cases as Readonly<Record<string, GrammarInternal>>)[key]!] as const
-      })
-  if (entries.length === 0) throw new RangeError("choiceOn: at least one case is required")
+  entries: ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+  where: string,
+): Grammar<A> => {
+  if (entries.length === 0) throw new RangeError(`${where}: at least one case is required`)
   const keys = entries.map(([key]) => key)
-  assertUniqueKeys(keys, "choiceOn")
+  assertUniqueKeys(keys, where)
   return make({
     _tag: "Choice",
     options: entries.map(([, grammar]) => grammar),
     on: { tag, keys },
   })
 }
+
+/**
+ * Alternatives dispatched by a discriminant field. Parsing tries the branches
+ * in order; printing reads `value[tag]` and prints with the branch of that key,
+ * so it never picks the wrong printer. It does not remove parse ambiguity: two
+ * branches may still parse the same text.
+ *
+ * The cases are an object keyed by the tag's string values. Integer-like keys
+ * are rejected, since JavaScript reorders them; use `choiceOnEntries` for
+ * those, and for number or boolean discriminants.
+ */
+export const choiceOn = <
+  const Tag extends string,
+  const Cases extends Readonly<Record<string, GrammarInternal>>,
+>(
+  tag: Tag,
+  cases: Cases & OnCases<Tag, Cases>,
+): Grammar<Type<Cases[keyof Cases]>> => {
+  const entries = Object.keys(cases).map((key) => {
+    if (isArrayIndexKey(key)) {
+      throw new RangeError(
+        `choiceOn: key ${JSON.stringify(key)} looks like an integer; JavaScript reorders such keys, so parse order would not match the source. Use choiceOnEntries instead.`,
+      )
+    }
+    return [key, cases[key]!] as const
+  })
+  return dispatchedChoice(tag, entries, "choiceOn")
+}
+
+/**
+ * `choiceOn` with the cases as an array of `[key, grammar]` entries: the parse
+ * order is the array order, and keys may be numbers or booleans as well as
+ * strings.
+ */
+export const choiceOnEntries = <
+  const Tag extends string,
+  const Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>,
+>(
+  tag: Tag,
+  entries: Entries & OnEntries<Tag, Entries>,
+): Grammar<Type<Entries[number][1]>> => dispatchedChoice(tag, entries, "choiceOnEntries")
 
 type TaggedValue<Tag extends string, Cases extends Readonly<Record<string, GrammarInternal>>> = {
   readonly [K in keyof Cases & string]: Readonly<Record<Tag, K>> & {

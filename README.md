@@ -76,9 +76,10 @@ ambiguous. `taggedChoice(tag, cases)` wraps each branch's value as
 matched. It tries longer strings first, so `literals(">", ">=")` still reads
 `>=`.
 
-For explicit branch order or number/boolean discriminants, pass `choiceOn` an
-array of `[key, grammar]` entries. Object-form `choiceOn` and `taggedChoice`
-reject JavaScript array-index keys because object enumeration can reorder them.
+For explicit branch order or number/boolean discriminants, use
+`choiceOnEntries(tag, entries)` with an array of `[key, grammar]` entries.
+`choiceOn` and `taggedChoice` reject JavaScript array-index keys because object
+enumeration can reorder them.
 
 `gen` result objects are exact printer patterns: printing rejects missing,
 extra, symbol, or otherwise unexpected own keys. Arrays must have exactly the

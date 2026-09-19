@@ -183,8 +183,8 @@ const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
   v: "a",
 }
-// choiceOn also accepts ordered [key, grammar] entries.
-const onEntries = G.choiceOn("kind", [["plain", plainTagged]] as const)
+// choiceOnEntries takes ordered [key, grammar] entries.
+const onEntries = G.choiceOnEntries("kind", [["plain", plainTagged]] as const)
 const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
 void onEntriesValue
 void onValue

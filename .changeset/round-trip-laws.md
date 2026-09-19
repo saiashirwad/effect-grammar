@@ -23,9 +23,9 @@ and `suffix` remain available for one-sided delimiters.
   (`choiceOn`) choices, is gone.
 - `codec` verifies the round trip on encode by default; pass
   `{ roundTrip: "off" }` to skip it.
-- `choiceOn` now also accepts an array of `[key, grammar]` entries for an
-  explicit parse order and number or boolean discriminants. The object form
-  still works and rejects JavaScript array-index keys, whose enumeration order
+- Add `choiceOnEntries`, which is `choiceOn` over an array of `[key, grammar]`
+  entries, for an explicit parse order and number or boolean discriminants.
+  `choiceOn` now rejects JavaScript array-index keys, whose enumeration order
   would otherwise change branch priority.
 - Distinguish transformations by the law they claim: `iso` (claimed inverse),
   `partialIso` (fallible, agrees where both succeed), and `decodeTo` (Schema
