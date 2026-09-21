@@ -4,10 +4,10 @@ Define a parser, printer, and Effect schema codec from one grammar.
 
 ## Install
 
-Requires Node.js 20 or later and Effect `>=4.0.0-rc.112 <5`.
+Requires Node.js 20 or later and Effect v4.
 
 ```sh
-npm install effect@4.0.0-rc.112 effect-grammar
+npm install effect@rc effect-grammar
 ```
 
 ## Quick start
