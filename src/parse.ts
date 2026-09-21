@@ -1,14 +1,6 @@
 import { Predicate, Result } from "effect"
 
-import {
-  type Grammar,
-  type GrammarInternal,
-  type Node,
-  nodeOf,
-  resolve,
-  unsafeToNever,
-  type Value,
-} from "./core.ts"
+import { type Grammar, type GrammarInternal, type Node, nodeOf, resolve, unsafeToNever, type Value } from "./core.ts"
 import {
   bind,
   caseFor,
@@ -32,32 +24,23 @@ interface State {
   readonly suspended: Map<Node, Set<number>>
 }
 
-const Fail = Symbol("effect-grammar/ParseFail")
-
-const failAtPosition = (state: State, position: number, expected: string): typeof Fail => {
+const failAt = (state: State, expected: string, position = state.pos): Result.Result<never, void> => {
   if (position > state.furthest) {
     state.furthest = position
     state.expected = new Set([expected])
   } else if (position === state.furthest) {
     state.expected.add(expected)
   }
-  return Fail
+  return Result.fail(undefined)
 }
 
-const failAt = (state: State, expected: string): typeof Fail =>
-  failAtPosition(state, state.pos, expected)
-
-const go = (
-  grammar: GrammarInternal,
-  state: State,
-  env: Frame | undefined,
-): Value | typeof Fail => {
+const parseGrammar = (grammar: GrammarInternal, state: State, env: Frame | undefined): Result.Result<Value, void> => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal": {
       if (state.input.startsWith(node.value, state.pos)) {
         state.pos += node.value.length
-        return undefined
+        return Result.void
       }
       // Report the first mismatch, not the start of the literal.
       const end = state.pos + node.value.length
@@ -72,89 +55,89 @@ const go = (
       const match = expression.exec(state.input)
       if (match === null || match.index !== state.pos) return failAt(state, node.name)
       state.pos += match[0].length
-      return match[0]
+      return Result.succeed(match[0])
     }
     case "Gen": {
       const local = frame(node.scope, node.slotCount, env)
       for (const step of node.steps) {
-        const value = go(step.grammar, state, local)
-        if (value === Fail) return Fail
-        if (step._tag === "Bind") bind(local, step.slot, value)
+        const result = parseGrammar(step.grammar, state, local)
+        if (Result.isFailure(result)) return result
+        if (step._tag === "Bind") bind(local, step.slot, result.success)
       }
       const value = materialize(node.result, local)
-      return value === Unbound ? failAt(state, "a bound generator result") : value
+      return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
     }
     case "Wrap": {
-      if (go(node.open, state, env) === Fail) return Fail
-      const value = go(node.inner, state, env)
-      if (value === Fail) return Fail
-      return go(node.close, state, env) === Fail ? Fail : value
+      const open = parseGrammar(node.open, state, env)
+      if (Result.isFailure(open)) return open
+      const inner = parseGrammar(node.inner, state, env)
+      if (Result.isFailure(inner)) return inner
+      const close = parseGrammar(node.close, state, env)
+      return Result.isFailure(close) ? close : inner
     }
     case "Choice": {
       const start = state.pos
       for (const option of node.options) {
-        const value = go(option, state, env)
-        if (value !== Fail) return value
+        const result = parseGrammar(option, state, env)
+        if (Result.isSuccess(result)) return result
         state.pos = start
       }
-      return Fail
+      return Result.fail(undefined)
     }
     case "Many": {
       const values: Array<Value> = []
       let mark = state.pos
       while (values.length < node.max) {
-        const value = go(node.inner, state, env)
-        if (value === Fail) break
+        const result = parseGrammar(node.inner, state, env)
+        if (Result.isFailure(result)) break
         if (state.pos === mark) return failAt(state, "a repetition element that consumes input")
-        values.push(value)
+        values.push(result.success)
         mark = state.pos
-        if (go(node.sep, state, env) === Fail) break
+        if (Result.isFailure(parseGrammar(node.sep, state, env))) break
       }
       state.pos = mark
-      return values.length < node.min ? Fail : values
+      return values.length < node.min ? Result.fail(undefined) : Result.succeed(values)
     }
     case "Optional": {
       const mark = state.pos
-      const value = go(node.inner, state, env)
-      if (value !== Fail) return value
+      const result = parseGrammar(node.inner, state, env)
+      if (Result.isSuccess(result)) return result
       state.pos = mark
-      return undefined
+      return Result.void
     }
     case "Transform": {
       const start = state.pos
-      const value = go(node.inner, state, env)
-      if (value === Fail) return Fail
+      const result = parseGrammar(node.inner, state, env)
+      if (Result.isFailure(result)) return result
       const consumed = state.pos
       try {
-        const decoded = node.decode(unsafeToNever(value))
+        const decoded = node.decode(unsafeToNever(result.success))
         if (Result.isFailure(decoded)) {
           state.pos = start
-          return failAtPosition(state, consumed, decoded.failure.message)
+          return failAt(state, decoded.failure.message, consumed)
         }
         if (node.is?.(unsafeToNever(decoded.success)) === false) {
           state.pos = start
-          return failAtPosition(state, consumed, node.name ?? describe(node.inner))
+          return failAt(state, node.name ?? describe(node.inner), consumed)
         }
-        return decoded.success
+        return Result.succeed(decoded.success)
       } catch (error) {
         state.pos = start
-        return failAtPosition(
-          state,
-          consumed,
-          `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`,
-        )
+        return failAt(state, `${node.name ?? describe(node.inner)}: ${exceptionMessage(error)}`, consumed)
       }
     }
-    case "Skip":
-      return go(node.inner, state, env) === Fail ? Fail : undefined
+    case "Skip": {
+      const result = parseGrammar(node.inner, state, env)
+      return Result.isFailure(result) ? result : Result.void
+    }
     case "Label": {
       const start = state.pos
       const siblings = state.furthest === start ? [...state.expected] : []
-      const value = go(node.inner, state, env)
-      if (value === Fail && state.furthest === start) {
+      const result = parseGrammar(node.inner, state, env)
+      if (Result.isFailure(result) && state.furthest === start) {
         state.expected = new Set([...siblings, node.name])
       }
-      return value
+      return result
     }
     case "Suspend": {
       const positions = state.suspended.get(node) ?? new Set<number>()
@@ -162,14 +145,14 @@ const go = (
       state.suspended.set(node, positions)
       const position = state.pos
       positions.add(position)
-      let target: GrammarInternal
       try {
-        target = resolve(node)
-      } catch (error) {
-        return failAt(state, exceptionMessage(error))
-      }
-      try {
-        return go(target, state, env)
+        let target: GrammarInternal
+        try {
+          target = resolve(node)
+        } catch (error) {
+          return failAt(state, exceptionMessage(error))
+        }
+        return parseGrammar(target, state, env)
       } finally {
         positions.delete(position)
         if (positions.size === 0) state.suspended.delete(node)
@@ -180,7 +163,7 @@ const go = (
       if (key === Unbound) return failAt(state, "a bound match ref")
       const matchCase = caseFor(node.cases, key)
       if (matchCase === undefined) return failAt(state, `a match case for ${preview(key)}`)
-      return go(matchCase.grammar, state, env)
+      return parseGrammar(matchCase.grammar, state, env)
     }
     case "Take": {
       const count = evaluate(node.count, env)
@@ -190,19 +173,15 @@ const go = (
       if (available < count) {
         if (node.unit === "char") return failAt(state, `${count} chars`)
         const expected = `${count} bytes but only ${available} remain`
-        return failAtPosition(
-          state,
-          state.input.length,
-          node.name === undefined ? expected : `${node.name}: ${expected}`,
-        )
+        return failAt(state, node.name === undefined ? expected : `${node.name}: ${expected}`, state.input.length)
       }
       const value = state.input.slice(state.pos, state.pos + count)
       if (node.unit === "byte") {
         const index = value.search(nonByte)
-        if (index !== -1) return failAtPosition(state, state.pos + index, "a byte")
+        if (index !== -1) return failAt(state, "a byte", state.pos + index)
       }
       state.pos += count
-      return value
+      return Result.succeed(value)
     }
     case "RepeatExact": {
       const count = evaluate(node.count, env)
@@ -211,46 +190,32 @@ const go = (
       const values: Array<Value> = []
       for (let index = 0; index < count; index++) {
         const mark = state.pos
-        const value = go(node.inner, state, env)
-        if (value === Fail) return Fail
+        const result = parseGrammar(node.inner, state, env)
+        if (Result.isFailure(result)) return result
         if (state.pos === mark) return failAt(state, "a repetition element that consumes input")
-        values.push(value)
+        values.push(result.success)
       }
-      return values
+      return Result.succeed(values)
     }
     case "Merge": {
       const merged: Record<string, Value> = {}
       for (const part of node.parts) {
         const start = state.pos
-        const value = go(part.grammar, state, env)
-        if (value === Fail) return Fail
-        if (!Predicate.isObject(value)) return failAtPosition(state, start, "an object to merge")
-        copyFields(merged, value, part.keys)
+        const result = parseGrammar(part.grammar, state, env)
+        if (Result.isFailure(result)) return result
+        if (!Predicate.isObject(result.success)) return failAt(state, "an object to merge", start)
+        copyFields(merged, result.success, part.keys)
       }
-      return merged
+      return Result.succeed(merged)
     }
   }
-}
-
-const toError = (state: State): ParseError => {
-  const before = state.input.slice(0, state.furthest)
-  const code = state.input.codePointAt(state.furthest)
-  return new ParseError({
-    pos: state.furthest,
-    line: before.split("\n").length,
-    column: before.length - before.lastIndexOf("\n"),
-    expected: [...state.expected],
-    found: code === undefined ? undefined : String.fromCodePoint(code),
-  })
 }
 
 export const reparse = (
   grammar: GrammarInternal,
   text: string,
   env: Frame | undefined,
-):
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly error: ParseError } => {
+): Result.Result<Value, ParseError> => {
   const state: State = {
     input: text,
     pos: 0,
@@ -258,20 +223,25 @@ export const reparse = (
     expected: new Set(),
     suspended: new Map(),
   }
-  const value = go(grammar, state, env)
-  if (value !== Fail && state.pos === text.length) return { ok: true, value }
-  if (value !== Fail) failAt(state, "end of input")
-  return { ok: false, error: toError(state) }
+  const result = parseGrammar(grammar, state, env)
+  if (Result.isSuccess(result)) {
+    if (state.pos === text.length) return Result.succeed(result.success)
+    failAt(state, "end of input")
+  }
+  const before = state.input.slice(0, state.furthest)
+  const code = state.input.codePointAt(state.furthest)
+  return Result.fail(
+    new ParseError({
+      pos: state.furthest,
+      line: before.split("\n").length,
+      column: before.length - before.lastIndexOf("\n"),
+      expected: [...state.expected],
+      found: code === undefined ? undefined : String.fromCodePoint(code),
+    }),
+  )
 }
 
 // Parse the entire input.
-export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
-  const state: State = { input, pos: 0, furthest: 0, expected: new Set(), suspended: new Map() }
-  const value = go(grammar, state, undefined)
-  if (value !== Fail && state.pos === input.length) {
-    // SAFETY: interpreting Grammar<A> preserves its output type across every node.
-    return Result.succeed(value as A)
-  }
-  if (value !== Fail) failAt(state, "end of input")
-  return Result.fail(toError(state))
-}
+export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> =>
+  // SAFETY: interpreting Grammar<A> preserves its output type across every node.
+  reparse(grammar, input, undefined) as Result.Result<A, ParseError>

@@ -25,8 +25,8 @@ const roundTripIssue = (
   env: Frame | undefined,
 ): RoundTripIssue | undefined => {
   const back = reparse(grammar, printed, env)
-  if (!back.ok) return { _tag: "RoundTrip", value, printed, error: back.error.message }
-  return Equal.equals(back.value, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.value }
+  if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed, error: back.failure.message }
+  return Equal.equals(back.success, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.success }
 }
 
 const bindingPath = (
