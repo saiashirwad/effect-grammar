@@ -92,7 +92,7 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
   }
 }
 
-/** The tail of a round-trip message: what the value printed as and how that read back. */
+// Message suffix describing the printed value and parse result.
 export const describeRoundTrip = (issue: Extract<PrintIssue, { _tag: "RoundTrip" }>): string =>
   issue.error === undefined
     ? `prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
@@ -115,11 +115,8 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
 export const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
 
-/**
- * `JSON.stringify`, except that bytes show as `<07 ab>` and a bigint as `5n`,
- * unquoted so neither reads as a string. A replacer cannot do this: its result
- * is quoted, and `toJSON` turns a `Buffer` into an object before it runs.
- */
+// Keep bytes and bigints unquoted. A JSON replacer would quote them, and
+// Buffer.toJSON runs before the replacer can see the bytes.
 const show = (value: Value, seen: ReadonlyArray<Value>): string | undefined => {
   if (Predicate.isBigInt(value)) return `${value}n`
   if (Predicate.isUint8Array(value)) return `<${hex(value)}>`

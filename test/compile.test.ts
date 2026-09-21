@@ -15,7 +15,6 @@ const prepareFail = <A>(grammar: G.Grammar<A>): G.GrammarValidationError => {
   return result.failure
 }
 
-// A ref captured inside a gen and used after it closes.
 const escaped = (() => {
   let leaked: G.Grammar<string> | undefined
   G.gen(function* () {

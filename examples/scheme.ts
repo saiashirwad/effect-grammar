@@ -67,8 +67,7 @@ const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
   }),
 )
 
-// Printing reads `kind` and goes straight to that case; parsing tries the
-// cases in this order. No branch needs a guard.
+// Printing dispatches on `kind`; parsing tries branches in order. No guards needed.
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () =>
     Grammar.choiceOn("kind", {
@@ -82,8 +81,7 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   "expr",
 )
 
-// `trivia` prints nothing, `spaces` prints one space: "(+ 1 2)" prints back as
-// "(+ 1 2)", not "(+12)".
+// `trivia` prints nothing; `spaces` keeps "(+ 1 2)" from printing as "(+12)".
 const list = Grammar.between(
   Grammar.seq(Grammar.literal("("), Grammar.trivia),
   Grammar.sepBy(expr, Grammar.spaces),

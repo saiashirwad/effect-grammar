@@ -45,7 +45,6 @@ const fail = (issue: PrintIssue): Failure => new Failure(issue)
 
 type RoundTripIssue = Extract<PrintIssue, { _tag: "RoundTrip" }>
 
-/** Parse `printed` back through `grammar`; the issue if it does not read as `value`. */
 const roundTripIssue = (
   grammar: GrammarInternal,
   value: Value,
@@ -344,7 +343,7 @@ const out = (
       if (nonByte.test(value)) {
         return fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
       }
-      // A binary string is an encoding detail, so the error shows the bytes it stands for.
+      // Report bytes rather than the internal binary string.
       return value.length === count
         ? value
         : fail({ _tag: "InvalidValue", expected: `${count} bytes`, actual: toBytes(value) })
@@ -389,7 +388,7 @@ export const printUnknown = (
     : Result.succeed(result)
 }
 
-/** Print a value using the grammar's selected branches and configured spellings. This does not verify a round trip; see {@link printCheckedUnknown}. */
+// Print with the grammar's branches and spellings, without a round-trip check. See `printChecked`.
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   printUnknown(grammar, value)
 
@@ -403,10 +402,6 @@ export const printCheckedUnknown = (
   return issue === undefined ? printed : Result.fail(new PrintError({ issue }))
 }
 
-/**
- * Print a value, then parse the whole output back and confirm it equals the
- * original. Fails if the text would decode to a different value, so a checked
- * print never hides a broken round trip.
- */
+// Print a value and verify that parsing the whole output returns the original value.
 export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   printCheckedUnknown(grammar, value)

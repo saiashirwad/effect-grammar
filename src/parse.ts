@@ -59,7 +59,7 @@ const go = (
         state.pos += node.value.length
         return undefined
       }
-      // Failure path only: report at the first mismatching character.
+      // Report the first mismatch, not the start of the literal.
       const end = state.pos + node.value.length
       let current = state.pos
       while (current < end && state.input[current] === node.value[current - state.pos]) current++
@@ -264,7 +264,7 @@ export const reparse = (
   return { ok: false, error: toError(state) }
 }
 
-/** Interpret a grammar from cursor zero and require the whole input to be consumed. */
+// Parse the entire input.
 export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> => {
   const state: State = { input, pos: 0, furthest: 0, expected: new Set(), suspended: new Map() }
   const value = go(grammar, state, undefined)

@@ -30,12 +30,11 @@ export const literal = (value: string): Silent => silent({ _tag: "Literal", valu
 
 export const empty = literal("")
 
-/**
- * Match at the parser's current cursor using JavaScript `RegExp` semantics.
- * Parsing uses a fresh sticky matcher against the original full input; printing
- * requires the supplied string to match in full. `g`, `y`, and the caller's
- * `lastIndex` are ignored, and the caller's expression is never mutated.
- */
+// Match at the parser's current cursor using JavaScript `RegExp` semantics.
+// Parsing uses a fresh sticky matcher against the original full input; printing
+// requires the supplied string to match in full. `g`, `y`, and the caller's
+// `lastIndex` are ignored, and the caller's expression is never mutated.
+
 export const regex = (expression: RegExp, name: string): Grammar<string> => {
   const flags = expression.flags.replace(/[gy]/g, "")
   return make({ _tag: "Regex", source: expression.source, flags, name })
@@ -116,23 +115,19 @@ export function suffix<A>(innerOrClose: Grammar<A> | Silent | string, close?: Si
   return between(empty, innerOrClose as Grammar<A>, close)
 }
 
-/**
- * Ordered alternatives. Parsing tries each branch in order and keeps the
- * first that matches. Printing keeps the first branch whose printer accepts
- * the value; use `checkedChoice` to keep the first branch whose text also
- * parses back.
- */
+// Parse with the first matching branch; print with the first accepting printer.
+// Use `checkedChoice` to also check that printed text parses back.
+
 export const choice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
 >(
   ...options: Grammars
 ): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options })
 
-/**
- * {@link choice} whose printer selects the first branch that reads back to an
- * equal value. Each checked choice reparses its candidate output; nesting can
- * multiply that work, so keep it off hot paths.
- */
+// `choice` whose printer selects the first branch that reads back to an
+// equal value. Each checked choice reparses its candidate output; nesting can
+// multiply that work, so keep it off hot paths.
+
 export const checkedChoice = <
   const Grammars extends readonly [GrammarInternal, ...Array<GrammarInternal>],
 >(
@@ -172,7 +167,7 @@ const repeatNode = <A>(
 ): Grammar<ReadonlyArray<A>> =>
   make({ _tag: "Many", inner, sep: separator, ...bounds(name, options) })
 
-/** Repeat an item within bounds. Each successful parse must consume input. */
+// Repeat an item within bounds. Each successful parse must consume input.
 export const many: {
   <A>(inner: Grammar<A>, options?: RepeatOptions): Grammar<ReadonlyArray<A>>
   (options?: RepeatOptions): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
@@ -180,7 +175,7 @@ export const many: {
   repeatNode("many", inner, empty, options),
 )
 
-/** Repeat an item with a silent separator. Each successful item parse must consume input. */
+// Repeat an item with a silent separator. Each successful item parse must consume input.
 export const sepBy: {
   <A>(
     inner: Grammar<A>,
@@ -255,7 +250,7 @@ export const take = (count: Ref<number> | number): Grammar<string> =>
 export const takeBytes = (count: Ref<number> | number, name?: string): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "bytes"), unit: "byte", name })
 
-/** Repeat an item a constant or bound number of times. Each successful parse must consume input. */
+// Repeat an item a constant or bound number of times. Each successful parse must consume input.
 export const repeat: {
   <A>(inner: Grammar<A>, count: Ref<number> | number): Grammar<ReadonlyArray<A>>
   (count: Ref<number> | number): <A>(inner: Grammar<A>) => Grammar<ReadonlyArray<A>>
@@ -303,11 +298,9 @@ const resultTransform = <A, B>(
   fidelity: Fidelity,
 ): Grammar<B> => make({ _tag: "Transform", inner, ...options, fidelity })
 
-/**
- * Map a grammar's value with a pair of functions. No law is claimed: the
- * two directions need not be inverse, so a value may print as text that
- * parses back to something else. Use `iso` when you mean to claim inverses.
- */
+// Transform values without claiming the functions are inverses. Printed text
+// may parse back to a different value. Use `iso` to claim inverses.
+
 export const transform: {
   <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
@@ -322,7 +315,7 @@ export interface TransformOrFailOptions<A, B> {
   readonly name?: string
 }
 
-/** {@link transform} with directions that return a `Result`. No law is claimed. */
+// `transform` with directions that return a `Result`. No law is claimed.
 export const transformOrFail: {
   <A, B>(options: TransformOrFailOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
@@ -330,11 +323,9 @@ export const transformOrFail: {
   resultTransform(inner, options, "unchecked"),
 )
 
-/**
- * Like {@link transform}, but the author claims the two directions are
- * inverse. The claim is recorded, not proved; `Grammar.auditFidelity` reports
- * only the transforms that make no such claim.
- */
+// Like `transform`, but claims the functions are inverses. This is not
+// verified; `Grammar.auditFidelity` only reports transforms without this claim.
+
 export const iso: {
   <A, B>(options: TransformOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOptions<A, B>): Grammar<B>
@@ -342,7 +333,7 @@ export const iso: {
   plainTransform(inner, options, "claimed-iso"),
 )
 
-/** An {@link iso} whose two directions may each fail; they must agree where both succeed. */
+// An `iso` whose two directions may each fail; they must agree where both succeed.
 export const partialIso: {
   <A, B>(options: TransformOrFailOptions<A, B>): (inner: Grammar<A>) => Grammar<B>
   <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B>
@@ -401,11 +392,9 @@ export const as: {
   ),
 )
 
-/**
- * String alternatives whose value is the matched string. Longer strings are
- * tried first whatever order they are listed in, so a string is never shadowed
- * by one of its own prefixes; strings of equal length keep their listed order.
- */
+// Return the matched string, trying longest first to avoid prefix shadowing.
+// Equal-length strings keep their listed order.
+
 export const literals = <const Values extends readonly [string, ...Array<string>]>(
   ...values: Values
 ): Grammar<Values[number]> => {
@@ -429,20 +418,16 @@ export const label: {
   <A>(inner: Grammar<A>, name: string): Grammar<A>
 } = F.dual(2, <A>(inner: Grammar<A>, name: string) => make({ _tag: "Label", inner, name }))
 
-/**
- * Defer a grammar for recursive definitions. The thunk runs on first resolution
- * and its result is cached. Parsing rejects recursion at the same input position;
- * printing rejects recursion that reaches the same suspension without consuming
- * a value, so recursive definitions must be productive.
- */
+// Resolve and cache the thunk on first use. Parsing rejects recursion at the
+// same input position; printing rejects revisiting the same suspension without
+// consuming a value.
+
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> =>
   make({ _tag: "Suspend", thunk, name })
 
-/**
- * Replace an absent (`undefined`) inner value when parsing, and omit a value
- * equal to the default when printing. Parsing leaves every other value,
- * including `null`, unchanged.
- */
+// Replace `undefined` with the default when parsing; omit equal values when
+// printing. Other parsed values, including `null`, are unchanged.
+
 export const defaulted: {
   <A>(value: A): (inner: Grammar<A | undefined>) => Grammar<A>
   <A>(inner: Grammar<A | undefined>, value: A): Grammar<A>
@@ -459,10 +444,9 @@ type StructValue<Fields extends StructFields> = {
   readonly [K in keyof Fields]: Type<Fields[K]>
 }
 
-/**
- * Sequence fields and return an object. Printing requires exactly these own
- * keys: missing, extra, and symbol keys are rejected.
- */
+// Sequence fields and return an object. Printing requires exactly these own
+// keys: missing, extra, and symbol keys are rejected.
+
 export const struct = <const Fields extends StructFields>(
   fields: Fields,
 ): Grammar<StructValue<Fields>> => {
@@ -629,16 +613,12 @@ const dispatchedChoice = <A>(
   })
 }
 
-/**
- * Alternatives dispatched by a discriminant field. Parsing tries the branches
- * in order; printing reads `value[tag]` and prints with the branch of that key,
- * so it never picks the wrong printer. It does not remove parse ambiguity: two
- * branches may still parse the same text.
- *
- * The cases are an object keyed by the tag's string values. Integer-like keys
- * are rejected, since JavaScript reorders them; use `choiceOnEntries` for
- * those, and for number or boolean discriminants.
- */
+// Parse branches in order; print with the branch keyed by `value[tag]`.
+// Branches may still parse the same text.
+//
+// Cases use string keys. Integer-like keys are rejected because JavaScript
+// reorders them. Use `choiceOnEntries` for those or number and boolean keys.
+
 export const choiceOn = <
   const Tag extends string,
   const Cases extends Readonly<Record<string, GrammarInternal>>,
@@ -657,11 +637,9 @@ export const choiceOn = <
   return dispatchedChoice(tag, entries, "choiceOn")
 }
 
-/**
- * `choiceOn` with the cases as an array of `[key, grammar]` entries: the parse
- * order is the array order, and keys may be numbers or booleans as well as
- * strings.
- */
+// `choiceOn` with `[key, grammar]` entries in parse order.
+// Keys may be strings, numbers, or booleans.
+
 export const choiceOnEntries = <
   const Tag extends string,
   const Entries extends ReadonlyArray<readonly [MatchKey, GrammarInternal]>,

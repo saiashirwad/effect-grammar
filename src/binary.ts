@@ -110,18 +110,15 @@ const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
 const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
   integer(8, name, Int64, (value) => BigInt.asIntN(64, value), littleEndian)
 
-// Floats are read and written through one shared view, so a value costs no allocation.
+// Reuse the view to avoid allocating a buffer for each float.
 const scratch = new DataView(new ArrayBuffer(8))
 
-/**
- * Every NaN prints as the quiet NaN the engine writes, so a payload or a
- * signalling NaN in the input does not survive parsing and printing again.
- */
+// NaN payloads and signalling NaNs do not survive a parse/print round trip.
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
   takeBytes(size, name).pipe(
     iso({
       name,
-      // A float32 holds only the numbers that survive rounding to single precision.
+      // Reject values that would lose precision as float32.
       is: (value) =>
         Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)),
       decode: (binary) => {
@@ -163,10 +160,9 @@ export const float64 = float(8, "float64")
 export const float32le = float(4, "float32le", true)
 export const float64le = float(8, "float64le", true)
 
-// No length cap: a value too wide for a number is left for decoding to reject by range.
+// Allow padding of any length; decoding rejects out-of-range values.
 const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
 
-/** The encoded number, or a value outside the safe integer range when it is too large to hold. */
 const fromLeb128 = (binary: string): number => {
   let value = 0
   for (let index = binary.length - 1; index >= 0; index--) {
@@ -185,10 +181,8 @@ const toLeb128 = (value: number): string => {
   return binary + String.fromCharCode(rest)
 }
 
-/**
- * Unsigned LEB128 within the safe integer range. Parsing accepts padded
- * encodings of any length; printing writes the shortest one.
- */
+// Unsigned LEB128 within the safe integer range. Parsing accepts padded
+// encodings of any length; printing writes the shortest one.
 export const varuint = leb128("varuint").pipe(
   partialIso({
     name: "varuint",
@@ -205,7 +199,7 @@ export const varuint = leb128("varuint").pipe(
   }),
 )
 
-/** Zigzag-encoded LEB128, as in protobuf `sint64`, for integers from -(2 ** 52) to 2 ** 52 - 1. */
+// Zigzag-encoded LEB128, as in protobuf `sint64`, for integers from -(2 ** 52) to 2 ** 52 - 1.
 export const varint = leb128("varint").pipe(
   partialIso({
     name: "varint",

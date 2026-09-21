@@ -30,14 +30,9 @@ export class GrammarValidationError extends Schema.TaggedError<GrammarValidation
   }
 }
 
-/**
- * Validate a grammar once, then return interpreter functions bound to it in a
- * `Result`. Validation can resolve and cache suspended thunks. Other input,
- * value, callback, and round-trip failures can still occur when the prepared
- * operations run.
- *
- * This does not compile or optimize the grammar.
- */
+// Validate once and bind the interpreters without compiling or optimizing the grammar.
+// Validation may resolve and cache suspended thunks. Prepared operations can still
+// fail on inputs, values, callbacks, or round trips.
 export const prepare = <A>(
   grammar: Grammar<A>,
 ): Result.Result<Prepared<A>, GrammarValidationError> => {

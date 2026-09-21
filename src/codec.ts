@@ -14,12 +14,8 @@ const printIssueToSchema = (actual: Value, issue: PrintIssue): SchemaIssue.Issue
 
 export interface CodecOptions {
   readonly identifier?: string
-  /**
-   * - `verify` (default): encoding prints, then parses the output back and
-   *   fails if it decodes to a different value, so a codec never encodes a
-   *   valid value into text that decodes as another. Reparses on every encode.
-   * - `off`: encoding prints without the check.
-   */
+  // - `verify` (default): reparse every encoded output and fail if the value changes.
+  // - `off`: print without checking the round trip.
   readonly roundTrip?: "verify" | "off"
 }
 

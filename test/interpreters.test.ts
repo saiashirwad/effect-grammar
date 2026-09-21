@@ -8,9 +8,7 @@ import * as G from "../src/index.ts"
 import { assertPrintParse } from "../src/testing.ts"
 import { parseOk } from "./helpers.ts"
 
-// One row per Node variant, exercising parse, print, and render together so a
-// behavior that drifts between the three interpreters is caught. The `satisfies`
-// clause makes a new Node variant a compile error until it gains a row here.
+// Shared cases catch drift between interpreters. `satisfies` requires a row for every Node variant.
 
 interface Row<A = unknown> {
   readonly grammar: G.Grammar<A>

@@ -34,9 +34,8 @@ export const printFail = <A>(grammar: Grammar.Grammar<A>, value: A): Grammar.Pri
 
 export { assertPrintParse as assertRoundTrip } from "../src/testing.ts"
 
-// Two branches whose encoders ignore the discriminant. `plain` accepts any
-// value with a `value` field, so a trial-based printer picks it for a `hashed`
-// value and prints "x" instead of "#x".
+// Both encoders ignore the discriminant, so a trial-based printer can choose
+// `plain` for a `hashed` value and print "x" instead of "#x".
 export const word = Grammar.regex(/[a-z]+/, "word")
 export const plain = word.pipe(
   Grammar.transform({
@@ -52,8 +51,8 @@ export const hashed = Grammar.prefix("#", word).pipe(
 )
 export const wrong = { kind: "hashed", value: "x" } as const
 
-// "42" is both a number and a symbol, so a symbol whose text is "42" reads back
-// as a number no matter which branch prints it.
+// Both branches accept "42", so the symbol parses back as a number
+// regardless of which branch prints it.
 export const number = Grammar.regex(/\d+/, "number").pipe(
   Grammar.transform({
     decode: (raw) => ({ kind: "number" as const, value: Number(raw) }),

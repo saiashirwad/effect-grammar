@@ -161,10 +161,9 @@ describe("choiceOn prints by reading the tag", () => {
   it.effect("does not detect an ambiguous grammar on its own", () =>
     Effect.sync(() => {
       const atom = G.choiceOn("kind", { number, symbol })
-      // The tag says symbol, so choiceOn prints "42"; the grammar reads it as a number.
       assert.equal(printOk(atom, { kind: "symbol", value: "42" }), "42")
       assert.deepEqual(parseOk(atom, "42"), { kind: "number", value: 42 })
-      // printChecked exposes the ambiguity the tag dispatch hides.
+      // Tag dispatch still needs a whole-grammar round-trip check.
       const r = G.printChecked(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
     }),

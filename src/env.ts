@@ -2,10 +2,7 @@ import { Predicate } from "effect"
 
 import type { Case, Expr, Pattern, RefExpr, ScopeId, Value } from "./core.ts"
 
-/**
- * Sentinel for "no value has been bound here". Distinguished from `undefined`
- * because slots can legitimately hold `undefined` (e.g. `optional`).
- */
+// An unbound slot; `undefined` is a valid bound value.
 export const Unbound = Symbol("effect-grammar/Unbound")
 
 export type BoundValue = Value | typeof Unbound
@@ -17,7 +14,7 @@ export interface Frame {
 }
 
 export const frame = (scope: ScopeId, slotCount: number, parent: Frame | undefined): Frame => {
-  // Push (not `Array.from({ length }).fill()`): the slots array must stay packed.
+  // Push keeps the slots array packed.
   const values: Array<Value> = []
   for (let slot = 0; slot < slotCount; slot++) values.push(Unbound)
   return { scope, parent, values }
@@ -98,6 +95,6 @@ export const isCount = (value: Value): value is number =>
 
 export const nonByte = /[^\0-\xff]/
 
-/** The bytes of a binary string, one per character; call only once `nonByte` has ruled out wider ones. */
+// Call only after `nonByte` has ruled out characters above 0xff.
 export const toBytes = (binary: string): Uint8Array =>
   Uint8Array.from(binary, (char) => char.charCodeAt(0))

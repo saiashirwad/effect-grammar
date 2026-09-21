@@ -26,7 +26,6 @@ const allMatchEmpty = (grammars: Iterable<GrammarInternal>, seen: Set<Node>): Em
   return result
 }
 
-/** Check whether the grammar can be proved to match or reject empty input. */
 const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => {
   const node = nodeOf(grammar)
   switch (node._tag) {
@@ -61,7 +60,7 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
     case "Optional":
       return "yes"
     case "Transform": {
-      // A transform consumes what its inner grammar does, but its decode may reject an empty match.
+      // Decoding may reject an empty match unless the transform is total.
       const inner = matchesEmpty(node.inner, seen)
       return inner === "yes" && node.total !== true ? "unknown" : inner
     }
@@ -77,7 +76,7 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
     }
     case "Take":
     case "RepeatExact":
-      // A repeated item must consume input, so as with take only a zero count matches empty.
+      // Repeated items must consume input, so only a zero count matches empty.
       if (node.count._tag !== "Count") return "unknown"
       return node.count.value === 0 ? "yes" : "no"
     case "Merge":
@@ -90,7 +89,7 @@ const matchesEmpty = (grammar: GrammarInternal, seen: Set<Node>): EmptyMatch => 
   }
 }
 
-/** Walk every node reachable from `grammar`, once per `Suspend` node. */
+// Visit reachable nodes, deduplicating only suspensions.
 const eachNode = (grammar: GrammarInternal, visit: (node: Node) => void, seen: Set<Node>): void => {
   const node = nodeOf(grammar)
   if (node._tag === "Suspend") {
@@ -183,7 +182,7 @@ const walk = (
       break
     case "RepeatExact":
       checkRef(node.count, "repeat", active, issues)
-      // A bound count may be zero at run time, but like `many` with a max it is checked anyway.
+      // Bound counts can be nonzero, so their items must pass the progress check.
       if (node.count._tag !== "Count" || node.count.value > 0) {
         checkProgress(node.inner, "repetition", issues)
       }
@@ -194,13 +193,9 @@ const walk = (
   for (const child of children(node)) walk(child, active, visiting, completed, issues)
 }
 
-/**
- * Check a grammar for staged errors that `parse` and `print` would otherwise
- * only report when they run: refs used outside their gen and any nonzero
- * repetition of a grammar proven to match empty input. Resolving suspensions
- * may evaluate and cache their thunks. Returns the issues these checks find;
- * an empty array is not proof of all runtime behavior.
- */
+// Check for refs outside their gen and nonzero repetitions of grammars proven
+// to match empty input. May evaluate and cache suspension thunks.
+// An empty result does not guarantee runtime success.
 export const validate = (grammar: GrammarInternal): ReadonlyArray<GrammarIssue> => {
   const issues: Array<GrammarIssue> = []
   walk(grammar, [], new Set(), new WeakMap(), issues)
@@ -212,11 +207,9 @@ export interface FidelityEntry {
   readonly fidelity: Fidelity
 }
 
-/**
- * List the transforms in a grammar that do not claim a full inverse law
- * (`transform`, `transformOrFail`, `partialIso`). An empty result means each
- * transform makes that claim; it does not prove the claim or a round trip.
- */
+// List the transforms in a grammar that do not claim a full inverse law
+// (`transform`, `transformOrFail`, `partialIso`). An empty result means each
+// transform makes that claim; it does not prove the claim or a round trip.
 export const auditFidelity = (grammar: GrammarInternal): ReadonlyArray<FidelityEntry> => {
   const entries: Array<FidelityEntry> = []
   eachNode(

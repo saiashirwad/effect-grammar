@@ -69,7 +69,7 @@ const refHandler: ProxyHandler<RefImpl<unknown>> = {
 const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
   const ref = new Proxy(new RefImpl<A>(), refHandler)
   refs.set(ref, { expr, scope })
-  // SAFETY: refFor creates a proxy that implements the Ref interface for A.
+  // SAFETY: the proxy implements Ref<A>.
   return ref as Ref<A>
 }
 
@@ -242,7 +242,7 @@ export const gen = <R>(run: () => Generator<GrammarInternal, R, unknown>): GenGr
       result: pattern,
     }
     const bare = pattern._tag === "Const" && pattern.value === undefined
-    // SAFETY: bare is derived from the Const pattern, and make/silent return the matching GenGrammar shape.
+    // SAFETY: an undefined Const selects Silent; other patterns select Grammar.
     return (bare ? silent(node) : make(node)) as GenGrammar<R>
   } finally {
     scope.open = false

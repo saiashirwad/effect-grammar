@@ -6,20 +6,12 @@ import { preview } from "./errors.ts"
 import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 
-/**
- * Property helpers for checking a particular grammar. These properties are not
- * guaranteed for every grammar: choices, transforms, and configured silent
- * spellings can make printing lossy or non-idempotent.
- *
- * - `parse(print(value)) = value` checks a value round trip.
- * - For accepted text, parse, print, and parse again preserve the value, and a
- *   second print is unchanged. “Canonical” names that tested fixed-point
- *   property; it is not a universal canonicalization guarantee.
- */
+// Choices, transforms, and silent spellings can make printing lossy or
+// non-idempotent. These helpers test individual grammars, not universal laws.
 
 const lawError = (message: string): Error => new Error(`grammar law: ${message}`)
 
-/** Assert `parse(print(value))` equals `value`. */
+// Assert `parse(print(value))` equals `value`.
 export const assertPrintParse = <A>(grammar: Grammar<A>, value: A): void => {
   const printed = printChecked(grammar, value)
   if (Result.isFailure(printed)) {
@@ -27,11 +19,8 @@ export const assertPrintParse = <A>(grammar: Grammar<A>, value: A): void => {
   }
 }
 
-/**
- * Assert that `text` parses, that parsing its printed form yields an equal
- * value, and that printing the result again is unchanged. Returns that stable
- * printed form; this assertion does not imply universal canonicality.
- */
+// Assert that `text` parses and survives a print/parse round trip with an equal
+// value and unchanged second print. Return the stable text, not a universal canonical form.
 export const assertParsePrintCanonical = <A>(grammar: Grammar<A>, text: string): string => {
   const parsed = parse(grammar, text)
   if (Result.isFailure(parsed)) {
@@ -67,7 +56,7 @@ const assertCanonical = <A>(grammar: Grammar<A>, text: string, value: A): string
   return canonical.success
 }
 
-/** Check `parse(print(value)) = value` over an arbitrary of values. */
+// Check `parse(print(value)) = value` over an arbitrary of values.
 export const checkPrintParse = <A>(
   grammar: Grammar<A>,
   arbitrary: FastCheck.Arbitrary<A>,
@@ -81,10 +70,7 @@ export const checkPrintParse = <A>(
   )
 }
 
-/**
- * Check the accepted-text value-preservation and print fixed-point properties
- * over arbitrary text. Inputs that do not parse are skipped.
- */
+// Check value preservation and stable printing for arbitrary text. Skip inputs that do not parse.
 export const checkCanonicalization = <A>(
   grammar: Grammar<A>,
   arbitraryText: FastCheck.Arbitrary<string>,

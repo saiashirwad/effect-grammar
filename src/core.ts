@@ -5,15 +5,10 @@ const SilentTypeId: unique symbol = Symbol.for("effect-grammar/Silent")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
 export const RefTypeId: unique symbol = Symbol.for("effect-grammar/Ref")
 
-/** Every JavaScript value; `{}` is TypeScript's non-nullish top type. */
+// Every JavaScript value; `{}` is TypeScript's non-nullish top type.
 export type Value = {} | null | undefined
 
-/**
- * Bridges an erased node callback with the runtime value produced for that
- * node. Node callbacks are stored as `never`-argument functions so the
- * public combinator types stay precise; this is the single choke point where
- * the runtime value is passed to them.
- */
+// Node callbacks use `never` parameters to preserve public combinator types.
 export const unsafeToNever = (value: Value): never => {
   // SAFETY: erased Node callbacks accept the runtime value produced for that node.
   return value as never
@@ -47,13 +42,11 @@ export type Pattern =
 
 export type MatchKey = string | number | boolean
 
-/**
- * How much a `Transform` promises about its two directions.
- *
- * - `unchecked`: no law claimed (`transform`, `transformOrFail`).
- * - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
- * - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
- */
+// Laws claimed by a transform.
+//
+// - `unchecked`: no law claimed (`transform`, `transformOrFail`).
+// - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
+// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
 export type Fidelity = "unchecked" | "partial" | "claimed-iso"
 
 export interface GrammarIssue {
@@ -98,7 +91,7 @@ export type Node =
       readonly _tag: "Choice"
       readonly options: ReadonlyArray<GrammarInternal>
       readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
-      /** Print with the first branch whose text parses back, not just the first that accepts. */
+      // Use the first branch whose printed text parses back to the input value.
       readonly checked?: boolean | undefined
     }
   | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
@@ -112,7 +105,7 @@ export type Node =
       readonly name?: string | undefined
       readonly keys?: ReadonlyArray<string> | undefined
       readonly fidelity: Fidelity
-      /** Decoding accepts every inner match, so the transform matches empty input when its inner grammar does. */
+      // Decoding cannot fail, so empty-input matching follows the inner grammar.
       readonly total?: boolean | undefined
     }
   | {
@@ -245,7 +238,7 @@ export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarIntern
   }
 }
 
-/** The grammars a node refers to directly. A `Suspend` yields its resolved target. */
+// The grammars a node refers to directly. A `Suspend` yields its resolved target.
 export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
   switch (node._tag) {
     case "Literal":

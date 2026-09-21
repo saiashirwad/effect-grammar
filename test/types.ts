@@ -2,10 +2,9 @@ import * as G from "../src/index.ts"
 
 const kindOf = G.literals("a", "b")
 
-// `value` is reserved for the tagged branch payload.
 // @ts-expect-error taggedChoice cannot use "value" as its tag
 G.taggedChoice("value", { number: G.integer })
-// A tag chosen at runtime remains valid and meets the runtime reserved-name check.
+// Dynamic tags rely on the runtime reserved-name check.
 const dynamicTag: string = "kind"
 G.taggedChoice(dynamicTag, { number: G.integer })
 
@@ -17,7 +16,6 @@ G.gen(function* () {
   return { kind, value }
 })
 
-// match must cover every literal.
 G.gen(function* () {
   const kind = yield* kindOf
   // @ts-expect-error missing case "b"
@@ -25,7 +23,6 @@ G.gen(function* () {
   return { kind, value }
 })
 
-// match needs a literal ref.
 G.gen(function* () {
   const n = yield* G.optional(G.integer)
   // @ts-expect-error number | undefined is not a key
@@ -33,7 +30,6 @@ G.gen(function* () {
   return { n, value }
 })
 
-// take and repeat need a number ref.
 G.gen(function* () {
   const w = yield* G.regex(/x/, "x")
   // @ts-expect-error Ref<string> is not Ref<number>
@@ -41,7 +37,7 @@ G.gen(function* () {
   return { w, s }
 })
 
-// The value type is the return with every Ref<A> replaced by A...
+// The return type unwraps each Ref<A> to A.
 const g = G.gen(function* () {
   yield* G.literal("(")
   const n = yield* G.integer
@@ -53,7 +49,6 @@ const ok: G.Type<typeof g> = { n: 1, tags: ["a"] }
 // @ts-expect-error n must be a number
 const bad: G.Type<typeof g> = { n: "1", tags: [] }
 
-// ...through a bare ref, a tuple (`as const`, or it is an array), nesting, and constants.
 const bare = G.gen(function* () {
   const n = yield* G.integer
   return n
@@ -75,14 +70,12 @@ const okNested: G.Type<typeof nested> = { kind: "x", inner: { a: 1 } }
 // @ts-expect-error kind is the literal "x"
 const badNested: G.Type<typeof nested> = { kind: "y", inner: { a: 1 } }
 
-// An optional binding denotes to A | undefined.
 const opt = G.gen(function* () {
   const port = yield* G.optional(G.integer)
   return { port }
 })
 const okOpt: G.Type<typeof opt> = { port: undefined }
 
-// match yields the union of its cases.
 const matched = G.gen(function* () {
   const kind = yield* kindOf
   const value = yield* G.match(kind, { a: G.integer, b: G.regex(/x/, "x") })
@@ -91,7 +84,7 @@ const matched = G.gen(function* () {
 const okMatched: G.Type<typeof matched> = { kind: "a", value: 1 }
 const okMatchedB: G.Type<typeof matched> = { kind: "b", value: "x" }
 
-// A property of a ref is a ref to that property, and only real properties exist.
+// Ref properties remain refs, so they can drive dependent grammars.
 const header = G.gen(function* () {
   const kind = yield* kindOf
   const size = yield* G.integer
@@ -105,23 +98,19 @@ G.gen(function* () {
   return { h, body }
 })
 
-// No bindings and no return is silent.
 const s: G.Silent = G.gen(function* () {
   yield* G.literal("a")
 })
 
-// seq only accepts silent grammars.
 // @ts-expect-error bare value grammar
 G.seq(G.literal("a"), G.integer)
 
-// `as` only applies to silent grammars.
 // @ts-expect-error integer is not silent
 G.integer.pipe(G.as(1))
 
-// Silent composition stays silent.
 const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.between("<", G.symbol("b"), ">")))
 
-// A silent choice is not silent (it has no canonical print).
+// A choice of silent grammars has no canonical print.
 // @ts-expect-error
 const notSilent: G.Silent = G.choice(G.literal("a"), G.literal("b"))
 
@@ -164,7 +153,6 @@ void [
   widenedGrammar,
 ]
 
-// choiceOn: every case must yield a value whose tag field is its key.
 const plainTagged = G.regex(/a/, "a").pipe(
   G.transform({ decode: (v) => ({ kind: "plain" as const, v }), encode: (x) => x.v }),
 )
@@ -177,13 +165,11 @@ G.choiceOn("kind", { plain: plainTagged })
 G.choiceOn("kind", { plain: plainTagged, b: untagged })
 // @ts-expect-error case "c" has kind "other", not "c"
 G.choiceOn("kind", { plain: plainTagged, c: misTagged })
-// The parsed type is the union of the case types.
 const onGrammar = G.choiceOn("kind", { plain: plainTagged })
 const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
   v: "a",
 }
-// choiceOnEntries takes ordered [key, grammar] entries.
 const onEntries = G.choiceOnEntries("kind", [["plain", plainTagged]] as const)
 const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
 void onEntriesValue
