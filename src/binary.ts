@@ -1,6 +1,5 @@
 import { Function as F, Predicate, Result, Schema } from "effect"
 
-import { type CodecOptions, codecFrom } from "./codec.ts"
 import { iso, partialIso, prefixedBy, regex, takeBytes, withKeys } from "./combinators.ts"
 import {
   type Grammar,
@@ -14,6 +13,7 @@ import { isCount, nonByte, toBytes } from "./env.ts"
 import { describeExpected, hex, PrintError } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
 import { printCheckedUnknown, printUnknown } from "./print.ts"
+import { type CodecOptions, codecFrom } from "./schema.ts"
 
 export { hex } from "./errors.ts"
 
@@ -343,14 +343,12 @@ export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,
   options?: CodecOptions,
-) => {
-  const printer = options?.roundTrip === "off" ? printUnchecked : printVerified
-  return codecFrom(
+) =>
+  codecFrom(
     Schema.Uint8Array,
     target,
     grammar,
     options?.identifier,
     (input) => parse(grammar, input),
-    (value) => printer(grammar, value),
+    (value) => printVerified(grammar, value),
   )
-}

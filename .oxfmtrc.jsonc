@@ -4,6 +4,7 @@
   "sortPackageJson": {},
   "ignorePatterns": [".repos/**", "tools/oxlint/anti-slop/**", "**/*.gen.ts"],
   "sortImports": {},
+  "printWidth": 120,
   "sortTailwindcss": { "functions": ["cn"] },
   "proseWrap": "always",
   "overrides": [

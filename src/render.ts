@@ -53,12 +53,7 @@ const namesFor = (context: Context, scope: ScopeId): Map<number, string> => {
   return names
 }
 
-const nameBindings = (
-  pattern: Pattern,
-  path: string | undefined,
-  scope: ScopeId,
-  names: Map<number, string>,
-): void => {
+const nameBindings = (pattern: Pattern, path: string | undefined, scope: ScopeId, names: Map<number, string>): void => {
   switch (pattern._tag) {
     case "Ref":
       if (pattern.scope === scope && path !== undefined) names.set(pattern.slot, path)
@@ -105,25 +100,16 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
           const name = step._tag === "Bind" ? names.get(step.slot) : undefined
           return name === undefined
             ? inner
-            : {
-                precedence: AtomPrecedence,
-                text: `${name}:${parenthesize(inner, PostfixPrecedence)}`,
-              }
+            : { precedence: AtomPrecedence, text: `${name}:${parenthesize(inner, PostfixPrecedence)}` }
         }),
       )
     }
     case "Wrap":
-      return sequence([
-        show(node.open, context),
-        show(node.inner, context),
-        show(node.close, context),
-      ])
+      return sequence([show(node.open, context), show(node.inner, context), show(node.close, context)])
     case "Choice": {
       const on = node.on
       if (on !== undefined) {
-        const cases = node.options.map(
-          (option, index) => `${preview(on.keys[index])} => ${show(option, context).text}`,
-        )
+        const cases = node.options.map((option, index) => `${preview(on.keys[index])} => ${show(option, context).text}`)
         return {
           precedence: AtomPrecedence,
           text: `on(${on.tag}){${cases.join(" | ")}}`,
@@ -131,9 +117,7 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
       }
       return {
         precedence: ChoicePrecedence,
-        text: node.options
-          .map((option) => parenthesize(show(option, context), SequencePrecedence))
-          .join(" | "),
+        text: node.options.map((option) => parenthesize(show(option, context), SequencePrecedence)).join(" | "),
       }
     }
     case "Many": {
@@ -189,10 +173,7 @@ const show = (grammar: GrammarInternal, context: Context): Fragment => {
     case "Take":
       return {
         precedence: AtomPrecedence,
-        text:
-          node.name === undefined
-            ? `<${node.unit}>{${showExpr(node.count, context)}}`
-            : `<${node.name}>`,
+        text: node.name === undefined ? `<${node.unit}>{${showExpr(node.count, context)}}` : `<${node.name}>`,
       }
     case "RepeatExact":
       return {
@@ -218,5 +199,4 @@ export const describe = (grammar: GrammarInternal): string => {
   return node._tag === "Regex" || node._tag === "Label" ? node.name : render(grammar)
 }
 
-export const describeStep = (step: Step, index: number): string =>
-  `step ${index + 1} (${describe(step.grammar)})`
+export const describeStep = (step: Step, index: number): string => `step ${index + 1} (${describe(step.grammar)})`

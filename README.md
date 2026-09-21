@@ -44,8 +44,7 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 `G.literal` matches fixed text. `G.gen` defines the fields to parse and print.
 
 Encoding checks that the output parses back to an equal value using
-`Equal.equals`. It does not preserve the original text's spelling. Pass
-`{ roundTrip: "off" }` as the third argument to `G.codec` to skip this check.
+`Equal.equals`. It does not preserve the original text's spelling.
 
 ## Parsing and printing without Schema
 
