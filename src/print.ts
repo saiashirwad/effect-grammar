@@ -55,7 +55,7 @@ const bindingPath = (
   }
 }
 
-const ownKeys = (
+const validateOwnKeys = (
   value: Readonly<Record<string, Value>>,
   fields: ReadonlyArray<string>,
 ): Result.Result<Array<string | symbol>, PrintIssue> => {
@@ -94,7 +94,7 @@ const unifyPattern = (pattern: Pattern, value: Value, values: Frame): Result.Res
       if (!Predicate.isObject(value)) {
         return Result.fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
       }
-      const keys = ownKeys(
+      const keys = validateOwnKeys(
         value,
         pattern.fields.map(([key]) => key),
       )
@@ -388,7 +388,7 @@ const printGrammar = (
       if (!Predicate.isObject(value)) {
         return Result.fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
       }
-      const keys = ownKeys(
+      const keys = validateOwnKeys(
         value,
         node.parts.flatMap((part) => part.keys),
       )
