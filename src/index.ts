@@ -54,7 +54,7 @@ export {
   tuple,
 } from "./combinators.ts"
 export { parse } from "./parse.ts"
-export { prepare, type Prepared } from "./prepare.ts"
+export { GrammarValidationError, prepare, type Prepared } from "./prepare.ts"
 export { print, printChecked } from "./print.ts"
 export { describe, render } from "./render.ts"
 export { type CodecOptions, codec } from "./schema.ts"

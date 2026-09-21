@@ -51,9 +51,10 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 - `printChecked(grammar, value)` prints, reparses the whole output, and compares
   the result with Effect's equality. It fails when that value round trip does
   not hold.
-- `prepare(grammar)` runs the library's static validation once, then returns
-  `parse`, `print`, and `printChecked` functions bound to the grammar, plus its
-  rendering and fidelity audit. It is not compilation or optimization; runtime
+- `prepare(grammar)` runs the library's static validation once, then returns a
+  `Result` containing `parse`, `print`, and `printChecked` functions bound to
+  the grammar, plus its rendering and fidelity audit. Validation issues produce
+  a `GrammarValidationError`. It is not compilation or optimization; runtime
   failures remain possible.
 - `codec(grammar, schema)` creates an Effect Schema codec. Encoding uses checked
   printing by default; `{ roundTrip: "off" }` selects unchecked printing.
@@ -86,9 +87,10 @@ extra, symbol, or otherwise unexpected own keys. Arrays must have exactly the
 expected length.
 
 `many`, `sepBy`, and exact `repeat` require every successfully parsed item to
-advance the cursor; zero-width items fail rather than loop. `validate`/`prepare`
-report repetitions whose item can be proved to match empty input, but validation
-is intentionally not a proof of all behavior.
+advance the cursor; zero-width items fail rather than loop. `validate` reports
+repetitions whose item can be proved to match empty input, and `prepare` returns
+those issues as a `GrammarValidationError`, but validation is intentionally not
+a proof of all behavior.
 
 `take(count)` reads a fixed number of UTF-16 code units and
 `repeat(item, count)` a fixed number of items; the count is a number or a ref

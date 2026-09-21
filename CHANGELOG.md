@@ -52,8 +52,9 @@
 
   This release intentionally removes the old `compile` function and `Compiled`
   type. Migrate `compile(grammar)` to `prepare(grammar)` and `Compiled<A>` to
-  `Prepared<A>`. `prepare` validates once and returns interpreters bound to the
-  grammar; it does not compile or otherwise optimize them.
+  `Prepared<A>`. `prepare` validates once and returns a `Result` containing
+  interpreters bound to the grammar; validation issues are returned as a
+  `GrammarValidationError`. It does not compile or otherwise optimize them.
 
   The old `wrap` helper is also removed. Replace `wrap(open, inner, close)` with
   `between(open, inner, close)`. This rename is a breaking API change; `prefix`

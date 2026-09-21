@@ -7,6 +7,14 @@ import * as G from "../src/index.ts"
 
 const word = G.regex(/[a-z]+/, "word")
 
+const prepareOk = <A>(grammar: G.Grammar<A>): G.Prepared<A> => Result.getOrThrow(G.prepare(grammar))
+
+const prepareFail = <A>(grammar: G.Grammar<A>): G.GrammarValidationError => {
+  const result = G.prepare(grammar)
+  assert(Result.isFailure(result))
+  return result.failure
+}
+
 // A ref captured inside a gen and used after it closes.
 const escaped = (() => {
   let leaked: G.Grammar<string> | undefined
@@ -44,7 +52,7 @@ describe("validate", () => {
       const issues = G.validate(G.many(G.regex(/x*/, "xs")))
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /can match the empty string/)
-      assert.throws(() => G.prepare(G.many(G.literal(""))), /can match the empty string/)
+      assert.match(prepareFail(G.many(G.literal(""))).message, /can match the empty string/)
     }),
   )
 
@@ -53,7 +61,7 @@ describe("validate", () => {
       const grammar = G.many(G.empty, { min: 1, max: 2 })
 
       assert.match(G.validate(grammar)[0]!.message, /zero-width elements/)
-      assert.throws(() => G.prepare(grammar), /zero-width elements/)
+      assert.match(prepareFail(grammar).message, /zero-width elements/)
     }),
   )
 
@@ -61,7 +69,7 @@ describe("validate", () => {
     Effect.sync(() => {
       const item = G.optional(G.literal("a"))
       assert.match(G.validate(G.repeat(item, 2))[0]!.message, /zero-width elements/)
-      assert.throws(() => G.prepare(G.countPrefixed(item, G.integer)), /zero-width elements/)
+      assert.match(prepareFail(G.countPrefixed(item, G.integer)).message, /zero-width elements/)
       assert.deepEqual(G.validate(G.repeat(item, 0)), [])
     }),
   )
@@ -83,7 +91,7 @@ describe("validate", () => {
       const issues = G.validate(outer)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /can match the empty string/)
-      assert.throws(() => G.prepare(outer), /can match the empty string/)
+      assert.match(prepareFail(outer).message, /can match the empty string/)
     }),
   )
 
@@ -101,7 +109,7 @@ describe("validate", () => {
       const grammar = G.many(nonempty.pipe(G.label("nonempty xs")))
 
       assert.deepEqual(G.validate(grammar), [])
-      assert.deepEqual(Result.getOrThrow(G.prepare(grammar).parse("xx")), ["xx"])
+      assert.deepEqual(Result.getOrThrow(prepareOk(grammar).parse("xx")), ["xx"])
     }),
   )
 
@@ -117,7 +125,7 @@ describe("validate", () => {
       const grammar = G.many(empty)
 
       assert.deepEqual(G.validate(grammar), [])
-      const parsed = G.prepare(grammar).parse("")
+      const parsed = prepareOk(grammar).parse("")
       assert.equal(Result.isFailure(parsed), true)
       if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /consumes input/)
     }),
@@ -141,7 +149,7 @@ describe("validate", () => {
       const issues = G.validate(grammar)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-      assert.throws(() => G.prepare(grammar), /the grammar has 1 issue/)
+      assert.match(prepareFail(grammar).message, /the grammar has 1 issue/)
     }),
   )
 
@@ -188,7 +196,7 @@ describe("prepare", () => {
   it.effect("returns prepared operations for a sound grammar", () =>
     Effect.sync(() => {
       const g = G.struct({ host: word, port: G.integer.pipe(G.prefix(":")) })
-      const prepared = G.prepare(g)
+      const prepared = prepareOk(g)
       assert.deepEqual(Result.getOrThrow(prepared.parse("h:80")), { host: "h", port: 80 })
       assert.equal(Result.getOrThrow(prepared.print({ host: "h", port: 80 })), "h:80")
       assert.equal(Result.getOrThrow(prepared.printChecked({ host: "h", port: 80 })), "h:80")
@@ -196,9 +204,12 @@ describe("prepare", () => {
     }),
   )
 
-  it.effect("throws on an invalid grammar", () =>
+  it.effect("returns a typed failure for an invalid grammar", () =>
     Effect.sync(() => {
-      assert.throws(() => G.prepare(escaped), /the grammar has 1 issue/)
+      const error = prepareFail(escaped)
+      assert.equal(error._tag, "GrammarValidationError")
+      assert.equal(error.issues.length, 1)
+      assert.match(error.message, /the grammar has 1 issue/)
     }),
   )
 })
