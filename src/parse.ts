@@ -70,12 +70,13 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       const count = evaluate(node.count, env)
       if (count === Unbound) return failAt(state, "a bound take count")
       if (!isCount(count)) return failAt(state, `take{${preview(count)}}`)
-      if (state.input.length - state.pos < count)
+      if (state.input.length - state.pos < count) {
         return failAt(
           state,
           `${count} more ${state.domain === "bytes" ? "byte" : "character"}${count === 1 ? "" : "s"}`,
           state.input.length,
         )
+      }
       const value = state.input.slice(state.pos, state.pos + count)
       state.pos += count
       return Result.succeed(value)
@@ -118,8 +119,9 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
     case "Repeat": {
       const min = parseCount(state, evaluate(node.min, env), "repeat count")
       if (Result.isFailure(min)) return min
-      const max =
-        node.max === undefined ? Result.succeed(Infinity) : parseCount(state, evaluate(node.max, env), "repeat count")
+      const max = node.max === undefined
+        ? Result.succeed(Infinity)
+        : parseCount(state, evaluate(node.max, env), "repeat count")
       if (Result.isFailure(max)) return max
       const values: Array<Value> = []
       let mark = state.pos

@@ -152,7 +152,8 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
       state.issues.push({
         _tag: "OutOfScopeRef",
         path: [...path, field],
-        message: `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
+        message:
+          `${where}: uses a ref bound by a gen that is not an ancestor here; a ref works only inside the gen that bound it`,
       })
     }
   }
@@ -162,7 +163,9 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
       state.issues.push({
         _tag: "EmptyRepetition",
         path: [...path, "inner"],
-        message: `${repetition} of ${describe(inner)}, which can match the empty string, so parsing and printing would disagree about zero-width elements`,
+        message: `${repetition} of ${
+          describe(inner)
+        }, which can match the empty string, so parsing and printing would disagree about zero-width elements`,
       })
     }
   }
@@ -192,8 +195,8 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
       for (const [slot, step] of node.steps.entries()) {
         const omitted = !node.result.bindings.has(slot)
         if (
-          omitted &&
-          !isSyntaxOnly(step, (suspension) => {
+          omitted
+          && !isSyntaxOnly(step, (suspension) => {
             const target = inspect(suspension, state.resolutions)
             return target._tag === "Resolved" ? target.grammar : undefined
           })

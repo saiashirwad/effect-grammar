@@ -1,4 +1,5 @@
 allowBuilds:
+  dprint: true
   msgpackr-extract: false
 ignoredBuiltDependencies:
   - msgpackr-extract

@@ -28,7 +28,9 @@ const laws = <D extends Domain, Input>(runners: {
     }
     if (!Equal.equals(parsed.success, value)) {
       throw lawError(
-        `parse(print(value)) = value fails: ${runners.show(printed.success)} reads back as ${preview(parsed.success)}, expected ${preview(value)}`,
+        `parse(print(value)) = value fails: ${runners.show(printed.success)} reads back as ${
+          preview(parsed.success)
+        }, expected ${preview(value)}`,
       )
     }
   }
@@ -38,24 +40,32 @@ const laws = <D extends Domain, Input>(runners: {
     const canonical = runners.printUnchecked(grammar, value)
     if (Result.isFailure(canonical)) {
       throw lawError(
-        `print(parse(input)) failed\n  input:  ${runners.show(input)}\n  parsed: ${preview(value)}\n  error:  ${canonical.failure.message}`,
+        `print(parse(input)) failed\n  input:  ${runners.show(input)}\n  parsed: ${
+          preview(value)
+        }\n  error:  ${canonical.failure.message}`,
       )
     }
     const reparsed = runners.parse(grammar, canonical.success)
     if (Result.isFailure(reparsed)) {
       throw lawError(
-        `the canonical input does not parse\n  input:     ${runners.show(input)}\n  canonical: ${runners.show(canonical.success)}\n  error:     ${reparsed.failure.message}`,
+        `the canonical input does not parse\n  input:     ${runners.show(input)}\n  canonical: ${
+          runners.show(canonical.success)
+        }\n  error:     ${reparsed.failure.message}`,
       )
     }
     if (!Equal.equals(reparsed.success, value)) {
       throw lawError(
-        `canonicalization changed the value\n  input:     ${runners.show(input)}\n  canonical: ${runners.show(canonical.success)}\n  before:    ${preview(value)}\n  after:     ${preview(reparsed.success)}`,
+        `canonicalization changed the value\n  input:     ${runners.show(input)}\n  canonical: ${
+          runners.show(canonical.success)
+        }\n  before:    ${preview(value)}\n  after:     ${preview(reparsed.success)}`,
       )
     }
     const again = runners.printUnchecked(grammar, reparsed.success)
     if (Result.isFailure(again) || !runners.equals(again.success, canonical.success)) {
       throw lawError(
-        `canonicalization is not idempotent\n  once:  ${runners.show(canonical.success)}\n  twice: ${Result.isFailure(again) ? again.failure.message : runners.show(again.success)}`,
+        `canonicalization is not idempotent\n  once:  ${runners.show(canonical.success)}\n  twice: ${
+          Result.isFailure(again) ? again.failure.message : runners.show(again.success)
+        }`,
       )
     }
     return canonical.success

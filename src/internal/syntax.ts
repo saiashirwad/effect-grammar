@@ -18,9 +18,9 @@ const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): bool
       return false
     case "Gen":
       return (
-        ((node.result.tree._tag === "Const" && node.result.tree.value === undefined) ||
-          (node.result.tree._tag === "Ref" && node.result.tree.scope === node.scope)) &&
-        node.steps.every((step) => canOmit(step, seen, targetOf))
+        ((node.result.tree._tag === "Const" && node.result.tree.value === undefined)
+          || (node.result.tree._tag === "Ref" && node.result.tree.scope === node.scope))
+        && node.steps.every((step) => canOmit(step, seen, targetOf))
       )
     case "Choice":
       return node.options.every((option) => canOmit(option, seen, targetOf))

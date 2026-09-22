@@ -1,6 +1,6 @@
 import { Predicate } from "effect"
 
-import { type AnyGrammar, type Expr, nodeOf, type Node, resolve, type ScopeId, type Value } from "./core.ts"
+import { type AnyGrammar, type Expr, type Node, nodeOf, resolve, type ScopeId, type Value } from "./core.ts"
 import { preview } from "./errors.ts"
 
 const ChoicePrecedence = 1
@@ -64,7 +64,7 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
       return atom(`<take>{${showExpr(node.count, context)}}`)
     case "Gen": {
       let names = context.names.get(node.scope)
-      if (names === undefined) context.names.set(node.scope, (names = new Map()))
+      if (names === undefined) context.names.set(node.scope, names = new Map())
       for (const [slot, path] of node.result.bindings) {
         if (path.length > 0) names.set(slot, path.join("."))
       }
@@ -101,7 +101,9 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
         unbounded ? undefined : { _tag: "Const", value: Math.max(0, (staticMax ?? 0) - 1) },
         context,
       )
-      const body = `${parenthesize(inner, SequencePrecedence)} (${parenthesize(sep, SequencePrecedence)} ${parenthesize(inner, SequencePrecedence)})${rest}`
+      const body = `${parenthesize(inner, SequencePrecedence)} (${parenthesize(sep, SequencePrecedence)} ${
+        parenthesize(inner, SequencePrecedence)
+      })${rest}`
       return staticMin === 0
         ? { precedence: PostfixPrecedence, text: `(${body})?` }
         : { precedence: SequencePrecedence, text: body }

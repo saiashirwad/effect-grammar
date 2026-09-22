@@ -3,7 +3,7 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const person = Grammar.gen(function* () {
+const person = Grammar.gen(function*() {
   const name = yield* Grammar.regex(/[a-z]+/, "name")
   yield* Grammar.literal(":")
   const age = yield* Grammar.integer
@@ -29,5 +29,4 @@ Effect.forEach(samples, (source) =>
       onFailure: (err) => `${source}  →  ${formatIssue(err.issue)}`,
     }),
     Effect.flatMap(Console.log),
-  ),
-).pipe(Effect.runSync)
+  )).pipe(Effect.runSync)

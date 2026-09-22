@@ -75,9 +75,9 @@ const QuerySchema = Schema.Union([
 
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
-const doubleQuoted = Grammar.regex(/[^"]*/, "string content").pipe(Grammar.between('"', '"'))
+const doubleQuoted = Grammar.regex(/[^"]*/, "string content").pipe(Grammar.between("\"", "\""))
 
-const compareValue = Grammar.gen(function* () {
+const compareValue = Grammar.gen(function*() {
   const op = yield* Grammar.literals(">=", "<=", ">", "<")
   const value = yield* token("compare value")
   return { op, value }
@@ -91,7 +91,7 @@ const compareValue = Grammar.gen(function* () {
 
 const rangeBound = (name: string) => Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
 
-const rangeValue = Grammar.gen(function* () {
+const rangeValue = Grammar.gen(function*() {
   const from = yield* rangeBound("range start")
   yield* Grammar.literal("..")
   const to = yield* rangeBound("range end")
@@ -122,7 +122,7 @@ const quotedValue = doubleQuoted.pipe(
 
 const qualifierValue = Grammar.choice([quotedValue, compareValue, rangeValue, wordValue])
 
-const qualifier = Grammar.gen(function* () {
+const qualifier = Grammar.gen(function*() {
   const negate = yield* Grammar.flag("-")
   const key = yield* Grammar.regex(/[A-Za-z][A-Za-z0-9-]*/, "qualifier name")
   yield* Grammar.literal(":")
@@ -310,7 +310,7 @@ const atoms = (v: QualifierValue): ReadonlyArray<string> => {
   }
 }
 
-const walkQualifiers = function* (q: Query): Generator<Qualifier> {
+const walkQualifiers = function*(q: Query): Generator<Qualifier> {
   switch (q.kind) {
     case "qualifier":
       yield q
@@ -359,7 +359,7 @@ const samples = [
   "is:pr author:foo label:bug",
   grouped,
   "NOT draft:true stars:10..1000 language:TypeScript",
-  'label:"help wanted" in:title created:>=2024-01-01 pushed:*..2024-06-30',
+  "label:\"help wanted\" in:title created:>=2024-01-01 pushed:*..2024-06-30",
   "repo:effect-ts/effect path:src extension:ts",
   "is:maybe",
   "stars:abc",
@@ -379,7 +379,7 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   yield* Console.log(`grammar ${Grammar.render(whole)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
   const decoded = yield* decode(grouped)

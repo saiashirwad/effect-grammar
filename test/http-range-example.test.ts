@@ -49,8 +49,7 @@ describe("HTTP range example parity", () => {
         assert.ok(Result.isSuccess(grammar))
         assert.deepEqual(grammar.success, manual.success)
       }
-    }),
-  )
+    }))
 
   it.effect("encodes equal values to the same canonical string", () =>
     Effect.sync(() => {
@@ -62,8 +61,7 @@ describe("HTTP range example parity", () => {
         assert.ok(Result.isSuccess(grammar))
         assert.equal(grammar.success, manual.success)
       }
-    }),
-  )
+    }))
 
   it.effect("rejects the same important invalid-input categories", () =>
     Effect.sync(() => {
@@ -79,8 +77,7 @@ describe("HTTP range example parity", () => {
       for (const source of invalid) {
         for (const codec of codecs) assert.ok(Result.isFailure(decode(codec, source)), source)
       }
-    }),
-  )
+    }))
 
   it.effect("round-trips values through the same canonical text", () =>
     Effect.sync(() => {
@@ -90,8 +87,7 @@ describe("HTTP range example parity", () => {
           assert.deepEqual(Result.getOrThrow(decode(codec, encoded)), value)
         }
       }
-    }),
-  )
+    }))
 
   it.effect("canonicalizes valid text the same way", () =>
     Effect.sync(() => {
@@ -102,8 +98,7 @@ describe("HTTP range example parity", () => {
         })
         assert.equal(outputs[0], outputs[1])
       }
-    }),
-  )
+    }))
 
   it.effect("satisfies the value round-trip property for both codecs", () =>
     Effect.sync(() => {
@@ -142,8 +137,7 @@ describe("HTTP range example parity", () => {
           }
         }),
       )
-    }),
-  )
+    }))
 
   it.effect("satisfies the canonical-text property for both codecs", () =>
     Effect.sync(() => {
@@ -163,6 +157,5 @@ describe("HTTP range example parity", () => {
           assert.equal(canonical[0], canonical[1])
         }),
       )
-    }),
-  )
+    }))
 })

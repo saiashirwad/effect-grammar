@@ -7,35 +7,35 @@ G.taggedChoice("value", [["number", G.integer]] as const)
 const dynamicTag: string = "kind"
 G.taggedChoice(dynamicTag, [["number", G.integer]] as const)
 
-G.gen(function* () {
+G.gen(function*() {
   const kind = yield* kindOf
   // @ts-expect-error a Ref is not a string
   const value = yield* kind === "a" ? G.integer : G.regex(/x/, "x")
   return { kind, value }
 })
 
-G.gen(function* () {
+G.gen(function*() {
   const kind = yield* kindOf
   // @ts-expect-error missing case "b"
   const value = yield* G.match(kind, [["a", G.integer]] as const)
   return { kind, value }
 })
 
-G.gen(function* () {
+G.gen(function*() {
   const n = yield* G.optional(G.integer)
   // @ts-expect-error number | undefined is not a key
   const value = yield* G.match(n, [[1, G.integer]] as const)
   return { n, value }
 })
 
-G.gen(function* () {
+G.gen(function*() {
   const w = yield* G.regex(/x/, "x")
   // @ts-expect-error Ref<string> is not Ref<number>
   const s = yield* G.take(w)
   return { w, s }
 })
 
-const g = G.gen(function* () {
+const g = G.gen(function*() {
   yield* G.literal("(")
   const n = yield* G.integer
   const tags = yield* G.regex(/[a-z]+/, "tag").pipe(G.many())
@@ -46,12 +46,12 @@ const ok: G.Type<typeof g> = { n: 1, tags: ["a"] }
 // @ts-expect-error n must be a number
 const bad: G.Type<typeof g> = { n: "1", tags: [] }
 
-const bare = G.gen(function* () {
+const bare = G.gen(function*() {
   const n = yield* G.integer
   return n
 })
 const okBare: G.Type<typeof bare> = 1
-const tuple = G.gen(function* () {
+const tuple = G.gen(function*() {
   const a = yield* G.integer
   const b = yield* G.regex(/x/, "x")
   return [a, b] as const
@@ -59,7 +59,7 @@ const tuple = G.gen(function* () {
 const okTuple: G.Type<typeof tuple> = [1, "x"]
 // @ts-expect-error the tuple has two items
 const badTuple: G.Type<typeof tuple> = [1]
-const nested = G.gen(function* () {
+const nested = G.gen(function*() {
   const a = yield* G.integer
   return { kind: "x", inner: { a } } as const
 })
@@ -67,34 +67,40 @@ const okNested: G.Type<typeof nested> = { kind: "x", inner: { a: 1 } }
 // @ts-expect-error kind is the literal "x"
 const badNested: G.Type<typeof nested> = { kind: "y", inner: { a: 1 } }
 
-const opt = G.gen(function* () {
+const opt = G.gen(function*() {
   const port = yield* G.optional(G.integer)
   return { port }
 })
 const okOpt: G.Type<typeof opt> = { port: undefined }
 
-const matched = G.gen(function* () {
+const matched = G.gen(function*() {
   const kind = yield* kindOf
-  const value = yield* G.match(kind, [
-    ["a", G.integer],
-    ["b", G.regex(/x/, "x")],
-  ] as const)
+  const value = yield* G.match(
+    kind,
+    [
+      ["a", G.integer],
+      ["b", G.regex(/x/, "x")],
+    ] as const,
+  )
   return { kind, value }
 })
 const okMatched: G.Type<typeof matched> = { kind: "a", value: 1 }
 const okMatchedB: G.Type<typeof matched> = { kind: "b", value: "x" }
 
-const header = G.gen(function* () {
+const header = G.gen(function*() {
   const kind = yield* kindOf
   const size = yield* G.integer
   return { kind, size }
 })
-G.gen(function* () {
+G.gen(function*() {
   const h = yield* header
-  const body = yield* G.match(G.get(h, "kind"), [
-    ["a", G.take(G.get(h, "size"))],
-    ["b", G.integer.pipe(G.repeat(G.get(h, "size")))],
-  ] as const)
+  const body = yield* G.match(
+    G.get(h, "kind"),
+    [
+      ["a", G.take(G.get(h, "size"))],
+      ["b", G.integer.pipe(G.repeat(G.get(h, "size")))],
+    ] as const,
+  )
   // @ts-expect-error refs are opaque, even for known properties
   void h.kind
   // @ts-expect-error no such property
@@ -111,7 +117,7 @@ G.gen(function* () {
   return { h, body }
 })
 
-const s: G.Grammar<void> = G.gen(function* () {
+const s: G.Grammar<void> = G.gen(function*() {
   yield* G.literal("a")
 })
 
@@ -134,10 +140,13 @@ const choicePolicy: G.ChoiceOptions = { print: "roundTrip" }
 const policyChoice: G.Grammar<number | "x"> = G.choice(choiceBranches, choicePolicy)
 void policyChoice
 
-const tagged = G.taggedChoice("kind", [
-  ["number", G.integer],
-  [true, G.literal("x").pipe(G.as("x"))],
-] as const)
+const tagged = G.taggedChoice(
+  "kind",
+  [
+    ["number", G.integer],
+    [true, G.literal("x").pipe(G.as("x"))],
+  ] as const,
+)
 const taggedValue: G.Type<typeof tagged> = { kind: true, value: "x" }
 // @ts-expect-error the payload must match the selected tag
 const wrongPayload: G.Type<typeof tagged> = { kind: "number", value: "x" }
@@ -151,14 +160,14 @@ void wordGrammar.node
 
 // eslint-disable-next-line unicorn/no-thenable -- Verifies reserved then property typing.
 const reservedHeader = G.literal("h").pipe(G.as({ then: "a" as const }))
-G.gen(function* () {
+G.gen(function*() {
   const value = yield* reservedHeader
   const body = yield* G.match(G.get(value, "then"), [["a", G.integer]] as const)
   return { value, body }
 })
 
 const mixedKind = G.choice([G.literal("n").pipe(G.as(1)), G.literal("s").pipe(G.as("1"))])
-G.gen(function* () {
+G.gen(function*() {
   const kind = yield* mixedKind
   // @ts-expect-error match must cover every selector literal
   const value = yield* G.match(kind, [[1, G.integer]] as const)
@@ -190,16 +199,22 @@ const misTagged = G.regex(/c/, "c").pipe(
   G.transform({ decode: (v) => ({ kind: "other" as const, v }), encode: (x) => x.v }),
 )
 G.dispatch("kind", [["plain", plainTagged]] as const)
-G.dispatch("kind", [
-  ["plain", plainTagged],
-  // @ts-expect-error case "b" has no kind field
-  ["b", untagged],
-] as const)
-G.dispatch("kind", [
-  ["plain", plainTagged],
-  // @ts-expect-error case "c" has kind "other", not "c"
-  ["c", misTagged],
-] as const)
+G.dispatch(
+  "kind",
+  [
+    ["plain", plainTagged],
+    // @ts-expect-error case "b" has no kind field
+    ["b", untagged],
+  ] as const,
+)
+G.dispatch(
+  "kind",
+  [
+    ["plain", plainTagged],
+    // @ts-expect-error case "c" has kind "other", not "c"
+    ["c", misTagged],
+  ] as const,
+)
 const onGrammar = G.dispatch("kind", [["plain", plainTagged]] as const)
 const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
@@ -220,7 +235,7 @@ const variant = G.struct({
     "variant",
   ),
 )
-const merged = G.gen(function* () {
+const merged = G.gen(function*() {
   const v = yield* variant
   const id = yield* G.integer
   return { v, id }

@@ -20,7 +20,7 @@ const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
       }),
       Grammar.filter((a: Nested): boolean => Array.isArray(a), "array"),
     ),
-  ]),
+  ])
 )
 
 const nestedArb: FastCheck.Arbitrary<Nested> = FastCheck.letrec<{ nested: Nested }>((tie) => ({
@@ -31,7 +31,7 @@ const nestedArb: FastCheck.Arbitrary<Nested> = FastCheck.letrec<{ nested: Nested
   ),
 })).nested
 
-const endpoint = Grammar.gen(function* () {
+const endpoint = Grammar.gen(function*() {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[a-z][a-z0-9.-]*/, "host")
   const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
@@ -39,7 +39,7 @@ const endpoint = Grammar.gen(function* () {
   return { host, port, path }
 })
 
-const netstring = Grammar.gen(function* () {
+const netstring = Grammar.gen(function*() {
   const length = yield* Grammar.integer
   yield* Grammar.literal(":")
   const payload = yield* Grammar.take(length)
@@ -61,8 +61,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
           assertRoundTrip(Grammar.integer, n)
         }),
       )
-    }),
-  )
+    }))
 
   it.effect("nested integer lists with lexemes", () =>
     Effect.sync(() => {
@@ -71,8 +70,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
           assertRoundTrip(nested, value)
         }),
       )
-    }),
-  )
+    }))
 
   it.effect("gen grammar with optional and repeated bindings", () =>
     Effect.sync(() => {
@@ -81,8 +79,7 @@ describe("round-trip law: parse(print(a)) == a", () => {
           assertRoundTrip(endpoint, value)
         }),
       )
-    }),
-  )
+    }))
 
   it.effect("gen grammar with a length prefix", () =>
     Effect.sync(() => {
@@ -91,6 +88,5 @@ describe("round-trip law: parse(print(a)) == a", () => {
           assertRoundTrip(netstring, { length: payload.length, payload })
         }),
       )
-    }),
-  )
+    }))
 })

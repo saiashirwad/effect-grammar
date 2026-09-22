@@ -3,7 +3,7 @@ import { Console, Effect, Schema } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const endpoint = Grammar.gen(function* () {
+const endpoint = Grammar.gen(function*() {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
   const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
@@ -24,7 +24,7 @@ const encode = Schema.encodeEffect(Endpoint)
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const source = "https://effect.website:443"
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   const decoded = yield* decode(source)
   const encoded = yield* encode(decoded)
   const noPort = yield* decode("https://effect.website")

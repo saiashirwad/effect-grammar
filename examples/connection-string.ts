@@ -3,7 +3,7 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const pair = Grammar.gen(function* () {
+const pair = Grammar.gen(function*() {
   const key = yield* Grammar.regex(/[^=&]+/, "param key")
   yield* Grammar.literal("=")
   const value = yield* Grammar.regex(/[^&]*/, "param value")
@@ -24,7 +24,7 @@ const queryParams = pair.pipe(
   Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.String)), "query parameters"),
 )
 
-const dsn = Grammar.gen(function* () {
+const dsn = Grammar.gen(function*() {
   yield* Grammar.literal("postgres://")
   const user = yield* Grammar.regex(/[^:@/?#]+/, "user")
   const password = yield* Grammar.regex(/[^@/?#]+/, "password").pipe(Grammar.prefix(":"), Grammar.optional)
@@ -78,7 +78,7 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   yield* Console.log(`grammar ${Grammar.render(dsn)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
 

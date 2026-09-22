@@ -17,8 +17,7 @@ describe("product and conditional APIs", () => {
       assert.equal(parseOk(port, ":80"), 80)
       assert.equal(printOk(port, 443), "")
       assert.equal(printOk(port, 80), ":80")
-    }),
-  )
+    }))
 
   it.effect("does not replace an explicitly parsed null with the default", () =>
     Effect.sync(() => {
@@ -31,8 +30,7 @@ describe("product and conditional APIs", () => {
       assert.equal(parseOk(grammar, ""), 0)
       assert.equal(printOk(grammar, 0), "")
       assert.equal(Result.getOrThrow(Grammar.print(grammar, 0)), "")
-    }),
-  )
+    }))
 
   it.effect("supports data-last delimiters and optional", () =>
     Effect.sync(() => {
@@ -47,8 +45,7 @@ describe("product and conditional APIs", () => {
       assert.equal(parseOk(grammar, ""), undefined)
       assert.equal(printOk(grammar, 3), "#[3];")
       assert.equal(printOk(grammar, undefined), "")
-    }),
-  )
+    }))
 
   it.effect("builds explicit structs and tuples", () =>
     Effect.sync(() => {
@@ -62,22 +59,23 @@ describe("product and conditional APIs", () => {
       assert.equal(printOk(record, { host: "server", port: 443 }), "server:443")
       assert.deepEqual(parseOk(pair, "1,name"), [1, "name"])
       assert.equal(printOk(pair, [2, "value"]), "2,value")
-    }),
-  )
+    }))
 
   it.effect("represents branch choice with a semantic tag", () =>
     Effect.sync(() => {
-      const grammar = Grammar.taggedChoice("kind", [
-        ["number", Grammar.integer],
-        ["word", word],
-      ] as const)
+      const grammar = Grammar.taggedChoice(
+        "kind",
+        [
+          ["number", Grammar.integer],
+          ["word", word],
+        ] as const,
+      )
 
       assert.deepEqual(parseOk(grammar, "12"), { kind: "number", value: 12 })
       assert.deepEqual(parseOk(grammar, "name"), { kind: "word", value: "name" })
       assert.equal(printOk(grammar, { kind: "number", value: 3 }), "3")
       assert.equal(printOk(grammar, { kind: "word", value: "value" }), "value")
-    }),
-  )
+    }))
 })
 
 describe("trivia APIs", () => {
@@ -90,14 +88,12 @@ describe("trivia APIs", () => {
       assert.equal(printOk(exact, 2), " 2 ")
       assert.equal(parseOk(canonical, "\t 3\n"), 3)
       assert.equal(printOk(canonical, 4), " 4 ")
-    }),
-  )
+    }))
 
   it.effect("renders context-free grammars", () =>
     Effect.sync(() => {
       const grammar = Grammar.tuple(word, Grammar.integer.pipe(Grammar.prefix(":")))
-      assert.equal(Grammar.render(grammar), '0:<word> 1:(":" <integer>)')
+      assert.equal(Grammar.render(grammar), "0:<word> 1:(\":\" <integer>)")
       assert.equal(Grammar.describe(word), "word")
-    }),
-  )
+    }))
 })

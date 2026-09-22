@@ -70,14 +70,17 @@ const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
 
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () =>
-    Grammar.dispatch("kind", [
-      ["quote", quoteExpr],
-      ["list", list],
-      ["number", numberAtom],
-      ["string", stringAtom],
-      ["boolean", booleanAtom],
-      ["symbol", symbolAtom],
-    ] as const),
+    Grammar.dispatch(
+      "kind",
+      [
+        ["quote", quoteExpr],
+        ["list", list],
+        ["number", numberAtom],
+        ["string", stringAtom],
+        ["boolean", booleanAtom],
+        ["symbol", symbolAtom],
+      ] as const,
+    ),
   "expr",
 )
 
@@ -133,7 +136,7 @@ const catalog = {
 
 const isKnownForm = (name: string): name is keyof typeof catalog => Object.hasOwn(catalog, name)
 
-const walkLists = function* (e: Expr): Generator<List> {
+const walkLists = function*(e: Expr): Generator<List> {
   switch (e.kind) {
     case "list":
       yield e
@@ -176,10 +179,10 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const samples = [
   "(+ 1 2)",
-  '(define x "hello")',
+  "(define x \"hello\")",
   "(lambda (n) (* n n))",
   "(if #t 1 0)",
-  '(list 1 \'foo "bar" #f)',
+  "(list 1 'foo \"bar\" #f)",
   "'(a b c)",
   "(begin (define y 10) (+ y 1))",
   "(if #t)",
@@ -202,7 +205,7 @@ const check = (source: string) =>
     Effect.flatMap(Console.log),
   )
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   yield* Console.log(`grammar ${Grammar.render(document)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
   const printed = yield* encode({

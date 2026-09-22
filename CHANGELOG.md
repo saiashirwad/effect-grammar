@@ -41,9 +41,9 @@
     empty input cannot either, and `as`, `flag`, and `literals` match empty
     input when their literal does.
   - Print errors show a `Uint8Array` or `Buffer` as `<07 ab>` and a bigint as
-    `5n`, at any depth in the value, instead of an indexed object or
-    `[object Object]`. A byte run of the wrong length reports its bytes rather
-    than a binary string.
+    `5n`, at any depth in the value, instead of an indexed object or `[object
+    Object]`. A byte run of the wrong length reports its bytes rather than a
+    binary string.
 
 - [#11](https://github.com/saiashirwad/effect-grammar/pull/11)
   [`fae4dc2`](https://github.com/saiashirwad/effect-grammar/commit/fae4dc2bee3f5cfe046d715cf2bdc0aedfb452ec)
@@ -67,8 +67,8 @@
     selection: `checkedChoice(...branches)` picks the first branch whose text
     parses back. The old `verify` option, which never checked dispatched
     (`choiceOn`) choices, is gone.
-  - `codec` verifies the round trip on encode by default; pass
-    `{ roundTrip: "off" }` to skip it.
+  - `codec` verifies the round trip on encode by default; pass `{ roundTrip:
+    "off" }` to skip it.
   - Add `choiceOnEntries`, which is `choiceOn` over an array of `[key, grammar]`
     entries, for an explicit parse order and number or boolean discriminants.
     `choiceOn` now rejects JavaScript array-index keys, whose enumeration order

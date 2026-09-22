@@ -38,7 +38,7 @@ describe("printer sequencing and exception boundaries", () => {
       assert.doesNotMatch(closeFailure.message, /not returned/)
 
       calls.length = 0
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const first = yield* tracked("first")
         const second = yield* tracked("second")
         return { nested: { first }, second }
@@ -47,8 +47,7 @@ describe("printer sequencing and exception boundaries", () => {
       assert.deepEqual(calls, ["first"])
       assert.equal(error.issue._tag, "AtPath")
       assert.match(error.message, /nested.*first/)
-    }),
-  )
+    }))
 
   it.effect("keeps syntax failures through omitted generators without resolving later suspensions", () =>
     Effect.sync(() => {
@@ -63,8 +62,7 @@ describe("printer sequencing and exception boundaries", () => {
       const unresolved = G.empty.pipe(G.between(bad, later))
       assert.match(printFail(G.seq(unresolved), undefined).message, /expected \/ok\/, got "bad"/)
       assert.equal(calls, 0)
-    }),
-  )
+    }))
 
   it.effect("prints separators first and stops repeated items at the first failure", () =>
     Effect.sync(() => {
@@ -85,13 +83,12 @@ describe("printer sequencing and exception boundaries", () => {
         printFail(grammar, ["ok", "bad", "ok"])
         assert.deepEqual(calls, ["ok", "bad"])
       }
-    }),
-  )
+    }))
 
   it.effect("probes descriptors before reading fields in generators and structs", () =>
     Effect.sync(() => {
       const grammars: ReadonlyArray<G.Grammar<{ first: number; second: number }>> = [
-        G.gen(function* () {
+        G.gen(function*() {
           const first = yield* G.integer
           const second = yield* G.integer
           return { first, second }
@@ -122,13 +119,12 @@ describe("printer sequencing and exception boundaries", () => {
         assert.equal(Result.getOrThrow(G.printUnchecked(grammar, value)), "12")
         assert.deepEqual(calls, ["keys", "descriptor:first", "descriptor:second", "get:first", "get:second"])
       }
-    }),
-  )
+    }))
 
   it.effect("catches descriptor traps before rejecting extra fields or reading getters", () =>
     Effect.sync(() => {
       const grammars: ReadonlyArray<G.Grammar<{ first: number; second: number }>> = [
-        G.gen(function* () {
+        G.gen(function*() {
           const first = yield* G.integer
           const second = yield* G.integer
           return { first, second }
@@ -165,12 +161,11 @@ describe("printer sequencing and exception boundaries", () => {
         })
         assert.deepEqual(calls, ["keys", "descriptor:extra", "descriptor:first"])
       }
-    }),
-  )
+    }))
 
   it.effect("preserves nested pattern paths and reads each getter only until the first failure", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const tail = yield* G.integer
         return { nested: [{ kind: "ok" as const }], tail }
       })
@@ -245,8 +240,7 @@ describe("printer sequencing and exception boundaries", () => {
         },
       })
       assert.deepEqual(calls, ["nested", "kind"])
-    }),
-  )
+    }))
 
   it.effect("returns the same tag getter failure through transforms, suspensions, labels, and wrappers", () =>
     Effect.sync(() => {
@@ -263,13 +257,15 @@ describe("printer sequencing and exception boundaries", () => {
         path: "kind",
         issue: { _tag: "InvalidValue", expected: "a readable field", actual: value, detail: "tag getter failed" },
       }
-      for (const wrapped of [
-        grammar,
-        transformed,
-        G.suspend(() => grammar),
-        grammar.pipe(G.label("tagged")),
-        grammar.pipe(G.between("[", "]")),
-      ]) {
+      for (
+        const wrapped of [
+          grammar,
+          transformed,
+          G.suspend(() => grammar),
+          grammar.pipe(G.label("tagged")),
+          grammar.pipe(G.between("[", "]")),
+        ]
+      ) {
         assert.deepEqual(printFail(wrapped, value).issue, issue)
         const unchecked = G.printUnchecked(wrapped, value)
         assert.ok(Result.isFailure(unchecked))
@@ -279,8 +275,7 @@ describe("printer sequencing and exception boundaries", () => {
         throw new Error("resolution failed")
       })
       assert.match(printFail(unresolved, "x").message, /resolution failed/)
-    }),
-  )
+    }))
 
   it.effect("stops choice after success and checked printing before reparsing a failure", () =>
     Effect.sync(() => {
@@ -301,6 +296,5 @@ describe("printer sequencing and exception boundaries", () => {
       assert.equal(calls, 0)
       G.print(later, "bad")
       assert.equal(calls, 1)
-    }),
-  )
+    }))
 })

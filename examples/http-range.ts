@@ -69,7 +69,7 @@ export const ManualByteRangeCodec = Schema.String.pipe(
 
 const tag = <const Tag extends string>(value: Tag) => Grammar.empty.pipe(Grammar.as(value))
 
-const closed = Grammar.gen(function* () {
+const closed = Grammar.gen(function*() {
   const kind = yield* tag("closed")
   const start = yield* Grammar.integer
   yield* Grammar.literal("-")
@@ -77,14 +77,14 @@ const closed = Grammar.gen(function* () {
   return { kind, start, end }
 })
 
-const open = Grammar.gen(function* () {
+const open = Grammar.gen(function*() {
   const kind = yield* tag("open")
   const start = yield* Grammar.integer
   yield* Grammar.literal("-")
   return { kind, start }
 })
 
-const suffix = Grammar.gen(function* () {
+const suffix = Grammar.gen(function*() {
   const kind = yield* tag("suffix")
   yield* Grammar.literal("-")
   const length = yield* Grammar.integer
@@ -92,11 +92,14 @@ const suffix = Grammar.gen(function* () {
 })
 
 export const ByteRangeCodec = GrammarSchema.codec(
-  Grammar.dispatch("kind", [
-    ["closed", closed],
-    ["open", open],
-    ["suffix", suffix],
-  ] as const).pipe(Grammar.sepBy(",", { min: 1 }), Grammar.prefix("bytes=")),
+  Grammar.dispatch(
+    "kind",
+    [
+      ["closed", closed],
+      ["open", open],
+      ["suffix", suffix],
+    ] as const,
+  ).pipe(Grammar.sepBy(",", { min: 1 }), Grammar.prefix("bytes=")),
   ByteRanges,
   { identifier: "ByteRanges" },
 )

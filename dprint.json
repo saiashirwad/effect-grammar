@@ -1,0 +1,31 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "lineWidth": 120,
+  "indentWidth": 2,
+  "newLineKind": "lf",
+  "typescript": {
+    "semiColons": "asi",
+    "quoteStyle": "alwaysDouble",
+    "conditionalType.layout": "staircase"
+  },
+  "json": {},
+  "markdown": {
+    "lineWidth": 80,
+    "textWrap": "always"
+  },
+  "excludes": [
+    "**/node_modules",
+    "dist",
+    ".claude",
+    ".repos",
+    "tools/oxlint/anti-slop/**",
+    "**/*.gen.ts",
+    "pnpm-lock.yaml"
+  ],
+  "plugins": [
+    "https://github.com/saiashirwad/dprint-staircase-ternaries/releases/download/0.96.1-staircase.2/dprint_staircase_ternaries.wasm",
+    "https://plugins.dprint.dev/json-0.24.0.wasm",
+    "https://plugins.dprint.dev/markdown-0.24.0.wasm",
+    "https://plugins.dprint.dev/g-plane/pretty_yaml-v0.6.0.wasm"
+  ]
+}

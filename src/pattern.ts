@@ -58,12 +58,12 @@ export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet())
     throw new Error("gen: the return holds a grammar; yield* it to bind its value, then return the ref")
   }
   if (
-    value === null ||
-    value === undefined ||
-    Predicate.isString(value) ||
-    Predicate.isNumber(value) ||
-    Predicate.isBoolean(value) ||
-    Predicate.isBigInt(value)
+    value === null
+    || value === undefined
+    || Predicate.isString(value)
+    || Predicate.isNumber(value)
+    || Predicate.isBoolean(value)
+    || Predicate.isBigInt(value)
   ) {
     return { _tag: "Const", value }
   }
@@ -160,11 +160,11 @@ const validateOwnKeys = (
   return keys.success.every((key) => Predicate.isString(key) && fields.includes(key))
     ? keys
     : Result.fail({
-        _tag: "InvalidValue",
-        expected: `exactly the fields ${fields.join(", ")}`,
-        actual: value,
-        detail: "unexpected own field",
-      })
+      _tag: "InvalidValue",
+      expected: `exactly the fields ${fields.join(", ")}`,
+      actual: value,
+      detail: "unexpected own field",
+    })
 }
 
 export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result.Result<void, PrintIssue> => {

@@ -12,7 +12,7 @@ class EncodePrefix extends Context.Service<EncodePrefix, string>()("test/EncodeP
 
 describe("Schema integration", () => {
   it.effect("preserves target transformations and distinct decoding and encoding services", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const target = Schema.Finite.pipe(
         Schema.decodeTo(
           Schema.String,
@@ -38,11 +38,10 @@ describe("Schema integration", () => {
         yield* Schema.encodeEffect(binary)("value:42").pipe(Effect.provideService(EncodePrefix, "value:")),
         Uint8Array.of(42),
       )
-    }),
-  )
+    }))
 
   it.effect("keeps nested print paths as Schema pointers", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const target = Schema.Struct({ values: Schema.Array(Schema.Finite) })
       const textGrammar = G.struct({ values: G.integer.pipe(G.repeat(1)) })
       const binaryGrammar = G.struct({ values: Binary.uint8.pipe(G.repeat(1)) })
@@ -59,15 +58,13 @@ describe("Schema integration", () => {
       const format = SchemaIssue.makeFormatterStandardSchemaV1()
       assert.deepEqual(format(textError.issue).issues, [{ path: ["values", 0], message: "expected integer, got 1.5" }])
       assert.deepEqual(format(binaryError.issue).issues, [{ path: ["values", 0], message: "expected uint8, got 256" }])
-    }),
-  )
+    }))
 
   it.effect("uses checked text encoding after the target schema encodes", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const rounded = G.integer.pipe(G.transform({ decode: (value) => value, encode: Math.floor }))
       const codec = GrammarSchema.codec(rounded, Schema.Finite)
       const error = yield* Effect.flip(Schema.encodeEffect(codec)(1.5))
       assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /reads back as 1/)
-    }),
-  )
+    }))
 })

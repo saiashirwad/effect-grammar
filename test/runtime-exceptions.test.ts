@@ -46,8 +46,7 @@ describe("operational exceptions", () => {
           assert.deepEqual(printFail(wrapped, "x").issue, printed.issue)
         }
       }
-    }),
-  )
+    }))
 
   it.effect("retains dispatch hasOwn trap paths and stops before later items", () =>
     Effect.sync(() => {
@@ -75,8 +74,7 @@ describe("operational exceptions", () => {
         assert.match(error.message, /^\.items\[0\]\.kind: a readable field: tag descriptor failed$/)
       }
       assert.equal(later, 0)
-    }),
-  )
+    }))
 
   it.effect("retains tuple and repeat element paths and does not read later elements", () =>
     Effect.sync(() => {
@@ -97,12 +95,11 @@ describe("operational exceptions", () => {
         assert.match(error.message, /^\.values\[1\]: a readable array element: element failed$/)
         assert.deepEqual(reads, [0, 1])
       }
-    }),
-  )
+    }))
 
   it.effect("retains nested own-key and revoked-proxy inspection failures", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const value = yield* G.integer
         return { nested: { value } }
       })
@@ -118,8 +115,7 @@ describe("operational exceptions", () => {
       const revoked = Proxy.revocable({ value: 1 }, {})
       revoked.revoke()
       assert.match(printFail(grammar, { nested: revoked.proxy }).message, /^\.nested: .*revoked/)
-    }),
-  )
+    }))
 
   it.effect("returns expression getter and hasOwn failures from both interpreters at the dependent field", () =>
     Effect.sync(() => {
@@ -138,7 +134,7 @@ describe("operational exceptions", () => {
       )
       for (const header of [getter, trap]) {
         let later = 0
-        const grammar = G.gen(function* () {
+        const grammar = G.gen(function*() {
           const info = yield* G.literal("!").pipe(
             G.transform<void, typeof header>({ decode: () => header, encode: () => undefined }),
           )
@@ -157,8 +153,7 @@ describe("operational exceptions", () => {
         }
         assert.equal(later, 0)
       }
-    }),
-  )
+    }))
 
   it.effect("contains equality hooks in whole-output, local choice, and constant checks", () =>
     Effect.sync(() => {
@@ -183,11 +178,10 @@ describe("operational exceptions", () => {
         G.transform<void, ThrowingEquality>({ decode: () => value, encode: () => undefined }),
       )
       assert.equal(Result.getOrThrow(G.print(G.choice([grammar, fallback], { print: "roundTrip" }), value)), "y")
-    }),
-  )
+    }))
 
   it.effect("maps inspection paths to Schema pointers", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const grammar = G.struct({ items: G.integer.pipe(G.many()) })
       const values = [1, 2]
       Object.defineProperty(values, 1, {
@@ -199,8 +193,7 @@ describe("operational exceptions", () => {
       const error = yield* Effect.flip(Schema.encodeEffect(codec)({ items: values }))
       assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /\["items"\]\[1\]/)
       assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /schema element failed/)
-    }),
-  )
+    }))
 
   it.effect("contains hostile thrown values even when their message cannot be read", () =>
     Effect.sync(() => {
@@ -221,8 +214,7 @@ describe("operational exceptions", () => {
       )
       assert.match(parseFail(grammar, "x").message, /<unprintable value>/)
       assert.match(printFail(grammar, "x").message, /<unprintable value>/)
-    }),
-  )
+    }))
 })
 
 describe("binary operational diagnostics", () => {
@@ -254,12 +246,11 @@ describe("binary operational diagnostics", () => {
       const mismatch = B.print(lossy, 255)
       assert.ok(Result.isFailure(mismatch))
       assert.match(mismatch.failure.message, /prints as <ff>, which reads back as 256/)
-    }),
-  )
+    }))
 
   it.effect("uses the enclosing environment while searching binary round-trip branches", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const length = yield* B.uint8
         const body = B.bytes(length)
         const plain = body.pipe(
@@ -283,11 +274,10 @@ describe("binary operational diagnostics", () => {
       for (const print of [B.print, B.printUnchecked]) {
         assert.deepEqual(Result.getOrThrow(print(grammar, value)), Uint8Array.of(2, 255, 65, 66))
       }
-    }),
-  )
+    }))
 
   it.effect("retains Schema pointers and byte diagnostics for a nested choice round-trip failure", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const item = B.uint8.pipe(
         G.transformOrFail({
           decode: () => Result.fail("a decoded value"),
@@ -301,8 +291,7 @@ describe("binary operational diagnostics", () => {
       assert.match(message, /\["payload"\]/)
       assert.match(message, /prints as <0a>.*byte 1:/)
       assert.doesNotMatch(message, /line|column/)
-    }),
-  )
+    }))
 
   it.effect("contains binary callbacks, lazy resolution, inspection, and equality failures", () =>
     Effect.sync(() => {
@@ -352,6 +341,5 @@ describe("binary operational diagnostics", () => {
       const parsed = B.parse(B.uint8, unreadable)
       assert.ok(Result.isFailure(parsed))
       assert.match(parsed.failure.message, /byte 0: .*byte input failed/)
-    }),
-  )
+    }))
 })

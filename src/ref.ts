@@ -14,8 +14,8 @@ interface RefEntry {
 
 const escaped = (): never => {
   throw new TypeError(
-    "a Grammar.Ref has no value until parse or print time, so it cannot be compared, " +
-      "added, or interpolated here; branch on it with Grammar.match instead",
+    "a Grammar.Ref has no value until parse or print time, so it cannot be compared, "
+      + "added, or interpolated here; branch on it with Grammar.match instead",
   )
 }
 

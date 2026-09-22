@@ -26,7 +26,7 @@ import { Schema } from "effect"
 import * as G from "effect-grammar"
 import * as GrammarSchema from "effect-grammar/Schema"
 
-const endpoint = G.gen(function* () {
+const endpoint = G.gen(function*() {
   yield* G.literal("https://")
   const host = yield* G.regex(/[^:/?#]+/, "host")
   yield* G.literal(":")
@@ -108,8 +108,8 @@ stores its `printed` output as a `Uint8Array` and formats it as hexadecimal
 bytes.
 
 To validate a transformed value with a Schema guard, use
-`inner.pipe(G.transform({ decode, encode }), G.filter(Schema.is(schema), name))`.
-The guard checks the value in both directions. It does not run Schema
+`inner.pipe(G.transform({ decode, encode }), G.filter(Schema.is(schema),
+name))`. The guard checks the value in both directions. It does not run Schema
 transformations.
 
 `choice([first, second])` takes a nonempty readonly tuple of branches. By
@@ -129,7 +129,7 @@ Inside `gen`, `yield*` binds an opaque `Ref<A>`. Use `get(ref, key)` to select a
 field for `take`, `repeat`, or `match`:
 
 ```ts
-const message = G.gen(function* () {
+const message = G.gen(function*() {
   const header = yield* G.struct({ size: G.integer.pipe(G.suffix(":")) })
   const body = yield* G.take(G.get(header, "size"))
   return { header, body }
@@ -163,7 +163,7 @@ Text `take` and `lengthPrefixed` count UTF-16 code units, as JavaScript string
 a grammar-graph `path`, and a human-readable `message`:
 
 ```ts
-const incomplete = G.gen(function* () {
+const incomplete = G.gen(function*() {
   yield* G.regex(/[a-z]+/, "word")
 })
 
@@ -249,11 +249,10 @@ string values. These helpers retain byte input and output.
 `Grammar<A, "bytes">`, including recursive annotations.
 
 Shared combinators preserve domains through products, branches, repetitions,
-transforms, and every `gen` yield. A mixed composition has domain
-`"text" | "bytes"`. You can construct and inspect it, but neither domain's
-runners or codecs accept it. A string delimiter or separator imposes the text
-domain, even when the string is empty. Use `Binary.literal(...)` for byte
-syntax.
+transforms, and every `gen` yield. A mixed composition has domain `"text" |
+"bytes"`. You can construct and inspect it, but neither domain's runners or
+codecs accept it. A string delimiter or separator imposes the text domain, even
+when the string is empty. Use `Binary.literal(...)` for byte syntax.
 
 `NeutralGrammar<A>` means `Grammar<A, never>`. Neutral grammars consume and emit
 no domain-specific input, so they compose with either domain. `empty`,

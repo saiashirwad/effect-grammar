@@ -48,7 +48,7 @@ B.print(G.struct({}), {})
 G.print(G.seq(), undefined)
 B.print(G.seq(), undefined)
 // oxlint-disable-next-line require-yield -- a yield-free grammar is deliberately neutral
-const constant = G.gen(function* () {
+const constant = G.gen(function*() {
   return { kind: "empty" } as const
 })
 const constantDomain: G.DomainOf<typeof constant> extends never ? true : false = true
@@ -60,7 +60,7 @@ G.parse(G.choice([G.integer, G.empty.pipe(G.as(0))]), "1")
 B.parse(B.uint8.pipe(G.prefix(G.empty), G.suffix(G.empty)), input)
 B.parse(B.uint8.pipe(G.between(B.literal(1), B.literal(2))), input)
 
-const bytesGen = G.gen(function* () {
+const bytesGen = G.gen(function*() {
   yield* B.literal(1)
   const size = yield* B.uint8
   const body = yield* B.bytes(size)
@@ -69,7 +69,7 @@ const bytesGen = G.gen(function* () {
 B.parse(bytesGen, input)
 // @ts-expect-error gen preserves the domain of every yield
 G.parse(bytesGen, "")
-const mixedGen = G.gen(function* () {
+const mixedGen = G.gen(function*() {
   yield* G.literal("")
   return yield* B.uint8
 })
@@ -122,7 +122,7 @@ const mixedDispatch = G.dispatch("kind", [
 // @ts-expect-error dispatch preserves all branch domains
 B.parse(mixedDispatch, input)
 
-const matched = G.gen(function* () {
+const matched = G.gen(function*() {
   const kind = yield* B.uint8.pipe(G.filter((n): n is 1 | 2 => n === 1 || n === 2, "kind"))
   const value = yield* G.match(kind, [
     [1, B.uint8],
@@ -131,7 +131,7 @@ const matched = G.gen(function* () {
   return { kind, value }
 })
 B.parse(matched, input)
-const mixedMatch = G.gen(function* () {
+const mixedMatch = G.gen(function*() {
   const kind = yield* B.literal(1).pipe(G.as(1))
   const value = yield* G.match(kind, [[1, G.integer]])
   return { kind, value }
@@ -182,11 +182,11 @@ B.parse(
 
 type Tree = { readonly value: number; readonly children: ReadonlyArray<Tree> }
 const tree: B.Grammar<Tree> = G.suspend(() =>
-  G.struct({ value: B.uint8, children: tree.pipe(G.countPrefixed(B.uint8)) }),
+  G.struct({ value: B.uint8, children: tree.pipe(G.countPrefixed(B.uint8)) })
 )
 B.parse(tree, input)
 const textTree: G.Grammar<Tree> = G.suspend(() =>
-  G.struct({ value: G.integer, children: textTree.pipe(G.countPrefixed(G.integer)) }),
+  G.struct({ value: G.integer, children: textTree.pipe(G.countPrefixed(G.integer)) })
 )
 G.parse(textTree, "")
 // @ts-expect-error recursive byte annotations remain byte-only

@@ -16,14 +16,17 @@ describe("opaque refs and return patterns", () => {
 
   it.effect("evaluates nested get for match, take, and repeat in both directions", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const h = yield* G.choice([header, header])
         const layout = G.get(h, "layout")
         const size = G.get(layout, "size")
-        const body = yield* G.match(G.get(layout, "kind"), [
-          ["text", G.take(size)],
-          ["bits", G.regex(/[01]/, "bit").pipe(G.repeat(size))],
-        ] as const)
+        const body = yield* G.match(
+          G.get(layout, "kind"),
+          [
+            ["text", G.take(size)],
+            ["bits", G.regex(/[01]/, "bit").pipe(G.repeat(size))],
+          ] as const,
+        )
         return { packet: { header: h }, body }
       })
 
@@ -44,12 +47,11 @@ describe("opaque refs and return patterns", () => {
         }).message,
         /^\.body: expected 3 characters/,
       )
-    }),
-  )
+    }))
 
   it.effect("evaluates explicit array indexes and length", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const counts = yield* G.tuple(G.integer.pipe(G.suffix(":")))
         const body = yield* G.take(G.get(counts, 0))
         const tail = yield* G.regex(/[01]/).pipe(G.repeat(G.get(counts, "length")))
@@ -58,15 +60,14 @@ describe("opaque refs and return patterns", () => {
       const value: G.Type<typeof grammar> = { counts: [2], body: "ab", tail: ["1"] }
       assert.deepEqual(parseOk(grammar, "2:ab1"), value)
       assert.equal(printOk(grammar, value), "2:ab1")
-    }),
-  )
+    }))
 
   it.effect("keeps parent and local refs through nested wrapper sequences", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const header = yield* G.struct({ size: G.integer.pipe(G.suffix(":")) })
         const size = G.get(header, "size")
-        const body = yield* G.gen(function* () {
+        const body = yield* G.gen(function*() {
           const count = yield* G.integer.pipe(G.suffix(":"))
           const value = yield* G.take(size).pipe(
             G.between(G.take(count).pipe(G.skip("!")), G.take(size).pipe(G.skip("??"))),
@@ -85,25 +86,23 @@ describe("opaque refs and return patterns", () => {
       const syntaxFailure = printFail(grammar, { ...value, body: { count: 2, value: "xy" } })
       assert.match(syntaxFailure.message, /^\.body\.value: expected 2 characters, got "!"/)
       assert.doesNotMatch(syntaxFailure.message, /not returned/)
-    }),
-  )
+    }))
 
   it.effect("rejects nested property refs anywhere in a return pattern", () =>
     Effect.sync(() => {
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const h = yield* header
             return { nested: [G.get(G.get(h, "layout"), "size")] }
           }),
         /property ref; return the whole bound ref/,
       )
-    }),
-  )
+    }))
 
   it.effect("rejects enumeration and coercion without exposing ref state", () =>
     Effect.sync(() => {
-      G.gen(function* () {
+      G.gen(function*() {
         const h = yield* header
         assert.equal(Object.getOwnPropertyDescriptor(h, "expr"), undefined)
         assert.equal(Object.getOwnPropertyDescriptor(h, "scope"), undefined)
@@ -115,6 +114,5 @@ describe("opaque refs and return patterns", () => {
         assert.throws(() => h.valueOf(), /Grammar\.Ref has no value/)
         return h
       })
-    }),
-  )
+    }))
 })

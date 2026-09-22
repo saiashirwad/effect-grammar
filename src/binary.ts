@@ -1,6 +1,6 @@
 import { Predicate, Result, Schema } from "effect"
 
-import { filter, label, countExpr, transform, transformNode, transformOrFail } from "./combinators.ts"
+import { countExpr, filter, label, transform, transformNode, transformOrFail } from "./combinators.ts"
 import { type Grammar as CoreGrammar, isCount, make, type Ref, type Value } from "./core.ts"
 import { exceptionMessage, ParseError, PrintError } from "./errors.ts"
 import { hex, nonByte, toBytes, toText } from "./internal/bytes.ts"
@@ -92,8 +92,7 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
       },
       encode: (value) => {
         const bytes = Uint8Array.from({ length: size }, (_, index) =>
-          Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))),
-        )
+          Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))))
         return toText(littleEndian ? bytes.reverse() : bytes)
       },
     }),
@@ -230,7 +229,7 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
   const slots = fields.map(([key, size]) => ({
     key,
     size,
-    shift: (shift -= BigInt(size)),
+    shift: shift -= BigInt(size),
     fits: Schema.is(uintSchema(size)),
   }))
 
@@ -279,10 +278,9 @@ const toByteResult = (
   Result.flatMap(printed, (binary) =>
     nonByte.test(binary)
       ? Result.fail(
-          new PrintError({ issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value } }),
-        )
-      : Result.succeed(toBytes(binary)),
-  )
+        new PrintError({ issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value } }),
+      )
+      : Result.succeed(toBytes(binary)))
 
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
   toByteResult(value, printDomain(grammar, value, "bytes"))

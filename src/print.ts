@@ -95,9 +95,9 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       return value.length === count.success
         ? Result.succeed(value)
         : invalid(
-            `${count.success} ${state.domain === "bytes" ? "byte" : "character"}${count.success === 1 ? "" : "s"}`,
-            state.domain === "bytes" ? toBytes(value) : value,
-          )
+          `${count.success} ${state.domain === "bytes" ? "byte" : "character"}${count.success === 1 ? "" : "s"}`,
+          state.domain === "bytes" ? toBytes(value) : value,
+        )
     }
     case "Gen": {
       const local = frame(node.scope, node.steps.length, env)
@@ -138,11 +138,11 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
         issues.push(
           issue._tag === "RoundTrip"
             ? {
-                _tag: "InvalidValue",
-                expected: describe(option),
-                actual: value,
-                detail: describeRoundTrip(issue),
-              }
+              _tag: "InvalidValue",
+              expected: describe(option),
+              actual: value,
+              detail: describeRoundTrip(issue),
+            }
             : issue,
         )
       }
@@ -180,17 +180,17 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
     case "Repeat": {
       const min = printCount(evaluate(node.min, env), "repeat count")
       if (Result.isFailure(min)) return Result.fail(min.failure)
-      const max =
-        node.max === undefined ? Result.succeed(Infinity) : printCount(evaluate(node.max, env), "repeat count")
+      const max = node.max === undefined
+        ? Result.succeed(Infinity)
+        : printCount(evaluate(node.max, env), "repeat count")
       if (Result.isFailure(max)) return Result.fail(max.failure)
       if (!Array.isArray(value)) return fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
       if (value.length < min.success || value.length > max.success) {
-        const expected =
-          min.success === max.success
-            ? `${min.success}`
-            : max.success === Infinity
-              ? `at least ${min.success}`
-              : `${min.success}..${max.success}`
+        const expected = min.success === max.success
+          ? `${min.success}`
+          : max.success === Infinity
+          ? `at least ${min.success}`
+          : `${min.success}..${max.success}`
         return invalid(`${expected} items`, value.length)
       }
       const separator = printGrammar(node.sep, undefined, env, state)

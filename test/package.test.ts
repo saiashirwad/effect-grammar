@@ -12,7 +12,7 @@ class CommandFailed extends Data.TaggedError("CommandFailed")<{
 }> {}
 
 const run = (command: string, args: ReadonlyArray<string>, cwd: string) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const handle = yield* ChildProcess.make(command, args, { cwd })
     const [output, exitCode] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.all)), handle.exitCode], {
       concurrency: 2,
@@ -27,7 +27,7 @@ class Packed extends Context.Service<
 >()("test/Packed") {
   static readonly layer = Layer.effect(
     Packed,
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const root = yield* path.fromFileUrl(new URL("..", import.meta.url))
@@ -44,7 +44,7 @@ class Packed extends Context.Service<
 describe("packaged exports", () => {
   layer(Packed.layer.pipe(Layer.provideMerge(NodeServices.layer)), { timeout: "2 minutes" })((it) => {
     it.effect("ships JavaScript and declarations for every source module, including internals", () =>
-      Effect.gen(function* () {
+      Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const { root, workspace, tarball } = yield* Packed
@@ -62,11 +62,10 @@ describe("packaged exports", () => {
             .sort()
           assert.deepStrictEqual(shipped, sources)
         }
-      }),
-    )
+      }))
 
     it.effect("imports every declared export and hides undeclared files", () =>
-      Effect.gen(function* () {
+      Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const { root, workspace, tarball } = yield* Packed
@@ -115,15 +114,15 @@ describe("packaged exports", () => {
         assert.match(output, /^ok$/m)
 
         const types = [
-          'import { Effect, Schema } from "effect"',
-          'import * as G from "effect-grammar"',
-          'import * as Binary from "effect-grammar/Binary"',
-          'import { codec, type CodecOptions } from "effect-grammar/Schema"',
-          'import * as Testing from "effect-grammar/testing"',
+          "import { Effect, Schema } from \"effect\"",
+          "import * as G from \"effect-grammar\"",
+          "import * as Binary from \"effect-grammar/Binary\"",
+          "import { codec, type CodecOptions } from \"effect-grammar/Schema\"",
+          "import * as Testing from \"effect-grammar/testing\"",
           "type Decode = { readonly decode: unique symbol }",
           "type Encode = { readonly encode: unique symbol }",
           "declare const target: Schema.Codec<string, number, Decode, Encode>",
-          'const options: CodecOptions = { identifier: "Number" }',
+          "const options: CodecOptions = { identifier: \"Number\" }",
           "const text = codec(G.integer, target, options)",
           "const binary = Binary.codec(Binary.uint8, target, options)",
           "const bytes: G.Grammar<Uint8Array, 'bytes'> = Binary.bytes(2)",
@@ -133,9 +132,9 @@ describe("packaged exports", () => {
           "  Same<typeof text.EncodingServices, Encode>, Same<typeof binary.DecodingServices, Decode>,",
           "  Same<typeof binary.EncodingServices, Encode>] = [true, true, true, true, true, true, true]",
           "// @ts-expect-error Schema decoding requires the target decoding service",
-          'Effect.runSync(Schema.decodeEffect(text)("1"))',
+          "Effect.runSync(Schema.decodeEffect(text)(\"1\"))",
           "// @ts-expect-error Schema encoding requires the target encoding service",
-          'Effect.runSync(Schema.encodeEffect(binary)("1"))',
+          "Effect.runSync(Schema.encodeEffect(binary)(\"1\"))",
           "// @ts-expect-error codec is only exported from the Schema adapter",
           "G.codec",
           "// @ts-expect-error CodecOptions is only exported from the Schema adapter",
@@ -170,7 +169,6 @@ describe("packaged exports", () => {
           ],
           consumer,
         )
-      }),
-    )
+      }))
   })
 })

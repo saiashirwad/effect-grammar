@@ -34,8 +34,7 @@ describe("unsigned integers", () => {
       assert.deepEqual(printOk(Binary.uint32le, 0xffeeddcc), [0xcc, 0xdd, 0xee, 0xff])
       assert.match(printFail(Binary.uint8, 256).message, /expected uint8/)
       assert.match(printFail(Binary.uint16, 1.5).message, /expected uint16/)
-    }),
-  )
+    }))
 })
 
 describe("signed and 64-bit integers", () => {
@@ -50,8 +49,7 @@ describe("signed and 64-bit integers", () => {
       assert.equal(parseOk(Binary.int64, ...Array(8).fill(0xff)), -1n)
       assert.match(printFail(Binary.uint64, -1n).message, /expected uint64/)
       assert.match(printFail(Binary.int64, 2n ** 63n).message, /expected int64/)
-    }),
-  )
+    }))
 })
 
 describe("floats", () => {
@@ -63,8 +61,7 @@ describe("floats", () => {
       assert.ok(Object.is(parseOk(Binary.float64, ...printOk(Binary.float64, -0)), -0))
       assert.ok(Number.isNaN(parseOk(Binary.float32, ...printOk(Binary.float32, Number.NaN))))
       assert.match(printFail(Binary.float32, 0.1).message, /expected float32/)
-    }),
-  )
+    }))
 })
 
 describe("varints", () => {
@@ -84,8 +81,7 @@ describe("varints", () => {
         "a varuint within the safe integer range",
       ])
       assert.match(printFail(Binary.varuint, -1).message, /non-negative safe integer/)
-    }),
-  )
+    }))
 
   it.effect("zigzags signed values across the whole range it accepts", () =>
     Effect.sync(() => {
@@ -99,8 +95,7 @@ describe("varints", () => {
       assert.deepEqual(parseFail(Binary.varint, ...Array(7).fill(0xff), 0x7f).expected, [
         "a varint from -(2 ** 52) to 2 ** 52 - 1",
       ])
-    }),
-  )
+    }))
 })
 
 describe("uintSchema", () => {
@@ -111,8 +106,7 @@ describe("uintSchema", () => {
       assert.ok(Schema.is(Binary.uintSchema(53))(Number.MAX_SAFE_INTEGER))
       assert.ok(!Schema.is(Binary.uintSchema(53))(2 ** 53))
       for (const size of [0, 1.5, 54]) assert.throws(() => Binary.uintSchema(size), /1 to 53 bits/)
-    }),
-  )
+    }))
 })
 
 describe("bits", () => {
@@ -126,8 +120,7 @@ describe("bits", () => {
       const wide = Binary.bits({ tag: 3, value: 53 })
       const large = { tag: 5, value: Number.MAX_SAFE_INTEGER }
       assert.deepEqual(parseOk(wide, ...printOk(wide, large)), large)
-    }),
-  )
+    }))
 
   it.effect("rejects values that do not fit the layout when printing unchecked", () =>
     Effect.sync(() => {
@@ -140,8 +133,7 @@ describe("bits", () => {
       const overflow = Binary.printUnchecked(byte, { a: 256 })
       assert.ok(Result.isFailure(overflow))
       assert.match(overflow.failure.message, /expected an integer from 0 to 255 for a/)
-    }),
-  )
+    }))
 
   it.effect("reports truncated input at the end of input", () =>
     Effect.sync(() => {
@@ -149,22 +141,20 @@ describe("bits", () => {
         parseFail(flags, 0x85).message,
         "byte 1: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4, found end of input",
       )
-    }),
-  )
+    }))
 
   it.effect("rejects layouts that are not whole bytes or that JavaScript would reorder", () =>
     Effect.sync(() => {
       assert.throws(() => Binary.bits({ a: 3 }), /got a:3/)
       assert.throws(() => Binary.bits({ a: 54, b: 2 }), /got a:54 b:2/)
       assert.throws(() => Binary.bits({ 0: 8 }), /got 0:8/)
-    }),
-  )
+    }))
 })
 
 describe("bytes / lengthPrefixed / literal", () => {
   it.effect("reads a bound run of bytes after a magic number", () =>
     Effect.sync(() => {
-      const frame = G.gen(function* () {
+      const frame = G.gen(function*() {
         yield* Binary.literal(0x89, 0x50)
         const size = yield* Binary.uint8
         const body = yield* Binary.bytes(size)
@@ -175,8 +165,7 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
       assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")
       assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /\.body: expected 3 bytes/)
-    }),
-  )
+    }))
 
   it.effect("derives a byte length prefix and converts text", () =>
     Effect.sync(() => {
@@ -189,15 +178,13 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.equal(parseOk(utf8, 3, 0xef, 0xbb, 0xbf), "\ufeff")
       assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
       assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
-    }),
-  )
+    }))
 
   it.effect("rejects literal values outside the byte range", () =>
     Effect.sync(() => {
       assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
       assert.throws(() => Binary.literal(-1), /expected bytes, got -1/)
-    }),
-  )
+    }))
 
   it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
@@ -206,16 +193,15 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.equal(
         printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
         [
-          'no choice branch accepts {"body":<07 ab>}:',
-          '  expected bytes, got {"body":<07 ab>}',
+          "no choice branch accepts {\"body\":<07 ab>}:",
+          "  expected bytes, got {\"body\":<07 ab>}",
           "  .body: expected 1 byte, got <07 ab>",
         ].join("\n"),
       )
       assert.match(printFail(either, Buffer.from([7, 0xab])).message, /accepts <07 ab>:/)
       // SAFETY: deliberately printing a string where bytes are expected.
       assert.match(printFail(either, "<07 ab>" as never).message, /accepts "<07 ab>":/)
-    }),
-  )
+    }))
 
   it.effect("shows a bigint inside a value in print errors", () =>
     Effect.sync(() => {
@@ -224,28 +210,25 @@ describe("bytes / lengthPrefixed / literal", () => {
         printFail(either, { id: -1n, tags: [5n] }).message,
         /no choice branch accepts \{"id":-1n,"tags":\[5n\]\}:/,
       )
-    }),
-  )
+    }))
 
   it.effect("does not let ascii claim a number in a choice", () =>
     Effect.sync(() => {
       const either = G.choice([Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii), Binary.uint8])
       assert.deepEqual(printOk(either, 65), [65])
-    }),
-  )
+    }))
 })
 
 describe("printing policy", () => {
   it.effect("checks lossy transforms by default, including Schema encoding", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const rounded = Binary.uint8.pipe(G.transform({ decode: (value) => value, encode: Math.floor }))
       assert.deepEqual(Array.from(Result.getOrThrow(Binary.printUnchecked(rounded, 1.5))), [1])
       assert.equal(printFail(rounded, 1.5).issue._tag, "RoundTrip")
       assert.deepEqual(printOk(rounded, 1), [1])
       const error = yield* Effect.flip(Schema.encodeEffect(Binary.codec(rounded, Schema.Finite))(1.5))
       assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /1\.5 prints as <01>, which reads back as 1/)
-    }),
-  )
+    }))
 })
 
 describe("codec", () => {
@@ -254,7 +237,7 @@ describe("codec", () => {
     kind: Binary.uintSchema(7),
     names: Schema.Array(Schema.String),
   })
-  const frame = G.gen(function* () {
+  const frame = G.gen(function*() {
     const bits = yield* Binary.bits({ version: 1, kind: 7 })
     const names = yield* Binary.lengthPrefixed(Binary.uint8).pipe(Binary.utf8, G.countPrefixed(Binary.uint8))
     return { bits, names }
@@ -268,18 +251,16 @@ describe("codec", () => {
   const wire = Uint8Array.of(0x85, 2, 1, 0x61, 2, 0x62, 0x63)
 
   it.effect("decodes and encodes a Uint8Array", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const value = yield* Schema.decodeEffect(FrameFromBytes)(wire)
       assert.deepEqual(value, { version: 1, kind: 5, names: ["a", "bc"] })
       const encoded = yield* Schema.encodeEffect(FrameFromBytes)(value)
       assert.equal(Binary.hex(encoded), "85 02 01 61 02 62 63")
-    }),
-  )
+    }))
 
   it.effect("reports decode failures by byte offset", () =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const error = yield* Effect.flip(Schema.decodeEffect(FrameFromBytes)(wire.slice(0, 6)))
       assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /byte 6: expected 2 more bytes, found end of input/)
-    }),
-  )
+    }))
 })

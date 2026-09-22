@@ -13,7 +13,7 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 
 const document = `{ "name": "ada", "age": 36, "tags": ["math", "code"], "address": { "city": "london", "zip": null } }`
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   yield* Console.log(`grammar ${Grammar.render(jsonValue)}\n`)
   const decoded = yield* decode(document)
   yield* Console.log(`decode  →  ${json(decoded)}`)

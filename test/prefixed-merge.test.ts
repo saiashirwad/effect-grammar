@@ -17,8 +17,7 @@ describe("take with a constant count", () => {
       assert.match(printFail(code, "abcd").message, /expected 3 characters/)
       assert.throws(() => G.take(1.5), RangeError)
       assert.equal(G.diagnose(G.take(0).pipe(G.many())).length, 1)
-    }),
-  )
+    }))
 })
 
 describe("filter", () => {
@@ -31,8 +30,7 @@ describe("filter", () => {
       assert.deepEqual(parseFail(G.integer.pipe(G.filter((n: number) => n > 0, "positive")), "0").expected, [
         "positive",
       ])
-    }),
-  )
+    }))
 })
 
 describe("lengthPrefixed / countPrefixed", () => {
@@ -42,8 +40,7 @@ describe("lengthPrefixed / countPrefixed", () => {
       assert.equal(parseOk(netstring, "5:hello,"), "hello")
       assert.equal(printOk(netstring, "hello world!"), "12:hello world!,")
       assert.deepEqual(parseFail(netstring, "5:hi,").expected, ["5 more characters"])
-    }),
-  )
+    }))
 
   it.effect("derives the count from the items when printing", () =>
     Effect.sync(() => {
@@ -53,12 +50,11 @@ describe("lengthPrefixed / countPrefixed", () => {
       assert.equal(printOk(words, ["x", "y", "z"]), "3:x;y;z;")
       assert.deepEqual(parseFail(words, "3:ab;cd;").expected, ["word"])
       assert.deepEqual(parseOk(item.pipe(G.countPrefixed(G.integer)), "1a;"), ["a"])
-    }),
-  )
+    }))
 })
 
 describe("whole-ref composition", () => {
-  const point = G.gen(function* () {
+  const point = G.gen(function*() {
     const x = yield* G.integer
     const y = yield* G.integer.pipe(G.prefix(","))
     return { x, y }
@@ -66,7 +62,7 @@ describe("whole-ref composition", () => {
 
   it.effect("flattens whole values with an explicit transform", () =>
     Effect.sync(() => {
-      const named = G.gen(function* () {
+      const named = G.gen(function*() {
         const p = yield* point.pipe(
           G.filter((value: G.Type<typeof point>) => value.x >= 0, "a point right of the origin"),
         )
@@ -80,8 +76,7 @@ describe("whole-ref composition", () => {
       )
       assert.deepEqual(parseOk(named, "1,2;p"), { x: 1, y: 2, name: "p" })
       assertRoundTrip(named, { x: 3, y: -4, name: "q" })
-    }),
-  )
+    }))
 
   it.effect("composes whole refs through wrappers without shape discovery", () =>
     Effect.sync(() => {
@@ -94,7 +89,7 @@ describe("whole-ref composition", () => {
         G.suspend(() => point),
       ]
       for (const wrapped of wrappers) {
-        const composed = G.gen(function* () {
+        const composed = G.gen(function*() {
           const p = yield* wrapped.pipe(G.between("(", ")"))
           return { nested: [p] as const }
         })
@@ -107,8 +102,7 @@ describe("whole-ref composition", () => {
         assert.match(message, /^\.nested\[0\]/)
         assert.match(message, /\.x: expected integer/)
       }
-    }),
-  )
+    }))
 
   it.effect("reports print failures by flat field path", () =>
     Effect.sync(() => {
@@ -118,14 +112,13 @@ describe("whole-ref composition", () => {
       // SAFETY: deliberately adding z to show unknown fields are rejected.
       const extra = { x: 1, y: 2, z: 3 } as G.Type<typeof point>
       assert.match(printFail(point, extra).message, /unexpected own field/)
-    }),
-  )
+    }))
 
   it.effect("rejects spreads, duplicate whole refs, and property returns", () =>
     Effect.sync(() => {
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const p = yield* point
             return { x: G.get(p, "x"), y: G.get(p, "y") }
           }),
@@ -133,7 +126,7 @@ describe("whole-ref composition", () => {
       )
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const p = yield* point
             return { p, again: p }
           }),
@@ -141,7 +134,7 @@ describe("whole-ref composition", () => {
       )
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const p = yield* point
             // oxlint-disable-next-line typescript/no-misused-spread -- Deliberately exercise runtime rejection.
             return { ...p }
@@ -151,12 +144,11 @@ describe("whole-ref composition", () => {
       const wrapped = word.pipe(G.transform({ decode: (w) => ({ w }), encode: ({ w }) => w }))
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const w = yield* wrapped
             return { first: G.get(w, "w") }
           }),
         /property ref/,
       )
-    }),
-  )
+    }))
 })

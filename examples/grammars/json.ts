@@ -49,7 +49,7 @@ const jsonArray = jsonValue.pipe(
   Grammar.between(Grammar.symbol("["), Grammar.symbol("]")),
 )
 
-const member = Grammar.gen(function* () {
+const member = Grammar.gen(function*() {
   const key = yield* jsonString
   yield* Grammar.symbol(":")
   const value = yield* jsonValue

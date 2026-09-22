@@ -36,13 +36,10 @@ export abstract class Ref<out A> {
 }
 
 export type Denote<T> =
-  T extends Ref<infer A>
-    ? A
-    : T extends ReadonlyArray<unknown>
-      ? { -readonly [K in keyof T]: Denote<T[K]> }
-      : T extends object
-        ? { -readonly [K in keyof T]: Denote<T[K]> }
-        : T
+    T extends Ref<infer A> ? A
+  : T extends ReadonlyArray<unknown> ? { -readonly [K in keyof T]: Denote<T[K]> }
+  : T extends object ? { -readonly [K in keyof T]: Denote<T[K]> }
+  : T
 
 class GrammarImpl<A, D extends Domain> implements Grammar<A, D> {
   declare readonly [GrammarTypeId]: Types.Invariant<A>
@@ -100,37 +97,37 @@ export type Node =
   | { readonly _tag: "Regex"; readonly source: string; readonly flags: string }
   | { readonly _tag: "Take"; readonly count: Expr }
   | {
-      readonly _tag: "Gen"
-      readonly scope: ScopeId
-      readonly steps: ReadonlyArray<AnyGrammar>
-      readonly result: ReturnPattern
-    }
+    readonly _tag: "Gen"
+    readonly scope: ScopeId
+    readonly steps: ReadonlyArray<AnyGrammar>
+    readonly result: ReturnPattern
+  }
   | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly print: "first" | "roundTrip" }
   | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
   | {
-      readonly _tag: "Repeat"
-      readonly inner: AnyGrammar
-      readonly sep: Grammar<void, Domain>
-      readonly min: Expr
-      readonly max: Expr | undefined
-    }
+    readonly _tag: "Repeat"
+    readonly inner: AnyGrammar
+    readonly sep: Grammar<void, Domain>
+    readonly min: Expr
+    readonly max: Expr | undefined
+  }
   | {
-      readonly _tag: "Transform"
-      readonly inner: AnyGrammar
-      readonly decode: (a: any) => Result.Result<Value, string>
-      readonly encode: (b: any) => Result.Result<Value, string>
-    }
+    readonly _tag: "Transform"
+    readonly inner: AnyGrammar
+    readonly decode: (a: any) => Result.Result<Value, string>
+    readonly encode: (b: any) => Result.Result<Value, string>
+  }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
   | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }
   | {
-      readonly _tag: "Suspend"
-      readonly thunk: () => AnyGrammar
-      readonly name?: string | undefined
-      resolved?: AnyGrammar | undefined
-      resolving?: true | undefined
-    }
+    readonly _tag: "Suspend"
+    readonly thunk: () => AnyGrammar
+    readonly name?: string | undefined
+    resolved?: AnyGrammar | undefined
+    resolving?: true | undefined
+  }
 
 export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): AnyGrammar => {
   if (node.resolved !== undefined) return node.resolved

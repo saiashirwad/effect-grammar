@@ -19,27 +19,30 @@ const attempt = (run: () => string): string => {
   }
 }
 
-const header = G.gen(function* () {
+const header = G.gen(function*() {
   const kind = yield* G.choice([G.literal("raw:").pipe(G.as("raw")), G.literal("pair:").pipe(G.as("pair"))])
   const size = yield* G.integer
   return { kind, size }
 })
 
-const frame = G.gen(function* () {
+const frame = G.gen(function*() {
   const h = yield* header
   yield* G.literal("#")
-  const body = yield* G.match(G.get(h, "kind"), [
-    ["raw", G.take(G.get(h, "size"))],
+  const body = yield* G.match(
+    G.get(h, "kind"),
     [
-      "pair",
-      G.gen(function* () {
-        const name = yield* G.regex(/[a-z]+/, "name")
-        yield* G.literal("=")
-        const value = yield* G.take(G.get(h, "size"))
-        return { name, value }
-      }),
-    ],
-  ] as const)
+      ["raw", G.take(G.get(h, "size"))],
+      [
+        "pair",
+        G.gen(function*() {
+          const name = yield* G.regex(/[a-z]+/, "name")
+          yield* G.literal("=")
+          const value = yield* G.take(G.get(h, "size"))
+          return { name, value }
+        }),
+      ],
+    ] as const,
+  )
   return { h, body }
 })
 
@@ -55,7 +58,7 @@ const Frame = GrammarSchema.codec(
   { identifier: "Frame" },
 )
 
-Effect.gen(function* () {
+Effect.gen(function*() {
   yield* Console.log("grammar :", G.render(frame))
   yield* Console.log()
   yield* Console.log("parse   :", show(G.parse(frame, "raw:5#hello")))

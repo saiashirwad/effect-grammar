@@ -9,7 +9,7 @@ const word = G.regex(/[a-z]+/, "word")
 
 const escaped = (() => {
   let leaked: G.Grammar<string> | undefined
-  G.gen(function* () {
+  G.gen(function*() {
     const length = yield* G.integer
     leaked = G.take(length)
     return length
@@ -20,15 +20,14 @@ const escaped = (() => {
 describe("diagnose", () => {
   it.effect("passes a sound grammar", () =>
     Effect.sync(() => {
-      const g = G.gen(function* () {
+      const g = G.gen(function*() {
         const length = yield* G.integer
         yield* G.literal(":")
         const payload = yield* G.take(length)
         return { length, payload }
       })
       assert.deepEqual(G.diagnose(g), [])
-    }),
-  )
+    }))
 
   it.effect("catches a ref used outside the gen that bound it", () =>
     Effect.sync(() => {
@@ -37,8 +36,7 @@ describe("diagnose", () => {
       assert.equal(issues[0]!._tag, "OutOfScopeRef")
       assert.deepEqual(issues[0]!.path, ["count"])
       assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-    }),
-  )
+    }))
 
   it.effect("catches unbounded repetition of an empty-matching grammar", () =>
     Effect.sync(() => {
@@ -48,8 +46,7 @@ describe("diagnose", () => {
       assert.deepEqual(issues[0]!.path, ["inner"])
       assert.match(issues[0]!.message, /can match the empty string/)
       assert.match(G.diagnose(G.literal("").pipe(G.many()))[0]!.message, /can match the empty string/)
-    }),
-  )
+    }))
 
   it.effect("rejects bounded repetition of an empty item too", () =>
     Effect.sync(() => {
@@ -58,8 +55,7 @@ describe("diagnose", () => {
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /zero-width elements/)
-    }),
-  )
+    }))
 
   it.effect("checks the item of a repeat unless its constant count is zero", () =>
     Effect.sync(() => {
@@ -67,8 +63,7 @@ describe("diagnose", () => {
       assert.match(G.diagnose(item.pipe(G.repeat(2)))[0]!.message, /zero-width elements/)
       assert.match(G.diagnose(item.pipe(G.countPrefixed(G.integer)))[0]!.message, /zero-width elements/)
       assert.deepEqual(G.diagnose(item.pipe(G.repeat(0))), [])
-    }),
-  )
+    }))
 
   it.effect("sees through a transform that cannot match empty, and through a constant", () =>
     Effect.sync(() => {
@@ -76,8 +71,7 @@ describe("diagnose", () => {
       assert.match(G.diagnose(G.literals("", "a").pipe(G.many()))[0]!.message, /zero-width elements/)
       assert.match(G.diagnose(G.flag("-").pipe(G.many()))[0]!.message, /zero-width elements/)
       assert.deepEqual(G.diagnose(G.literals("a", "b").pipe(G.many())), [])
-    }),
-  )
+    }))
 
   it.effect("detects that a zero-maximum repetition always matches empty", () =>
     Effect.sync(() => {
@@ -87,8 +81,7 @@ describe("diagnose", () => {
       const issues = G.diagnose(outer)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /can match the empty string/)
-    }),
-  )
+    }))
 
   it.effect("does not claim a fallible transform matches empty", () =>
     Effect.sync(() => {
@@ -102,8 +95,7 @@ describe("diagnose", () => {
 
       assert.deepEqual(G.diagnose(grammar), [])
       assert.deepEqual(Result.getOrThrow(G.parse(grammar, "xx")), ["xx"])
-    }),
-  )
+    }))
 
   it.effect("leaves an empty-producing transform to the runtime progress check", () =>
     Effect.sync(() => {
@@ -120,15 +112,14 @@ describe("diagnose", () => {
       const parsed = G.parse(grammar, "")
       assert.equal(Result.isFailure(parsed), true)
       if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /consumes input/)
-    }),
-  )
+    }))
 
   it.effect("diagnoses a delayed grammar in each ref scope where it is used", () =>
     Effect.sync(() => {
       let delayed: G.Grammar<string> | undefined
-      const owner = G.gen(function* () {
+      const owner = G.gen(function*() {
         const length = yield* G.integer
-        const dependent = G.gen(function* () {
+        const dependent = G.gen(function*() {
           const payload = yield* G.take(length)
           return payload
         })
@@ -142,15 +133,14 @@ describe("diagnose", () => {
       assert.equal(issues.length, 1)
       assert.deepEqual(issues[0]!.path, ["options", 1, "resolved", "steps", 0, "count"])
       assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-    }),
-  )
+    }))
 
   it.effect("reports one issue when a delayed grammar repeats in one ref scope", () =>
     Effect.sync(() => {
       let delayed: G.Grammar<string> | undefined
-      G.gen(function* () {
+      G.gen(function*() {
         const length = yield* G.integer
-        const dependent = G.gen(function* () {
+        const dependent = G.gen(function*() {
           const payload = yield* G.take(length)
           return payload
         })
@@ -159,31 +149,32 @@ describe("diagnose", () => {
       })
 
       assert.equal(G.diagnose(G.choice([delayed!, delayed!])).length, 1)
-    }),
-  )
+    }))
 
   it.effect("has nothing to report for duplicate match keys, which match rejects on construction", () =>
     Effect.sync(() => {
       const selector = G.choice([G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2))])
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const kind = yield* selector
-            const value = yield* G.match(kind, [
-              [1, G.integer],
-              [1, G.integer],
-              [2, G.integer],
-            ] as const)
+            const value = yield* G.match(
+              kind,
+              [
+                [1, G.integer],
+                [1, G.integer],
+                [2, G.integer],
+              ] as const,
+            )
             return { kind, value }
           }),
         /match: duplicate key 1/,
       )
-    }),
-  )
+    }))
 
   it.effect("reports a step that is parsed but not returned", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         yield* word
         yield* G.literal(":")
         const port = yield* G.integer
@@ -195,12 +186,11 @@ describe("diagnose", () => {
       assert.equal(issues[0]!._tag, "OmittedValue")
       assert.deepEqual(issues[0]!.path, ["steps", 0])
       assert.match(issues[0]!.message, /gen: step 1 \(word\) is parsed but not returned/)
-    }),
-  )
+    }))
 
   it.effect("accepts an omitted dependent skip without evaluating its ref", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const length = yield* G.integer.pipe(G.suffix(":"))
         yield* G.take(length).pipe(G.skip("abc"))
         return length
@@ -209,8 +199,7 @@ describe("diagnose", () => {
       assert.deepEqual(G.diagnose(grammar), [])
       assert.equal(Result.getOrThrow(G.parse(grammar, "3:abc")), 3)
       assert.equal(Result.getOrThrow(G.print(grammar, 3)), "3:abc")
-    }),
-  )
+    }))
 
   it.effect("never probes encode, decode, or predicates, even for undefined outputs", () =>
     Effect.sync(() => {
@@ -247,8 +236,7 @@ describe("diagnose", () => {
       assert.deepEqual(G.diagnose(opaque.pipe(G.many())), [])
       assert.deepEqual(G.diagnose(filtered.pipe(G.many())), [])
       assert.deepEqual(calls, { encode: 0, decode: 0, predicate: 0 })
-    }),
-  )
+    }))
 
   it.effect("only omits optional and choice outputs when every branch is syntax-only", () =>
     Effect.sync(() => {
@@ -260,7 +248,7 @@ describe("diagnose", () => {
       )
       assert.deepEqual(G.diagnose(syntax), [])
 
-      const values = G.gen(function* () {
+      const values = G.gen(function*() {
         yield* G.optional(word)
         yield* G.choice([G.empty, word])
         yield* G.choice([G.empty, word], { print: "roundTrip" })
@@ -269,12 +257,11 @@ describe("diagnose", () => {
         G.diagnose(values).map(({ _tag, path }) => ({ _tag, path })),
         [0, 1, 2].map((slot) => ({ _tag: "OmittedValue", path: ["steps", slot] })),
       )
-    }),
-  )
+    }))
 
   it.effect("checks all dependent match branches without selecting a runtime value", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const kind = yield* G.literals("a", "b")
         yield* G.match(kind, [
           ["a", G.literal("!")],
@@ -290,18 +277,17 @@ describe("diagnose", () => {
         G.diagnose(grammar).map(({ _tag, path }) => ({ _tag, path })),
         [{ _tag: "OmittedValue", path: ["steps", 2] }],
       )
-    }),
-  )
+    }))
 
   it.effect("distinguishes empty-result gen syntax from discarded or constant values", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         yield* G.seq(G.literal("x"))
         yield* G.empty.pipe(G.as(undefined))
         yield* G.struct({})
         yield* G.tuple()
         yield* G.literal("y").pipe(G.as("y"))
-        yield* G.gen(function* () {
+        yield* G.gen(function*() {
           yield* word
         })
       })
@@ -315,8 +301,7 @@ describe("diagnose", () => {
           { _tag: "OmittedValue", path: ["steps", 5, "steps", 0] },
         ],
       )
-    }),
-  )
+    }))
 
   it.effect("accepts whole syntax refs and explicitly supplied wrapper delimiters", () =>
     Effect.sync(() => {
@@ -331,7 +316,7 @@ describe("diagnose", () => {
           },
         }),
       )
-      const syntax = G.gen(function* () {
+      const syntax = G.gen(function*() {
         return yield* G.literal("x")
       }).pipe(G.between(delimiter, delimiter), G.prefix("["), G.suffix("]"))
       const grammar = G.seq(syntax)
@@ -341,8 +326,7 @@ describe("diagnose", () => {
       assert.equal(Result.getOrThrow(G.print(grammar, undefined)), "[!x!]")
       // Wrapping an opaque output does not make that output safe to omit.
       assert.equal(G.diagnose(G.seq(delimiter.pipe(G.between("[", "]"))))[0]!._tag, "OmittedValue")
-    }),
-  )
+    }))
 
   it.effect("reports throwing suspensions under repetition and omitted steps without throwing", () =>
     Effect.sync(() => {
@@ -376,8 +360,7 @@ describe("diagnose", () => {
       assert.equal(calls, 3)
       assert.equal(G.diagnose(broken.pipe(G.optional, G.skip<void>(undefined)))[0]!._tag, "InvalidSuspend")
       assert.equal(G.diagnose(broken.pipe(G.repeat(0)))[0]!._tag, "InvalidSuspend")
-    }),
-  )
+    }))
 
   it.effect("terminates on valid recursive values and conservatively rejects omitted recursive output", () =>
     Effect.sync(() => {
@@ -390,7 +373,7 @@ describe("diagnose", () => {
       assert.deepEqual(G.diagnose(tree.pipe(G.many())), [])
 
       const recursiveSyntax: G.Grammar<void> = G.suspend(() =>
-        G.choice([G.literal("x"), recursiveSyntax.pipe(G.between("[", "]"))]),
+        G.choice([G.literal("x"), recursiveSyntax.pipe(G.between("[", "]"))])
       )
       assert.deepEqual(G.diagnose(recursiveSyntax), [])
       assert.deepEqual(
@@ -398,13 +381,12 @@ describe("diagnose", () => {
         [{ _tag: "OmittedValue", path: ["steps", 0] }],
       )
       assert.deepEqual(G.diagnose(G.seq(recursiveSyntax.pipe(G.skip<void>(undefined)))), [])
-    }),
-  )
+    }))
 
   it.effect("retains ancestor scope checks for shared recursive grammars in either branch order", () =>
     Effect.sync(() => {
       let shared: G.Grammar<string> | undefined
-      const owner = G.gen(function* () {
+      const owner = G.gen(function*() {
         const size = yield* G.integer
         const payload = G.take(size)
         const recursive: G.Grammar<string> = G.suspend(() => G.choice([payload, recursive.pipe(G.between("[", "]"))]))
@@ -413,21 +395,22 @@ describe("diagnose", () => {
         return { size, value }
       })
       assert.deepEqual(G.diagnose(owner), [])
-      for (const options of [
-        [owner, shared!],
-        [shared!, owner],
-      ] as const) {
+      for (
+        const options of [
+          [owner, shared!],
+          [shared!, owner],
+        ] as const
+      ) {
         const issues = G.diagnose(G.choice(options))
         assert.equal(issues.length, 1)
         assert.equal(issues[0]!._tag, "OutOfScopeRef")
         assert.deepEqual(issues[0]!.path, ["options", options[0] === owner ? 1 : 0, "resolved", "options", 0, "count"])
       }
-    }),
-  )
+    }))
 
   it.effect("includes case and wrapper edges in diagnostic paths", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function* () {
+      const grammar = G.gen(function*() {
         const kind = yield* G.literal("a").pipe(G.as("a"))
         const value = yield* G.match(kind, [["a", escaped.pipe(G.between("[", "]"))]])
         return { kind, value }
@@ -435,8 +418,7 @@ describe("diagnose", () => {
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
       assert.deepEqual(issues[0]!.path, ["steps", 1, "cases", 0, "grammar", "steps", 1, "count"])
-    }),
-  )
+    }))
 })
 
 describe("direct operations", () => {
@@ -452,13 +434,13 @@ describe("direct operations", () => {
       assert.equal(G.describe(unrelated), "later")
       assert.throws(
         () =>
-          G.gen(function* () {
+          G.gen(function*() {
             const value = yield* product
             return { first: value, second: value }
           }),
         /step 1 \(gen\) is returned twice/,
       )
-      const omitted = G.gen(function* () {
+      const omitted = G.gen(function*() {
         yield* product
       })
       assert.equal(Result.isFailure(G.printUnchecked(omitted, undefined)), true)
@@ -480,10 +462,9 @@ describe("direct operations", () => {
       if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /choice: decode failed/)
       if (Result.isFailure(printed)) assert.match(printed.failure.message, /choice.*encode failed/)
       assert.equal(calls, 0)
-      assert.equal(G.render(unrelated), '"y"')
+      assert.equal(G.render(unrelated), "\"y\"")
       assert.equal(calls, 1)
-    }),
-  )
+    }))
 
   it.effect("parse, print, printUnchecked, and render a sound grammar", () =>
     Effect.sync(() => {
@@ -492,15 +473,13 @@ describe("direct operations", () => {
       assert.deepEqual(Result.getOrThrow(G.parse(g, "h:80")), { host: "h", port: 80 })
       assert.equal(Result.getOrThrow(G.print(g, { host: "h", port: 80 })), "h:80")
       assert.equal(Result.getOrThrow(G.printUnchecked(g, { host: "h", port: 80 })), "h:80")
-      assert.equal(G.render(g), 'host:<word> port:(":" <integer>)')
-    }),
-  )
+      assert.equal(G.render(g), "host:<word> port:(\":\" <integer>)")
+    }))
 
   it.effect("reports the issues of an invalid grammar", () =>
     Effect.sync(() => {
       const issues = G.diagnose(escaped)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-    }),
-  )
+    }))
 })

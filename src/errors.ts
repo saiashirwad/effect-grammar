@@ -30,19 +30,19 @@ export type PrintIssue =
   | { readonly _tag: "MissingField"; readonly field: string }
   | { readonly _tag: "MissingBinding"; readonly binding: string }
   | {
-      readonly _tag: "InvalidValue"
-      readonly expected: string
-      readonly actual: Value
-      readonly detail?: string | undefined
-    }
+    readonly _tag: "InvalidValue"
+    readonly expected: string
+    readonly actual: Value
+    readonly detail?: string | undefined
+  }
   | { readonly _tag: "NoAlternative"; readonly actual: Value; readonly issues: ReadonlyArray<PrintIssue> }
   | {
-      readonly _tag: "RoundTrip"
-      readonly value: Value
-      readonly printed: string | Uint8Array
-      readonly parsed?: Value
-      readonly error?: string | undefined
-    }
+    readonly _tag: "RoundTrip"
+    readonly value: Value
+    readonly printed: string | Uint8Array
+    readonly parsed?: Value
+    readonly error?: string | undefined
+  }
   | { readonly _tag: "AtPath"; readonly path: string | number; readonly issue: PrintIssue }
 
 const pathText = (path: ReadonlyArray<string | number>) =>
@@ -66,9 +66,11 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
         ? `${prefix}expected ${issue.expected}, got ${preview(issue.actual)}`
         : `${prefix}${issue.expected}: ${issue.detail}`
     case "NoAlternative":
-      return `${prefix}no choice branch accepts ${preview(issue.actual)}:\n  ${issue.issues
-        .map((child) => formatAt(child, []))
-        .join("\n  ")}`
+      return `${prefix}no choice branch accepts ${preview(issue.actual)}:\n  ${
+        issue.issues
+          .map((child) => formatAt(child, []))
+          .join("\n  ")
+      }`
     case "RoundTrip":
       return `${prefix}${preview(issue.value)} ${describeRoundTrip(issue)}`
   }

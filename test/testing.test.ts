@@ -21,36 +21,31 @@ describe("assertPrintParse", () => {
   it.effect("passes when the value round-trips", () =>
     Effect.sync(() => {
       assertPrintParse(G.integer, 42)
-    }),
-  )
+    }))
 
   it.effect("throws when print produces text that reads back differently", () =>
     Effect.sync(() => {
       assert.throws(() => assertPrintParse(G.choice([plain, hashed]), wrong), /reads back as/)
-    }),
-  )
+    }))
 })
 
 describe("assertParsePrintCanonical", () => {
   it.effect("returns the canonical form and drops unbound whitespace", () =>
     Effect.sync(() => {
       assert.equal(assertParsePrintCanonical(canonical, "\t 3\n"), " 3 ")
-    }),
-  )
+    }))
 
   it.effect("throws when the input does not parse", () =>
     Effect.sync(() => {
       assert.throws(() => assertParsePrintCanonical(G.integer, "nope"), /parse failed/)
-    }),
-  )
+    }))
 })
 
 describe("checkPrintParse", () => {
   it.effect("runs the round-trip law over an arbitrary of values", () =>
     Effect.sync(() => {
       checkPrintParse(G.integer, FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }))
-    }),
-  )
+    }))
 })
 
 describe("checkCanonicalization", () => {
@@ -58,8 +53,7 @@ describe("checkCanonicalization", () => {
     Effect.sync(() => {
       const spaced = FastCheck.integer({ min: -50, max: 50 }).map((n) => `  ${n}\t`)
       checkCanonicalization(canonical, spaced)
-    }),
-  )
+    }))
 })
 
 describe("binary laws", () => {
@@ -71,8 +65,7 @@ describe("binary laws", () => {
         B.varuint,
         FastCheck.integer({ min: 0, max: 127 }).map((n) => Uint8Array.of(n | 0x80, 0)),
       )
-    }),
-  )
+    }))
 
   it.effect("reports lossy transforms and invalid input in hex", () =>
     Effect.sync(() => {
@@ -83,8 +76,7 @@ describe("binary laws", () => {
       )
       assert.throws(() => Binary.assertPrintParse(lossy, 10), /hex\[0a\] reads back as 11/)
       assert.throws(() => Binary.assertParsePrintCanonical(B.uint16, Uint8Array.of(0xff)), /parse failed for hex\[ff\]/)
-    }),
-  )
+    }))
 
   it.effect("round-trips nested binary products with byte delimiters and neutral sides", () =>
     Effect.sync(() => {
@@ -98,6 +90,5 @@ describe("binary laws", () => {
         Binary.assertParsePrintCanonical(nested, Uint8Array.of(1, 0x81, 0, 2, 2, 3, 0xaa, 4)),
         Uint8Array.of(1, 1, 2, 2, 3, 0xaa, 4),
       )
-    }),
-  )
+    }))
 })

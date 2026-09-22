@@ -45,7 +45,7 @@ expose `void` at the type level. A ref has no parsed value until execution.
 Previous property access and ref spread:
 
 ```ts
-const packet = G.gen(function* () {
+const packet = G.gen(function*() {
   const header = yield* G.struct({ size: G.integer.pipe(G.suffix(":")) })
   const body = yield* G.take(header.size)
   return { ...header, body }
@@ -58,7 +58,7 @@ reshapes ordinary values in a transform:
 ```ts
 import * as G from "effect-grammar"
 
-const packet = G.gen(function* () {
+const packet = G.gen(function*() {
   const header = yield* G.struct({ size: G.integer.pipe(G.suffix(":")) })
   const body = yield* G.take(G.get(header, "size"))
   return { header, body }
@@ -123,7 +123,7 @@ const tree: Binary.Grammar<Tree> = G.suspend(() =>
   G.struct({
     value: Binary.uint8,
     children: tree.pipe(G.countPrefixed(Binary.uint8)),
-  }),
+  })
 )
 Binary.parse(tree, Uint8Array.of(7, 0)) // Success: { value: 7, children: [] }
 ```
@@ -148,9 +148,9 @@ patterns require exactly their declared own fields, including fields whose value
 is `undefined`.
 
 The default choice policy, `"first"`, selects the first branch that prints. The
-final checked print can then fail without searching other branches.
-`{ print: "roundTrip" }` searches for output that reads back equally through the
-choice itself. This search also runs under `printUnchecked`. Both policies parse
+final checked print can then fail without searching other branches. `{ print:
+"roundTrip" }` searches for output that reads back equally through the choice
+itself. This search also runs under `printUnchecked`. Both policies parse
 branches in declaration order.
 
 Runners return `Result` failures for exceptions from callbacks, lazy thunks,

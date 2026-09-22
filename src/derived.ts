@@ -34,7 +34,7 @@ export function taggedChoice<const Tag extends string, const E extends Entries>(
   entries: E,
 ): Grammar<TaggedValue<Tag, E>, DomainOf<E[number][1]>>
 export function taggedChoice<Tag extends string>(tag: Tag, entries: Entries): AnyGrammar {
-  if (tag === "value") throw new RangeError('taggedChoice: tag name "value" is reserved')
+  if (tag === "value") throw new RangeError("taggedChoice: tag name \"value\" is reserved")
   type Branch = Readonly<Record<Tag, MatchKey>> & { readonly value: Value }
   const branches = entries.map(([key, grammar]) => {
     // SAFETY: entries pair keys with grammars; only the payload type is erased.
@@ -67,22 +67,20 @@ export const literals = <const Values extends readonly [string, ...Array<string>
 export const flag = <T extends Grammar<void, Domain> | string>(value: T) =>
   choice([as(true)(toGrammar(value)), as(false)(empty)])
 
-export const defaulted =
-  <A>(value: A) =>
-  <D extends Domain>(inner: Grammar<A | undefined, D>): Grammar<A, D> =>
-    inner.pipe(
-      transform({
-        decode: (input) => (input === undefined ? value : input),
-        encode: (input) => (Equal.equals(input, value) ? undefined : input),
-      }),
-    )
+export const defaulted = <A>(value: A) => <D extends Domain>(inner: Grammar<A | undefined, D>): Grammar<A, D> =>
+  inner.pipe(
+    transform({
+      decode: (input) => (input === undefined ? value : input),
+      encode: (input) => (Equal.equals(input, value) ? undefined : input),
+    }),
+  )
 
 export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => prefixedBy(length, take)
 
 export const countPrefixed =
   <C extends Domain>(count: Grammar<number, C>) =>
   <A, D extends Domain>(item: Grammar<A, D>): Grammar<ReadonlyArray<A>, C | D> =>
-    gen(function* () {
+    gen(function*() {
       const size = yield* count
       const items = yield* repeat(size)(item)
       return { size, items }

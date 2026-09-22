@@ -24,17 +24,15 @@ describe("parser result regressions", () => {
       const trailing = parseFail(grammar, "ok!")
       assert.equal(trailing.pos, 2)
       assert.deepEqual(trailing.expected, ["end of input"])
-    }),
-  )
+    }))
 
   it.effect("whole-input checks retain farther diagnostics from a backtracked option", () =>
     Effect.sync(() => {
       const grammar = G.choice([G.literal("abc"), G.literal("a")])
       const error = parseFail(grammar, "ab!")
       assert.equal(error.pos, 2)
-      assert.deepEqual(error.expected, ['"abc"'])
-    }),
-  )
+      assert.deepEqual(error.expected, ["\"abc\""])
+    }))
 
   it.effect("stops wrapper syntax in opening, inner, closing order", () =>
     Effect.sync(() => {
@@ -52,19 +50,20 @@ describe("parser result regressions", () => {
       const grammar = character("inner", "x").pipe(
         G.between(character("open", "(").pipe(G.skip("(")), character("close", ")").pipe(G.skip(")"))),
       )
-      for (const [input, expectedCalls] of [
-        ["?x)", ["open"]],
-        ["(?)", ["open", "inner"]],
-        ["(x?", ["open", "inner", "close"]],
-      ] as const) {
+      for (
+        const [input, expectedCalls] of [
+          ["?x)", ["open"]],
+          ["(?)", ["open", "inner"]],
+          ["(x?", ["open", "inner", "close"]],
+        ] as const
+      ) {
         calls.length = 0
         const error = parseFail(grammar, input)
         assert.deepEqual(calls, expectedCalls)
         assert.deepEqual(error.expected, [expectedCalls.at(-1)])
         assert.equal(error.pos, expectedCalls.length)
       }
-    }),
-  )
+    }))
 
   it.effect("retries a failed suspend resolution in the next alternative", () =>
     Effect.sync(() => {
@@ -75,8 +74,7 @@ describe("parser result regressions", () => {
       })
       assert.equal(parseOk(G.choice([grammar, grammar]), "ok"), "ok")
       assert.equal(attempts, 2)
-    }),
-  )
+    }))
 
   it.effect("failed suspend retries keep resolution diagnostics without a stale recursion guard", () =>
     Effect.sync(() => {
@@ -88,6 +86,5 @@ describe("parser result regressions", () => {
       assert.equal(attempts, 2)
       assert.equal(error.pos, 0)
       assert.deepEqual(error.expected, ["attempt 1", "attempt 2"])
-    }),
-  )
+    }))
 })

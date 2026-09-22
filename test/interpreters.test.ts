@@ -20,16 +20,19 @@ const row = <A>(spec: Row<A>): Row => spec as Row
 
 const word = G.regex(/[a-z]+/, "word")
 
-const matchGrammar = G.gen(function* () {
+const matchGrammar = G.gen(function*() {
   const kind = yield* G.choice([G.literal("n").pipe(G.as("n" as const)), G.literal("s").pipe(G.as("s" as const))])
-  const value = yield* G.match(kind, [
-    ["n", G.integer],
-    ["s", word],
-  ] as const)
+  const value = yield* G.match(
+    kind,
+    [
+      ["n", G.integer],
+      ["s", word],
+    ] as const,
+  )
   return { kind, value }
 })
 
-const takeGrammar = G.gen(function* () {
+const takeGrammar = G.gen(function*() {
   const length = yield* G.integer
   yield* G.literal(":")
   const payload = yield* G.take(length)
@@ -39,10 +42,10 @@ const takeGrammar = G.gen(function* () {
 const recursive: G.Grammar<number> = G.suspend(() => G.integer, "rec")
 
 const table = {
-  Literal: row({ grammar: G.literal("x"), text: "x", value: undefined, render: '"x"' }),
+  Literal: row({ grammar: G.literal("x"), text: "x", value: undefined, render: "\"x\"" }),
   Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12", render: "<num>" }),
   Gen: row({
-    grammar: G.gen(function* () {
+    grammar: G.gen(function*() {
       const n = yield* G.integer
       const w = yield* word
       return { n, w }
@@ -55,13 +58,16 @@ const table = {
     grammar: G.choice([G.literal("a").pipe(G.as<number>(1)), G.literal("b").pipe(G.as<number>(2))]),
     text: "a",
     value: 1,
-    render: '("a" | "b")',
+    render: "(\"a\" | \"b\")",
   }),
   Dispatch: row({
-    grammar: G.dispatch("kind", [
-      ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
-      ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
-    ] as const),
+    grammar: G.dispatch(
+      "kind",
+      [
+        ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
+        ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
+      ] as const,
+    ),
     text: "sab",
     value: { kind: "s", value: "ab" },
     renderIncludes: "on(kind)",
@@ -117,8 +123,7 @@ describe("interpreter table (parse / print / render / law per Node)", () => {
       it.effect("parses the sample text", () =>
         Effect.sync(() => {
           assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
-        }),
-      )
+        }))
 
       it.effect("renders", () =>
         Effect.sync(() => {
@@ -126,14 +131,12 @@ describe("interpreter table (parse / print / render / law per Node)", () => {
           assert.ok(rendered.length > 0)
           if (entry.render !== undefined) assert.equal(rendered, entry.render)
           if (entry.renderIncludes !== undefined) assert.ok(rendered.includes(entry.renderIncludes))
-        }),
-      )
+        }))
 
       it.effect("obeys parse(print(value)) = value", () =>
         Effect.sync(() => {
           assertPrintParse(entry.grammar, entry.value)
-        }),
-      )
+        }))
     })
   }
 })

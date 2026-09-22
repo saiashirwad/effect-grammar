@@ -5,7 +5,7 @@ export const prefixedBy = <D extends Domain, T extends Domain>(
   length: Grammar<number, D>,
   take: (length: Ref<number>) => Grammar<string, T>,
 ): Grammar<string, D | T> =>
-  gen(function* () {
+  gen(function*() {
     const size = yield* length
     const body = yield* take(size)
     return { size, body }
