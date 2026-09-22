@@ -130,10 +130,3 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
 
 export const render = (grammar: AnyGrammar): string =>
   parenthesize(notation(grammar, { expanding: new Set(), names: new Map() }), SequencePrecedence)
-
-export const describe = (grammar: AnyGrammar): string => {
-  const node = nodeOf(grammar)
-  return node._tag === "Label" ? node.name : render(grammar)
-}
-
-export const describeStep = (step: AnyGrammar, index: number): string => `step ${index + 1} (${describe(step)})`

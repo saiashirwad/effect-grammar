@@ -3,8 +3,8 @@ import { Result } from "effect"
 import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
+import { describe } from "./internal/describe.ts"
 import { materialize } from "./pattern.ts"
-import { describe } from "./render.ts"
 
 interface State {
   readonly input: string

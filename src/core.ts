@@ -85,10 +85,6 @@ export interface Case {
   readonly grammar: AnyGrammar
 }
 
-export interface GrammarIssue {
-  readonly message: string
-}
-
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
   | { readonly _tag: "Regex"; readonly source: string; readonly flags: string }

@@ -3,9 +3,9 @@ import { Equal, Predicate, Result } from "effect"
 import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import { describe, describeStep } from "./internal/describe.ts"
 import { parseWithEnv } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
-import { describe, describeStep } from "./render.ts"
 
 interface State {
   readonly activeFor: Map<Node, Set<Value>>

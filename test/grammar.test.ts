@@ -192,10 +192,8 @@ describe("gen", () => {
       })
       assert.deepEqual(parseOk(g, "1,2"), { a: 1 })
       assert.deepEqual(
-        G.validate(g).map((issue) => issue.message),
-        [
-          "gen: step 3 (digits) is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip",
-        ],
+        G.diagnose(g).map((issue) => issue.message),
+        ["gen: step 3 (digits) is parsed but not returned; return it, or discard it with skip"],
       )
       assert.match(printFail(g, { a: 1 }).message, /step 3 \(digits\): parsed but not returned/)
     }),
@@ -420,8 +418,8 @@ describe("take / repeat", () => {
       assert.match(printFail(pair, ["x"]).message, /2/)
       assert.equal(G.render(pair), "(<letter>){2}")
       assert.throws(() => G.integer.pipe(G.repeat(-1)), /repeat: count must be a non-negative safe integer/)
-      assert.deepEqual(G.validate(G.integer.pipe(G.repeat(0), G.many())).length, 1)
-      assert.deepEqual(G.validate(G.integer.pipe(G.repeat(1), G.many())), [])
+      assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(0), G.many())).length, 1)
+      assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(1), G.many())), [])
     }),
   )
 })

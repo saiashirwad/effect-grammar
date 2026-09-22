@@ -1,4 +1,4 @@
-export { validate } from "./analysis.ts"
+export { diagnose, type GrammarIssue } from "./analysis.ts"
 export {
   as,
   between,
@@ -35,7 +35,7 @@ export {
   trivia,
   tuple,
 } from "./combinators.ts"
-export type { Grammar, GrammarIssue, Ref, Type } from "./core.ts"
+export type { Grammar, Ref, Type } from "./core.ts"
 export {
   countPrefixed,
   decodeTo,
@@ -48,7 +48,8 @@ export {
   symbol,
 } from "./derived.ts"
 export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
+export { describe } from "./internal/describe.ts"
 export { parse } from "./parse.ts"
 export { print, printUnchecked } from "./print.ts"
-export { describe, render } from "./render.ts"
+export { render } from "./render.ts"
 export { type CodecOptions, codec } from "./schema.ts"

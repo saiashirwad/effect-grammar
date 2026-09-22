@@ -6,7 +6,8 @@ Simplify the API around fewer concepts.
 
 - `Silent` is gone. A grammar that produces nothing is `Grammar<void>`. `gen`
   binds every `yield*`; a step the return value does not mention prints with
-  `undefined`, and `validate` reports steps that cannot.
+  `undefined`. `diagnose` reports omitted steps whose output is not structurally
+  syntax-only. Return opaque values or discard them with `skip`.
 - Every combinator that takes an inner grammar is pipe-only:
   `inner.pipe(many())`, `inner.pipe(between("(", ")"))`,
   `inner.pipe(transform(...))`. Data-first forms are removed.
@@ -29,7 +30,12 @@ Simplify the API around fewer concepts.
 - `Binary.Bit`, `Uint`, `Int`, `Uint8`…`Int64` are `bitSchema`, `uintSchema(n)`,
   `intSchema(n)`, `uint64Schema`, `int64Schema`.
 - `prepare`, `Prepared`, and `GrammarValidationError` are removed; use
-  `validate` with the parse and print functions.
+  `diagnose` with the parse and print functions. `diagnose` replaces `validate`
+  without an alias. Issues have a stable `_tag`, grammar-graph `path`, and
+  `message`. Diagnostics inspect structure without running encode, decode, or
+  predicate callbacks. Suspended thunk failures become issues.
+- `describe` now gives a shallow name without expanding children or resolving
+  suspensions. Use `render` for full grammar notation.
 - The `effect-grammar/Schema` subpath is removed; `codec` is on the root.
 - The printer's recursion guard now catches a suspended grammar re-entered with
   the same value at any depth, so a recursive branch that cannot make progress

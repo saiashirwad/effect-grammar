@@ -15,9 +15,9 @@ import {
   type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
+import { describeStep } from "./internal/describe.ts"
 import { type Pattern, returnPattern, toPattern } from "./pattern.ts"
 import { assertInScope, refFor, type Scope } from "./ref.ts"
-import { describeStep } from "./render.ts"
 
 export { get } from "./ref.ts"
 

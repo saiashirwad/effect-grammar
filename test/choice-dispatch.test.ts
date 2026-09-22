@@ -54,8 +54,8 @@ describe("checkedChoice selects a branch that reads back", () => {
         r.failure.message,
         [
           'no choice branch accepts {"kind":"symbol","value":"42"}:',
-          '  <number>: prints as "42", which reads back as {"kind":"number","value":42}',
-          '  <symbol>: prints as "42", which reads back as {"kind":"number","value":42}',
+          '  transform: prints as "42", which reads back as {"kind":"number","value":42}',
+          '  transform: prints as "42", which reads back as {"kind":"number","value":42}',
         ].join("\n"),
       )
     }),

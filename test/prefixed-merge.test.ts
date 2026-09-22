@@ -16,7 +16,7 @@ describe("take with a constant count", () => {
       assert.deepEqual(parseFail(code, "ab").expected, ["3 more characters"])
       assert.match(printFail(code, "abcd").message, /expected 3 characters/)
       assert.throws(() => G.take(1.5), RangeError)
-      assert.equal(G.validate(G.take(0).pipe(G.many())).length, 1)
+      assert.equal(G.diagnose(G.take(0).pipe(G.many())).length, 1)
     }),
   )
 })
@@ -98,7 +98,7 @@ describe("whole-ref composition", () => {
           const p = yield* wrapped.pipe(G.between("(", ")"))
           return { nested: [p] as const }
         })
-        assert.deepEqual(G.validate(composed), [])
+        assert.deepEqual(G.diagnose(composed), [])
         assert.deepEqual(parseOk(composed, "(1,2)"), { nested: [{ x: 1, y: 2 }] })
         const value: G.Type<typeof composed> = { nested: [{ x: 3, y: 4 }] }
         assertRoundTrip(composed, value)

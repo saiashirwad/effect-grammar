@@ -27,7 +27,7 @@ describe("opaque refs and return patterns", () => {
         return { packet: { header: h }, body }
       })
 
-      assert.deepEqual(G.validate(grammar), [])
+      assert.deepEqual(G.diagnose(grammar), [])
       for (const text of ["text/3:abc", "bits/2:01"]) {
         assert.equal(printOk(grammar, parseOk(grammar, text)), text)
       }

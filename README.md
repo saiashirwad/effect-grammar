@@ -115,6 +115,54 @@ tuple. Property refs from `get` cannot appear in return patterns. To flatten or
 rename fields, apply `transform` to the grammar. Its callbacks receive ordinary
 values and must describe both the decode and encode directions.
 
+## Structural diagnostics
+
+`G.diagnose(grammar)` returns structural issues. Each issue has a stable `_tag`,
+a grammar-graph `path`, and a human-readable `message`:
+
+```ts
+const incomplete = G.gen(function* () {
+  yield* G.regex(/[a-z]+/, "word")
+})
+
+G.diagnose(incomplete)
+// [{ _tag: "OmittedValue", path: ["steps", 0], message: "gen: step 1 ..." }]
+```
+
+The issue tags are `OmittedValue`, `OutOfScopeRef`, `EmptyRepetition`, and
+`InvalidSuspend`. Paths start at the root and use zero-based indices. Edges
+include `steps`, `options`, `cases` (followed by an index and `grammar`),
+`open`, `inner`, `close`, `sep`, and `resolved` for a suspension's target. Ref
+issues end at `count`, `min`, `max`, or `scrutinee`. Empty-repetition issues
+point to the repeated `inner` grammar. Shared suspensions are checked once per
+ancestor scope path, with issues at the first graph path visited in that scope.
+
+An omitted `gen` step must be structurally syntax-only:
+
+- `literal` and `skip` can be omitted.
+- Labels and wrappers preserve this property when their children have it.
+- `optional`, `choice`, and `match` require every child or branch to have it.
+- A nested `gen` must return constant `undefined` and contain only syntax-only
+  steps. An empty object or tuple is a value, not an empty result.
+- A suspension must resolve to syntax-only structure without a cycle.
+
+Return other outputs or discard them explicitly with `skip(printAs)`.
+Transforms, including filters, are opaque even when their callbacks could
+produce or accept `undefined`. Dependent syntax such as
+`G.take(length).pipe(G.skip("abc"))` can be omitted inside the owning `gen`.
+Diagnostics check ref scope but do not evaluate the dependent count or the
+discarded value.
+
+Diagnostics never run encode, decode, or predicate callbacks. They can resolve
+suspension thunks to inspect the graph, and thunk failures become issues.
+Recursive graphs terminate. Empty-match checks report proven empty matches and
+leave unknown cases, including dependent `match` branches and opaque transforms,
+to runtime progress checks. An empty issue list does not guarantee successful
+parsing or printing for every value.
+
+`G.describe(grammar)` returns a shallow name without resolving suspensions.
+`G.render(grammar)` returns full grammar notation and can resolve suspensions.
+
 ## Binary
 
 Use `effect-grammar/Binary` to parse and print bytes with the same grammar
