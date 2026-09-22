@@ -659,7 +659,7 @@ describe("transform / decodeTo", () => {
   it.effect("`is` guards both parse and print", () =>
     Effect.sync(() => {
       const even = G.integer.pipe(
-        G.iso({ decode: (n) => n, encode: (n) => n }),
+        G.transform({ decode: (n) => n, encode: (n) => n }),
         G.filter((n: number) => n % 2 === 0, "even"),
       )
       assert.deepEqual(parseFail(even, "3").expected, ["even"])

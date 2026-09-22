@@ -6,12 +6,12 @@ import {
   empty,
   filter,
   gen,
-  iso,
   literal,
   regex,
   repeat,
   suffix,
   take,
+  transform,
   type TransformOptions,
   trivia,
 } from "./combinators.ts"
@@ -32,13 +32,13 @@ export const decodeTo =
   <T>(schema: Schema.Codec<T, unknown, unknown, unknown>, name = "a value matching the schema") =>
   <A>(options: TransformOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> =>
-    inner.pipe(iso(options), filter(Schema.is(schema), name))
+    inner.pipe(transform(options), filter(Schema.is(schema), name))
 
 export const defaulted =
   <A>(value: A) =>
   (inner: Grammar<A | undefined>): Grammar<A> =>
     inner.pipe(
-      iso({
+      transform({
         decode: (input) => (input === undefined ? value : input),
         encode: (input) => (Equal.equals(input, value) ? undefined : input),
       }),
@@ -50,7 +50,7 @@ export const prefixedBy = (length: Grammar<number>, take: (length: Ref<number>) 
     const body = yield* take(size)
     return { size, body }
   }).pipe(
-    iso({
+    transform({
       decode: ({ body }) => body,
       encode: (body: string) => ({ size: body.length, body }),
     }),
@@ -66,7 +66,7 @@ export const countPrefixed =
       const items = yield* repeat(size)(item)
       return { size, items }
     }).pipe(
-      iso({
+      transform({
         decode: ({ items }) => items,
         encode: (items: ReadonlyArray<A>) => ({ size: items.length, items }),
       }),
@@ -77,7 +77,7 @@ export const lexeme = suffix(trivia)
 export const symbol = (value: string): Grammar<void> => lexeme(literal(value))
 
 export const integer = regex(/-?\d+/, "integer").pipe(
-  iso({
+  transform({
     decode: (text) => {
       const value = Number(text)
       return Object.is(value, -0) ? 0 : value

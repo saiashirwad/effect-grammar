@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 
 import { describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Result } from "effect"
 
 import * as G from "../src/index.ts"
 import { printFail, printOk } from "./helpers.ts"
@@ -12,7 +12,7 @@ describe("printer sequencing and exception boundaries", () => {
       const calls: Array<string> = []
       const tracked = (name: string) =>
         G.regex(/ok/, "ok").pipe(
-          G.iso({
+          G.transform({
             decode: (value) => value,
             encode: (value: string) => {
               calls.push(name)
@@ -46,7 +46,7 @@ describe("printer sequencing and exception boundaries", () => {
     Effect.sync(() => {
       const calls: Array<string> = []
       const item = G.regex(/ok/, "ok").pipe(
-        G.iso({
+        G.transform({
           decode: (value) => value,
           encode: (value: string) => {
             calls.push(value)
@@ -98,7 +98,8 @@ describe("printer sequencing and exception boundaries", () => {
             },
           },
         )
-        assert.equal(printOk(grammar, value), "12")
+        // Inspect printer reads only; the adjacent integers are intentionally ambiguous on parse.
+        assert.equal(Result.getOrThrow(G.printUnchecked(grammar, value)), "12")
         assert.deepEqual(calls, ["keys", "descriptor:first", "descriptor:second", "get:first", "get:second"])
       }
     }),
@@ -252,7 +253,7 @@ describe("printer sequencing and exception boundaries", () => {
           ),
         (error) => error === thrown,
       )
-      const transformed = grammar.pipe(G.iso({ decode: (value) => value, encode: (value) => value }))
+      const transformed = grammar.pipe(G.transform({ decode: (value) => value, encode: (value) => value }))
       assert.match(printFail(transformed, value).message, /tag getter failed/)
       const unresolved = G.suspend<string>(() => {
         throw new Error("resolution failed")
@@ -265,7 +266,7 @@ describe("printer sequencing and exception boundaries", () => {
     Effect.sync(() => {
       let calls = 0
       const later = G.regex(/ok/, "ok").pipe(
-        G.iso({
+        G.transform({
           decode: (value) => {
             calls++
             return value
@@ -278,7 +279,7 @@ describe("printer sequencing and exception boundaries", () => {
       )
       assert.equal(printOk(G.choice(G.regex(/ok/, "ok"), later), "ok"), "ok")
       assert.equal(calls, 0)
-      G.printChecked(later, "bad")
+      G.print(later, "bad")
       assert.equal(calls, 1)
     }),
   )

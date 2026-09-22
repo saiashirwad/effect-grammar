@@ -3,7 +3,6 @@ import { Result } from "effect"
 import {
   type AnyGrammar,
   type Expr,
-  type Fidelity,
   type Grammar,
   type GrammarIssue,
   type Node,
@@ -13,7 +12,7 @@ import {
   type ScopeId,
 } from "./core.ts"
 import { exceptionMessage } from "./errors.ts"
-import { print } from "./print.ts"
+import { printUnchecked } from "./print.ts"
 import { describe, describeStep } from "./render.ts"
 
 const children = (node: Node): ReadonlyArray<AnyGrammar> => {
@@ -165,7 +164,8 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
     const returned = mentionedSlots(node.result)
     for (const [slot, step] of node.steps.entries()) {
       // SAFETY: the step is printed with no value, exactly as the printer would.
-      if (!returned.has(slot) && Result.isFailure(print(step as Grammar<undefined>, undefined))) {
+      // Probe whether an unbound step can print; round-trip checking belongs to the whole grammar.
+      if (!returned.has(slot) && Result.isFailure(printUnchecked(step as Grammar<undefined>, undefined))) {
         state.issues.push({
           message: `gen: ${describeStep(step, slot)} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
         })
@@ -221,27 +221,4 @@ export const validate = (grammar: AnyGrammar): ReadonlyArray<GrammarIssue> => {
   const state: Walk = { issues: [], visiting: new Set(), walkedUnder: new WeakMap() }
   walk(grammar, [], state)
   return state.issues
-}
-
-export interface FidelityEntry {
-  readonly name: string
-  readonly fidelity: Fidelity
-}
-
-export const auditFidelity = (grammar: AnyGrammar): ReadonlyArray<FidelityEntry> => {
-  const entries: Array<FidelityEntry> = []
-  const seen = new Set<Node>()
-  const visit = (grammar: AnyGrammar): void => {
-    const node = nodeOf(grammar)
-    if (node._tag === "Suspend") {
-      if (seen.has(node)) return
-      seen.add(node)
-    }
-    if (node._tag === "Transform" && node.fidelity !== "claimed-iso") {
-      entries.push({ name: describe(node.inner), fidelity: node.fidelity })
-    }
-    for (const child of children(node)) visit(child)
-  }
-  visit(grammar)
-  return entries
 }

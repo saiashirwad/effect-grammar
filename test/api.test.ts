@@ -27,10 +27,10 @@ describe("product and conditional APIs", () => {
 
       assert.equal(parseOk(grammar, "null"), null)
       assert.equal(printOk(grammar, null), "null")
-      assert.equal(Result.getOrThrow(Grammar.printChecked(grammar, null)), "null")
+      assert.equal(Result.getOrThrow(Grammar.print(grammar, null)), "null")
       assert.equal(parseOk(grammar, ""), 0)
       assert.equal(printOk(grammar, 0), "")
-      assert.equal(Result.getOrThrow(Grammar.printChecked(grammar, 0)), "")
+      assert.equal(Result.getOrThrow(Grammar.print(grammar, 0)), "")
     }),
   )
 

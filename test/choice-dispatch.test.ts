@@ -11,14 +11,14 @@ describe("positional choice picks the first branch whose printer accepts", () =>
 
   it.effect("mis-prints a hashed value as plain", () =>
     Effect.sync(() => {
-      assert.equal(printOk(g, wrong), "x")
+      assert.equal(Result.getOrThrow(G.printUnchecked(g, wrong)), "x")
       assert.deepEqual(parseOk(g, "x"), { kind: "plain", value: "x" })
     }),
   )
 
-  it.effect("printChecked rejects output that reads back as another value", () =>
+  it.effect("print rejects output that reads back as another value", () =>
     Effect.sync(() => {
-      const r = G.printChecked(g, wrong)
+      const r = G.print(g, wrong)
       assert.ok(Result.isFailure(r))
       assert.equal(
         r.failure.message,
@@ -27,9 +27,9 @@ describe("positional choice picks the first branch whose printer accepts", () =>
     }),
   )
 
-  it.effect("plain print stays unchecked", () =>
+  it.effect("printUnchecked skips the whole-output check", () =>
     Effect.sync(() => {
-      assert.equal(printOk(g, wrong), "x")
+      assert.equal(Result.getOrThrow(G.printUnchecked(g, wrong)), "x")
     }),
   )
 })
@@ -40,6 +40,7 @@ describe("checkedChoice selects a branch that reads back", () => {
   it.effect("prints with the branch whose text round-trips", () =>
     Effect.sync(() => {
       assert.equal(printOk(g, wrong), "#x")
+      assert.equal(Result.getOrThrow(G.printUnchecked(g, wrong)), "#x")
       assert.equal(printOk(g, { kind: "plain", value: "x" } as const), "x")
     }),
   )
@@ -61,11 +62,22 @@ describe("checkedChoice selects a branch that reads back", () => {
   )
 })
 
-describe("printChecked is the whole-grammar round-trip guarantee", () => {
+describe("print is the whole-grammar round-trip guarantee", () => {
+  it.effect("rejects output that cannot parse even when a nested checkedChoice succeeds", () =>
+    Effect.sync(() => {
+      const grammar = G.tuple(G.checkedChoice(G.integer), G.integer)
+      assert.equal(Result.getOrThrow(G.printUnchecked(grammar, [1, 2])), "12")
+      const result = G.print(grammar, [1, 2])
+      assert.ok(Result.isFailure(result))
+      assert.equal(result.failure.issue._tag, "RoundTrip")
+      assert.match(result.failure.message, /does not parse back/)
+    }),
+  )
+
   it.effect("catches an ambiguous plain choice that no branch selection fixes", () =>
     Effect.sync(() => {
       const atom = G.choice(number, symbol)
-      const r = G.printChecked(atom, { kind: "symbol", value: "42" })
+      const r = G.print(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
       assert.equal(
         r.failure.message,
@@ -77,7 +89,7 @@ describe("printChecked is the whole-grammar round-trip guarantee", () => {
   it.effect("succeeds when the round trip holds", () =>
     Effect.sync(() => {
       const atom = G.choice(number, symbol)
-      assert.equal(Result.getOrThrow(G.printChecked(atom, { kind: "number", value: 42 })), "42")
+      assert.equal(Result.getOrThrow(G.print(atom, { kind: "number", value: 42 })), "42")
     }),
   )
 })
@@ -164,9 +176,9 @@ describe("dispatch prints by reading the tag", () => {
         ["number", number],
         ["symbol", symbol],
       ] as const)
-      assert.equal(printOk(atom, { kind: "symbol", value: "42" }), "42")
+      assert.equal(Result.getOrThrow(G.printUnchecked(atom, { kind: "symbol", value: "42" })), "42")
       assert.deepEqual(parseOk(atom, "42"), { kind: "number", value: 42 })
-      const r = G.printChecked(atom, { kind: "symbol", value: "42" })
+      const r = G.print(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
     }),
   )

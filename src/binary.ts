@@ -1,11 +1,20 @@
 import { Effect, flow, Predicate, Result, Schema, SchemaIssue, SchemaTransformation } from "effect"
 
-import { filter, iso, label, literal as text, partialIso, regex, take, transformNode } from "./combinators.ts"
+import {
+  filter,
+  label,
+  literal as text,
+  regex,
+  take,
+  transform,
+  transformNode,
+  transformOrFail,
+} from "./combinators.ts"
 import { type Grammar, isCount, nonByte, type Ref, toBytes, toText, type Value } from "./core.ts"
 import { prefixedBy } from "./derived.ts"
 import { hex, ParseError, PrintError, toSchemaIssue } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
-import { print as printText, printChecked as printCheckedText } from "./print.ts"
+import { print as printText, printUnchecked as printUncheckedText } from "./print.ts"
 import { render } from "./render.ts"
 import type { CodecOptions } from "./schema.ts"
 
@@ -40,7 +49,7 @@ const isBinary = (value: string): boolean => !nonByte.test(value)
 export const takeBytes = (count: Ref<number> | number): Grammar<string> => take(count).pipe(filter(isBinary, "a byte"))
 
 const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
-  inner.pipe(iso({ decode: toBytes, encode: toText }), filter(Predicate.isUint8Array, "bytes"))
+  inner.pipe(transform({ decode: toBytes, encode: toText }), filter(Predicate.isUint8Array, "bytes"))
 
 export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => asBytes(takeBytes(count))
 
@@ -56,13 +65,13 @@ export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
 
 export const ascii = (inner: Grammar<Uint8Array>): Grammar<string> =>
   inner.pipe(
-    iso<Uint8Array, string>({ decode: toText, encode: toBytes }),
+    transform<Uint8Array, string>({ decode: toText, encode: toBytes }),
     filter((value: Value) => Predicate.isString(value) && /^[\0-\x7f]*$/.test(value), "ascii"),
   )
 
 export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
   inner.pipe(
-    partialIso<Uint8Array, string>({
+    transformOrFail<Uint8Array, string>({
       decode: (value) => {
         try {
           return Result.succeed(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value))
@@ -80,7 +89,7 @@ export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
   takeBytes(size).pipe(
     label(name),
-    iso({
+    transform({
       decode: (binary) => {
         const bytes = littleEndian ? toBytes(binary).reverse() : toBytes(binary)
         return bytes.reduce((value, byte) => (value << 8n) | BigInt(byte), 0n)
@@ -96,13 +105,13 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
 
 const uint = (size: number, name: string, littleEndian = false): Grammar<number> =>
   word(size, name, littleEndian).pipe(
-    iso({ decode: Number, encode: BigInt }),
+    transform({ decode: Number, encode: BigInt }),
     filter(Schema.is(uintSchema(8 * size)), name),
   )
 
 const int = (size: number, name: string, littleEndian = false): Grammar<number> =>
   word(size, name, littleEndian).pipe(
-    iso({ decode: (value) => Number(BigInt.asIntN(8 * size, value)), encode: BigInt }),
+    transform({ decode: (value) => Number(BigInt.asIntN(8 * size, value)), encode: BigInt }),
     filter(Schema.is(intSchema(8 * size)), name),
   )
 
@@ -123,7 +132,7 @@ const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
 
 const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
   word(8, name, littleEndian).pipe(
-    iso({ decode: (value) => BigInt.asIntN(64, value), encode: (value: bigint) => value }),
+    transform({ decode: (value) => BigInt.asIntN(64, value), encode: (value: bigint) => value }),
     filter(Schema.is(int64Schema), name),
   )
 
@@ -137,7 +146,7 @@ const scratch = new DataView(new ArrayBuffer(8))
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
   takeBytes(size).pipe(
     label(name),
-    iso({
+    transform({
       decode: (binary) => {
         for (let index = 0; index < size; index++) scratch.setUint8(index, binary.charCodeAt(index))
         return size === 4 ? scratch.getFloat32(0, littleEndian) : scratch.getFloat64(0, littleEndian)
@@ -179,7 +188,7 @@ const toLeb128 = (value: number): string => {
 }
 
 export const varuint = leb128("varuint").pipe(
-  partialIso({
+  transformOrFail({
     decode: (binary) => {
       const value = fromLeb128(binary)
       return Number.isSafeInteger(value)
@@ -191,7 +200,7 @@ export const varuint = leb128("varuint").pipe(
 )
 
 export const varint = leb128("varint").pipe(
-  partialIso({
+  transformOrFail({
     decode: (binary) => {
       const value = fromLeb128(binary)
       return Number.isSafeInteger(value)
@@ -250,7 +259,6 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
         return Result.succeed(packed)
       },
     },
-    "claimed-iso",
     Object.keys(layout),
   )
 }
@@ -276,8 +284,8 @@ const toByteResult = (
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
   toByteResult(value, printText(grammar, value))
 
-export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
-  toByteResult(value, printCheckedText(grammar, value))
+export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
+  toByteResult(value, printUncheckedText(grammar, value))
 
 export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
@@ -295,7 +303,7 @@ export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
         ),
         encode: flow(
           // SAFETY: the target schema encodes to A.
-          (value) => printChecked(grammar, value as A),
+          (value) => print(grammar, value as A),
           Effect.fromResult,
           Effect.mapError(({ issue }) => toSchemaIssue(issue)),
         ),

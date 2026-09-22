@@ -8,14 +8,20 @@ Simplify the API around fewer concepts.
   binds every `yield*`; a step the return value does not mention prints with
   `undefined`, and `validate` reports steps that cannot.
 - Every combinator that takes an inner grammar is pipe-only:
-  `inner.pipe(many())`, `inner.pipe(between("(", ")"))`, `inner.pipe(iso(...))`.
-  Data-first forms are removed.
+  `inner.pipe(many())`, `inner.pipe(between("(", ")"))`,
+  `inner.pipe(transform(...))`. Data-first forms are removed.
 - `choiceOn`, `choiceOnEntries`, and `matchValue` are replaced by `dispatch` and
   `match`, which take `[key, grammar]` entries; `taggedChoice` takes entries
   too. Integer-like keys are allowed.
 - Transforms no longer take `is` or `name`. Use `filter(predicate, name)` for
-  guards and `label(name)` to name a grammar. `transformOrFail` and `partialIso`
-  fail with a string. `decodeTo(schema, name?)` applies the schema guard.
+  guards and `label(name)` to name a grammar. `transformOrFail` fails with a
+  string. `decodeTo(schema, name?)` applies the schema guard.
+- Transformations use `transform` or `transformOrFail`; `iso`, `partialIso`,
+  `Fidelity`, and `auditFidelity` are removed.
+- `print` now checks that its output parses back to an equal value. The previous
+  unchecked printer is `printUnchecked`; `printChecked` is removed. This applies
+  to text and Binary. `checkedChoice` still searches for a branch that
+  round-trips.
 - `regex(re, name)` is `regex(re).pipe(label(name))`; `take` has no byte unit.
   `Binary.takeBytes` replaces `takeBytes`.
 - One `ParseError`: `Binary.parse` returns it with `line` and `column` undefined

@@ -193,13 +193,13 @@ describe("validate", () => {
 })
 
 describe("direct operations", () => {
-  it.effect("parse, print, printChecked, and render a sound grammar", () =>
+  it.effect("parse, print, printUnchecked, and render a sound grammar", () =>
     Effect.sync(() => {
       const g = G.struct({ host: word, port: G.integer.pipe(G.prefix(":")) })
       assert.deepEqual(G.validate(g), [])
       assert.deepEqual(Result.getOrThrow(G.parse(g, "h:80")), { host: "h", port: 80 })
       assert.equal(Result.getOrThrow(G.print(g, { host: "h", port: 80 })), "h:80")
-      assert.equal(Result.getOrThrow(G.printChecked(g, { host: "h", port: 80 })), "h:80")
+      assert.equal(Result.getOrThrow(G.printUnchecked(g, { host: "h", port: 80 })), "h:80")
       assert.equal(G.render(g), 'host:<word> port:(":" <integer>)')
     }),
   )
@@ -209,33 +209,6 @@ describe("direct operations", () => {
       const issues = G.validate(escaped)
       assert.equal(issues.length, 1)
       assert.match(issues[0]!.message, /take: uses a ref bound by a gen that is not an ancestor/)
-    }),
-  )
-})
-
-describe("auditFidelity", () => {
-  it.effect("is empty for grammars built from isos", () =>
-    Effect.sync(() => {
-      assert.deepEqual(G.auditFidelity(G.integer), [])
-    }),
-  )
-
-  it.effect("lists transforms that claim no inverse law", () =>
-    Effect.sync(() => {
-      const g = G.regex(/\d+/, "num").pipe(G.transform({ decode: Number, encode: String }))
-      assert.deepEqual(G.auditFidelity(g), [{ name: "num", fidelity: "unchecked" }])
-    }),
-  )
-
-  it.effect("reports partialIso as partial", () =>
-    Effect.sync(() => {
-      const g = G.regex(/\d+/, "p").pipe(
-        G.partialIso({
-          decode: (raw) => Result.succeed(Number(raw)),
-          encode: (n) => Result.succeed(String(n)),
-        }),
-      )
-      assert.deepEqual(G.auditFidelity(g), [{ name: "p", fidelity: "partial" }])
     }),
   )
 })

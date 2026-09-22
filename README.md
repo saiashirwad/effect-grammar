@@ -48,8 +48,8 @@ Encoding checks that the output parses back to an equal value using
 
 ## Parsing and printing without Schema
 
-Use the grammar directly with `parse`, `print`, or `printChecked`. Each returns
-an Effect `Result`:
+Use the grammar directly with `parse`, `print`, or `printUnchecked`. Each
+returns an Effect `Result`:
 
 ```ts
 import { Result } from "effect"
@@ -68,15 +68,26 @@ if (Result.isFailure(invalid)) {
   // ParseError
 }
 
-const printed = G.printChecked(endpoint, {
+const printed = G.print(endpoint, {
   host: "effect.website",
   port: 443,
 })
 // Result containing "https://effect.website:443"
 ```
 
-`parse` requires the whole input to match. `print` prints without a round-trip
-check. `printChecked` checks that the output parses back to an equal value.
+`parse` requires the whole input to match. `print` checks that the output parses
+back to an equal value using `Equal.equals`. `printUnchecked` skips this
+whole-output check. Both printers still enforce the grammar's local constraints.
+
+Use `transform` for value-returning decode/encode callbacks and
+`transformOrFail` for callbacks returning `Result` with a string error. Neither
+claims an inverse law; `print` checks the round trip for each value. Callback
+exceptions become parse or print failures with grammar context.
+
+`choice` prints with the first branch that accepts the value. `checkedChoice`
+tries later branches when a candidate's output reads back differently through
+the choice. This branch search also applies with `printUnchecked`; `print`
+checks the final output of the whole grammar.
 
 Printing a `gen` object requires exactly its declared fields. Repeated items
 must consume input. Empty matches fail rather than loop.
@@ -99,7 +110,7 @@ const header = G.struct({
 Result.getOrThrow(Binary.parse(header, Uint8Array.of(0x01, 0x00, 0x03)))
 // { version: 1, length: 3 }
 
-Result.getOrThrow(Binary.printChecked(header, { version: 1, length: 3 }))
+Result.getOrThrow(Binary.print(header, { version: 1, length: 3 }))
 // Uint8Array [1, 0, 3]
 ```
 

@@ -3,7 +3,7 @@ import { Effect, flow, Schema, SchemaIssue, SchemaTransformation } from "effect"
 import type { Grammar } from "./core.ts"
 import { toSchemaIssue } from "./errors.ts"
 import { parse } from "./parse.ts"
-import { printChecked } from "./print.ts"
+import { print } from "./print.ts"
 import { render } from "./render.ts"
 
 export interface CodecOptions {
@@ -26,7 +26,7 @@ export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
         ),
         encode: flow(
           // SAFETY: the target schema encodes to A.
-          (value) => printChecked(grammar, value as A),
+          (value) => print(grammar, value as A),
           Effect.fromResult,
           Effect.mapError(({ issue }) => toSchemaIssue(issue)),
         ),

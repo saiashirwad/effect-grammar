@@ -4,7 +4,6 @@ import {
   type AnyGrammar,
   type Denote,
   type Expr,
-  type Fidelity,
   type Grammar,
   isCount,
   isGrammar,
@@ -15,7 +14,7 @@ import {
   type Type,
   type Value,
 } from "./core.ts"
-import { exceptionMessage, preview } from "./errors.ts"
+import { preview } from "./errors.ts"
 import { assertInScope, assertRefsReturnedOnce, keysOf, refFor, type Scope, toPattern } from "./ref.ts"
 
 export { get } from "./ref.ts"
@@ -192,7 +191,6 @@ export const taggedChoice = <const Tag extends string, const E extends Entries>(
           return Result.succeed(value.value)
         },
       },
-      "claimed-iso",
     )
     return [key, branch] as const
   })
@@ -257,45 +255,21 @@ export interface TransformOrFailOptions<A, B> {
 export const transformNode = <A, B>(
   inner: Grammar<A>,
   options: TransformOrFailOptions<A, B>,
-  fidelity: Fidelity,
   keys?: ReadonlyArray<string>,
-): Grammar<B> => make({ _tag: "Transform", inner, ...options, fidelity, keys })
-
-const attempt =
-  <A, B>(run: (a: A) => B) =>
-  (a: A): Result.Result<B, string> => {
-    try {
-      return Result.succeed(run(a))
-    } catch (error) {
-      return Result.fail(exceptionMessage(error))
-    }
-  }
-
-const throwingTransformNode = <A, B>(
-  inner: Grammar<A>,
-  options: TransformOptions<A, B>,
-  fidelity: Fidelity,
-): Grammar<B> => transformNode(inner, { decode: attempt(options.decode), encode: attempt(options.encode) }, fidelity)
+): Grammar<B> => make({ _tag: "Transform", inner, ...options, keys })
 
 export const transform =
   <A, B>(options: TransformOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
-    throwingTransformNode(inner, options, "unchecked")
+    transformNode(inner, {
+      decode: (value) => Result.succeed(options.decode(value)),
+      encode: (value) => Result.succeed(options.encode(value)),
+    })
 
 export const transformOrFail =
   <A, B>(options: TransformOrFailOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
-    transformNode(inner, options, "unchecked")
-
-export const iso =
-  <A, B>(options: TransformOptions<A, B>) =>
-  (inner: Grammar<A>): Grammar<B> =>
-    throwingTransformNode(inner, options, "claimed-iso")
-
-export const partialIso =
-  <A, B>(options: TransformOrFailOptions<A, B>) =>
-  (inner: Grammar<A>): Grammar<B> =>
-    transformNode(inner, options, "partial")
+    transformNode(inner, options)
 
 export function filter<A, B extends A>(
   refinement: (value: A) => value is B,
@@ -308,7 +282,7 @@ export function filter<A>(
 export function filter<A>(predicate: (value: A) => boolean, name: string) {
   return <I extends A>(inner: Grammar<I>): Grammar<I> => {
     const check = (value: I) => (predicate(value) ? Result.succeed(value) : Result.fail(name))
-    return transformNode(inner, { decode: check, encode: check }, "claimed-iso", keysOf(inner))
+    return transformNode(inner, { decode: check, encode: check }, keysOf(inner))
   }
 }
 

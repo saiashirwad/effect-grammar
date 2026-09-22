@@ -118,7 +118,7 @@ describe("spreading a ref", () => {
           }),
         /returned twice/,
       )
-      const wrapped = word.pipe(G.iso({ decode: (w) => ({ w }), encode: ({ w }) => w }))
+      const wrapped = word.pipe(G.transform({ decode: (w) => ({ w }), encode: ({ w }) => w }))
       assert.throws(
         () =>
           G.gen(function* () {

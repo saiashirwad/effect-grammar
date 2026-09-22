@@ -1,4 +1,4 @@
-export { auditFidelity, type FidelityEntry, validate } from "./analysis.ts"
+export { validate } from "./analysis.ts"
 export {
   as,
   between,
@@ -9,13 +9,11 @@ export {
   filter,
   gen,
   get,
-  iso,
   label,
   literal,
   many,
   match,
   optional,
-  partialIso,
   prefix,
   regex,
   repeat,
@@ -37,7 +35,7 @@ export {
   trivia,
   tuple,
 } from "./combinators.ts"
-export type { Fidelity, Grammar, GrammarIssue, Ref, Type } from "./core.ts"
+export type { Grammar, GrammarIssue, Ref, Type } from "./core.ts"
 export {
   countPrefixed,
   decodeTo,
@@ -51,6 +49,6 @@ export {
 } from "./derived.ts"
 export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
 export { parse } from "./parse.ts"
-export { print, printChecked } from "./print.ts"
+export { print, printUnchecked } from "./print.ts"
 export { describe, render } from "./render.ts"
 export { type CodecOptions, codec } from "./schema.ts"

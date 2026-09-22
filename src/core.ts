@@ -101,8 +101,6 @@ export interface Case {
   readonly grammar: AnyGrammar
 }
 
-export type Fidelity = "unchecked" | "partial" | "claimed-iso"
-
 export interface GrammarIssue {
   readonly message: string
 }
@@ -134,7 +132,6 @@ export type Node =
       readonly inner: AnyGrammar
       readonly decode: (a: any) => Result.Result<Value, string>
       readonly encode: (b: any) => Result.Result<Value, string>
-      readonly fidelity: Fidelity
       readonly keys?: ReadonlyArray<string> | undefined
     }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }

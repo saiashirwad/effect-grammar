@@ -172,8 +172,13 @@ describe("staged correctness", () => {
         }),
       )
 
-      assert.match(parseFail(total, "x").message, /decode failed/)
-      assert.match(printFail(total, "x").message, /encode failed/)
+      assert.deepEqual(parseFail(total, "x").expected, ["x: decode failed"])
+      assert.deepEqual(printFail(total, "x").issue, {
+        _tag: "InvalidValue",
+        expected: "x",
+        actual: "x",
+        detail: "encode failed",
+      })
       assert.match(parseFail(fallible, "x").message, /decode rejected/)
       assert.match(printFail(fallible, "x").message, /encode rejected/)
     }),

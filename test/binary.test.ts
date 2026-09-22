@@ -16,7 +16,7 @@ const parseFail = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): G
 }
 
 const printOk = <A>(grammar: G.Grammar<A>, value: A): ReadonlyArray<number> =>
-  Array.from(Result.getOrThrow(Binary.printChecked(grammar, value)))
+  Array.from(Result.getOrThrow(Binary.print(grammar, value)))
 
 const printFail = <A>(grammar: G.Grammar<A>, value: A): G.PrintError => {
   const result = Binary.print(grammar, value)
@@ -134,8 +134,12 @@ describe("bits", () => {
       const byte = Binary.bits({ a: 8 })
       // SAFETY: deliberately adding a field to show the printer rejects it.
       const extra = { a: 1, extra: true } as G.Type<typeof byte>
-      assert.match(printFail(byte, extra).message, /expected no field named extra/)
-      assert.match(printFail(byte, { a: 256 }).message, /expected an integer from 0 to 255 for a/)
+      const extraResult = Binary.printUnchecked(byte, extra)
+      assert.ok(Result.isFailure(extraResult))
+      assert.match(extraResult.failure.message, /expected no field named extra/)
+      const overflow = Binary.printUnchecked(byte, { a: 256 })
+      assert.ok(Result.isFailure(overflow))
+      assert.match(overflow.failure.message, /expected an integer from 0 to 255 for a/)
     }),
   )
 
@@ -185,7 +189,6 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.equal(parseOk(utf8, 3, 0xef, 0xbb, 0xbf), "\ufeff")
       assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
       assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
-      assert.deepEqual(G.auditFidelity(utf8), [{ name: "size:<uint8> body:<take>{size}", fidelity: "partial" }])
     }),
   )
 
@@ -232,6 +235,19 @@ describe("bytes / lengthPrefixed / literal", () => {
     Effect.sync(() => {
       const either = G.choice(Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii), Binary.uint8)
       assert.deepEqual(printOk(either, 65), [65])
+    }),
+  )
+})
+
+describe("printing policy", () => {
+  it.effect("checks lossy transforms by default, including Schema encoding", () =>
+    Effect.gen(function* () {
+      const rounded = Binary.uint8.pipe(G.transform({ decode: (value) => value, encode: Math.floor }))
+      assert.deepEqual(Array.from(Result.getOrThrow(Binary.printUnchecked(rounded, 1.5))), [1])
+      assert.equal(printFail(rounded, 1.5).issue._tag, "RoundTrip")
+      assert.deepEqual(printOk(rounded, 1), [1])
+      const error = yield* Effect.flip(Schema.encodeEffect(Binary.codec(rounded, Schema.Finite))(1.5))
+      assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /reads back as 1/)
     }),
   )
 })

@@ -116,6 +116,11 @@ const program = Effect.gen(function* () {
   yield* Console.log(
     show('print { user: "alice", sslmode: "require" }', Grammar.print(query, { user: "alice", sslmode: "require" })),
   )
+
+  const rounded = Grammar.integer.pipe(Grammar.transform({ decode: (value) => value, encode: Math.floor }))
+  yield* Console.log("── checked and unchecked printing ───────────────────")
+  yield* Console.log(show("print 1.5  (rejects a lossy round trip)", Grammar.print(rounded, 1.5)))
+  yield* Console.log(show("printUnchecked 1.5  (prints 1)", Grammar.printUnchecked(rounded, 1.5)))
 })
 
 program.pipe(Effect.runSync)

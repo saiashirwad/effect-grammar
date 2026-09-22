@@ -240,14 +240,14 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
   }
 }
 
-export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   Result.mapError(
     printGrammar(grammar, value, undefined, { activeFor: new Map() }),
     (issue) => new PrintError({ issue }),
   )
 
-export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
-  Result.flatMap(print(grammar, value), (printed) => {
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  Result.flatMap(printUnchecked(grammar, value), (printed) => {
     const issue = roundTripIssue(grammar, value, printed, undefined)
     return issue === undefined ? Result.succeed(printed) : Result.fail(new PrintError({ issue }))
   })
