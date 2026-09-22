@@ -4,17 +4,7 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 
 import * as G from "../src/index.ts"
-import {
-  assertRoundTrip,
-  hashed,
-  number,
-  parseOk,
-  plain,
-  printOk,
-  symbol,
-  word,
-  wrong,
-} from "./helpers.ts"
+import { assertRoundTrip, hashed, number, parseOk, plain, printOk, symbol, word, wrong } from "./helpers.ts"
 
 describe("positional choice picks the first branch whose printer accepts", () => {
   const g = G.choice(plain, hashed)
@@ -127,17 +117,11 @@ describe("choiceOn prints by reading the tag", () => {
       // SAFETY: deliberately ill-typed values exercise the runtime checks.
       const missing = G.print(g, { value: "x" } as never)
       assert.ok(Result.isFailure(missing))
-      assert.equal(
-        missing.failure.message,
-        'expected an object with a kind field, got {"value":"x"}',
-      )
+      assert.equal(missing.failure.message, 'expected an object with a kind field, got {"value":"x"}')
       // SAFETY: deliberately ill-typed values exercise the runtime checks.
       const unknown = G.print(g, { kind: "other", value: "x" } as never)
       assert.ok(Result.isFailure(unknown))
-      assert.equal(
-        unknown.failure.message,
-        'expected kind to be one of "plain", "hashed", got "other"',
-      )
+      assert.equal(unknown.failure.message, 'expected kind to be one of "plain", "hashed", got "other"')
     }),
   )
 

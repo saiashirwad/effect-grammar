@@ -4,17 +4,17 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 
 import * as G from "../src/index.ts"
-import { reparse } from "../src/parse.ts"
+import { parseWithEnv } from "../src/parse.ts"
 import { parseFail, parseOk } from "./helpers.ts"
 
 describe("parser result regressions", () => {
-  it.effect("reparse and parse share whole-input success and failure semantics", () =>
+  it.effect("parseWithEnv and parse share whole-input success and failure semantics", () =>
     Effect.sync(() => {
       const grammar = G.literal("ok")
-      assert.equal(Result.getOrThrow(reparse(grammar, "ok", undefined)), undefined)
+      assert.equal(Result.getOrThrow(parseWithEnv(grammar, "ok", undefined)), undefined)
       assert.equal(parseOk(grammar, "ok"), undefined)
       for (const input of ["no", "ok!"]) {
-        const result = reparse(grammar, input, undefined)
+        const result = parseWithEnv(grammar, input, undefined)
         assert.ok(Result.isFailure(result))
         const error = parseFail(grammar, input)
         assert.equal(result.failure.message, error.message)

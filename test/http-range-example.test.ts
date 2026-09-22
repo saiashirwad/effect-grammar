@@ -4,17 +4,11 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
 
-import {
-  ByteRangeCodec,
-  type ByteRangesValue,
-  ManualByteRangeCodec,
-} from "../examples/http-range.ts"
+import { ByteRangeCodec, type ByteRangesValue, ManualByteRangeCodec } from "../examples/http-range.ts"
 
 const codecs = [ManualByteRangeCodec, ByteRangeCodec] as const
-const decode = (codec: (typeof codecs)[number], source: string) =>
-  Schema.decodeResult(codec)(source)
-const encode = (codec: (typeof codecs)[number], value: ByteRangesValue) =>
-  Schema.encodeResult(codec)(value)
+const decode = (codec: (typeof codecs)[number], source: string) => Schema.decodeResult(codec)(source)
+const encode = (codec: (typeof codecs)[number], value: ByteRangesValue) => Schema.encodeResult(codec)(value)
 
 const values: ReadonlyArray<ByteRangesValue> = [
   [{ kind: "closed", start: 0, end: 499 }],
@@ -34,8 +28,7 @@ const rangeText = FastCheck.oneof(
     padding,
     padding,
   ).map(
-    ([start, width, startZeroes, endZeroes]) =>
-      `${padded(start, startZeroes)}-${padded(start + width, endZeroes)}`,
+    ([start, width, startZeroes, endZeroes]) => `${padded(start, startZeroes)}-${padded(start + width, endZeroes)}`,
   ),
   FastCheck.tuple(FastCheck.integer({ min: 0, max: 1_000 }), padding).map(
     ([start, zeroes]) => `${padded(start, zeroes)}-`,

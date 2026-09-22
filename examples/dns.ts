@@ -52,9 +52,7 @@ const DnsHeader = Schema.Struct({
 
 const DnsQuery = Schema.Struct({
   header: DnsHeader,
-  questions: Schema.Array(
-    Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.Uint16, qclass: B.Uint16 }),
-  ),
+  questions: Schema.Array(Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.Uint16, qclass: B.Uint16 })),
 })
 
 export const HeaderFromUint8Array = B.codec(header, DnsHeader, { identifier: "DnsHeader" })
@@ -74,8 +72,8 @@ const headerJson = Schema.encodeEffect(Schema.fromJsonString(DnsHeader))
 const questionsJson = Schema.encodeEffect(Schema.fromJsonString(DnsQuery.fields.questions))
 
 const packet = Uint8Array.from([
-  0xbe, 0xef, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x65, 0x78, 0x61,
-  0x6d, 0x70, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
+  0xbe, 0xef, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c,
+  0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
 ])
 
 Effect.gen(function* () {
@@ -97,7 +95,5 @@ Effect.gen(function* () {
 
   yield* Schema.decodeEffect(HeaderFromUint8Array)(packet.slice(0, 7)).pipe(report("7-byte header"))
 
-  yield* Schema.decodeEffect(QueryFromUint8Array)(packet.with(12, 0x40)).pipe(
-    report("label length 64"),
-  )
+  yield* Schema.decodeEffect(QueryFromUint8Array)(packet.with(12, 0x40)).pipe(report("label length 64"))
 }).pipe(Effect.runSync)

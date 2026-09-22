@@ -164,86 +164,84 @@ describe("printer sequencing and exception boundaries", () => {
     }),
   )
 
-  it.effect(
-    "preserves nested pattern paths and reads each getter only until the first failure",
-    () =>
-      Effect.sync(() => {
-        const grammar = G.gen(function* () {
-          const tail = yield* G.integer
-          return { nested: [{ kind: "ok" as const }], tail }
-        })
-        const calls: Array<string> = []
-        const value = {
-          get nested() {
-            calls.push("nested")
-            return [
-              {
-                get kind() {
-                  calls.push("kind")
-                  return "bad" as const
-                },
+  it.effect("preserves nested pattern paths and reads each getter only until the first failure", () =>
+    Effect.sync(() => {
+      const grammar = G.gen(function* () {
+        const tail = yield* G.integer
+        return { nested: [{ kind: "ok" as const }], tail }
+      })
+      const calls: Array<string> = []
+      const value = {
+        get nested() {
+          calls.push("nested")
+          return [
+            {
+              get kind() {
+                calls.push("kind")
+                return "bad" as const
               },
-            ]
-          },
-          get tail() {
-            calls.push("tail")
-            return 1
-          },
-        }
-        // SAFETY: deliberately mismatched constant exercises pattern validation.
-        const error = printFail(grammar, value as never)
-        assert.deepEqual(error.issue, {
+            },
+          ]
+        },
+        get tail() {
+          calls.push("tail")
+          return 1
+        },
+      }
+      // SAFETY: deliberately mismatched constant exercises pattern validation.
+      const error = printFail(grammar, value as never)
+      assert.deepEqual(error.issue, {
+        _tag: "AtPath",
+        path: "nested",
+        issue: {
           _tag: "AtPath",
-          path: "nested",
+          path: 0,
           issue: {
             _tag: "AtPath",
-            path: 0,
-            issue: {
-              _tag: "AtPath",
-              path: "kind",
-              issue: { _tag: "ConstantMismatch", expected: "ok", actual: "bad" },
-            },
+            path: "kind",
+            issue: { _tag: "ConstantMismatch", expected: "ok", actual: "bad" },
           },
-        })
-        assert.deepEqual(calls, ["nested", "kind"])
+        },
+      })
+      assert.deepEqual(calls, ["nested", "kind"])
 
-        calls.length = 0
-        const item = {
-          get kind(): "ok" {
-            calls.push("kind")
-            throw new Error("getter failed")
-          },
-        }
-        const unreadable = {
-          get nested() {
-            calls.push("nested")
-            return [item]
-          },
-          get tail() {
-            calls.push("tail")
-            return 1
-          },
-        }
-        assert.deepEqual(printFail(grammar, unreadable).issue, {
+      calls.length = 0
+      const item = {
+        get kind(): "ok" {
+          calls.push("kind")
+          throw new Error("getter failed")
+        },
+      }
+      const unreadable = {
+        get nested() {
+          calls.push("nested")
+          return [item]
+        },
+        get tail() {
+          calls.push("tail")
+          return 1
+        },
+      }
+      assert.deepEqual(printFail(grammar, unreadable).issue, {
+        _tag: "AtPath",
+        path: "nested",
+        issue: {
           _tag: "AtPath",
-          path: "nested",
+          path: 0,
           issue: {
             _tag: "AtPath",
-            path: 0,
+            path: "kind",
             issue: {
-              _tag: "AtPath",
-              path: "kind",
-              issue: {
-                _tag: "InvalidValue",
-                expected: "a readable field",
-                actual: item,
-                detail: "getter failed",
-              },
+              _tag: "InvalidValue",
+              expected: "a readable field",
+              actual: item,
+              detail: "getter failed",
             },
           },
-        })
-        assert.deepEqual(calls, ["nested", "kind"])
-      }),
+        },
+      })
+      assert.deepEqual(calls, ["nested", "kind"])
+    }),
   )
 
   it.effect("keeps transform catches broad and suspend catches limited to resolution", () =>
@@ -267,9 +265,7 @@ describe("printer sequencing and exception boundaries", () => {
           ),
         (error) => error === thrown,
       )
-      const transformed = grammar.pipe(
-        G.iso({ decode: (value) => value, encode: (value) => value }),
-      )
+      const transformed = grammar.pipe(G.iso({ decode: (value) => value, encode: (value) => value }))
       assert.match(printFail(transformed, value).message, /tag getter failed/)
       const unresolved = G.suspend<string>(() => {
         throw new Error("resolution failed")

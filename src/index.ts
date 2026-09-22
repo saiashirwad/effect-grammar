@@ -1,6 +1,11 @@
-export { auditFidelity, type FidelityEntry, validate } from "./analysis.ts"
-export type { Fidelity, Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
-export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
+export {
+  auditFidelity,
+  type FidelityEntry,
+  GrammarValidationError,
+  prepare,
+  type Prepared,
+  validate,
+} from "./analysis.ts"
 export {
   as,
   between,
@@ -8,23 +13,14 @@ export {
   choice,
   choiceOn,
   choiceOnEntries,
-  countPrefixed,
-  decodeTo,
-  type DecodeToOptions,
-  defaulted,
   empty,
   filter,
-  flag,
   gen,
   type GenGrammar,
   get,
-  integer,
   iso,
   label,
-  lengthPrefixed,
-  lexeme,
   literal,
-  literals,
   many,
   match,
   matchValue,
@@ -43,9 +39,8 @@ export {
   struct,
   suffix,
   suspend,
-  symbol,
-  taggedChoice,
   take,
+  taggedChoice,
   transform,
   transformOrFail,
   type TransformOptions,
@@ -53,8 +48,20 @@ export {
   trivia,
   tuple,
 } from "./combinators.ts"
+export type { Fidelity, Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
+export {
+  countPrefixed,
+  decodeTo,
+  defaulted,
+  flag,
+  integer,
+  lengthPrefixed,
+  lexeme,
+  literals,
+  symbol,
+} from "./derived.ts"
+export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
 export { parse } from "./parse.ts"
-export { GrammarValidationError, prepare, type Prepared } from "./prepare.ts"
 export { print, printChecked } from "./print.ts"
 export { describe, render } from "./render.ts"
 export { type CodecOptions, codec } from "./schema.ts"

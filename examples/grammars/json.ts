@@ -17,9 +17,9 @@ const jsonBool = Grammar.choice(
   Grammar.symbol("false").pipe(Grammar.as(false)),
 )
 
-const jsonNumber = Grammar.lexeme(
-  Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number"),
-).pipe(Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }))
+const jsonNumber = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number")).pipe(
+  Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }),
+)
 
 export const jsonString = Grammar.lexeme(
   // eslint-disable-next-line no-control-regex -- JSON strings must reject C0 controls.
@@ -29,9 +29,7 @@ export const jsonString = Grammar.lexeme(
     decode: (text) => {
       try {
         const value: unknown = JSON.parse(text)
-        return Predicate.isString(value)
-          ? Result.succeed(value)
-          : Result.fail({ message: "expected a JSON string" })
+        return Predicate.isString(value) ? Result.succeed(value) : Result.fail({ message: "expected a JSON string" })
       } catch (error) {
         return Result.fail({ message: error instanceof Error ? error.message : String(error) })
       }

@@ -1,39 +1,55 @@
 import { Equal, Predicate, Result } from "effect"
 
 import {
+  type AnyGrammar,
   type Grammar,
-  type GrammarInternal,
+  isCount,
   type Node,
   nodeOf,
+  nonByte,
   type Pattern,
   resolve,
   type ScopeId,
-  unsafeToNever,
+  toBytes,
   type Value,
 } from "./core.ts"
-import { bind, caseFor, copyFields, evaluate, type Frame, frame, nonByte, isCount, toBytes, Unbound } from "./env.ts"
+import { caseFor, copyFields, evaluate, type Frame, frame, Unbound, unifyPattern, validateOwnKeys } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
-import { reparse } from "./parse.ts"
+import { parseWithEnv } from "./parse.ts"
 import { describe, describeStep } from "./render.ts"
 
-type RoundTripIssue = Extract<PrintIssue, { _tag: "RoundTrip" }>
+interface State {
+  // Suspensions being printed, by value, to reject recursion that can never make progress.
+  readonly activeFor: Map<Node, Set<Value>>
+}
+
+type Printed = Result.Result<string, PrintIssue>
+
+const fail = (issue: PrintIssue): Printed => Result.fail(issue)
+
+const invalid = (expected: string, actual: Value, detail?: string): Printed =>
+  fail({ _tag: "InvalidValue", expected, actual, detail })
+
+const atPath = (path: string | number, result: Printed): Printed =>
+  Result.mapError(result, (issue) => ({ _tag: "AtPath", path, issue }))
 
 const roundTripIssue = (
-  grammar: GrammarInternal,
+  grammar: AnyGrammar,
   value: Value,
   printed: string,
   env: Frame | undefined,
-): RoundTripIssue | undefined => {
-  const back = reparse(grammar, printed, env)
+): Extract<PrintIssue, { _tag: "RoundTrip" }> | undefined => {
+  const back = parseWithEnv(grammar, printed, env)
   if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed, error: back.failure.message }
   return Equal.equals(back.success, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.success }
 }
 
+// Where a bound slot appears in the gen's return value, for error paths.
 const bindingPath = (
   pattern: Pattern,
   scope: ScopeId,
   slot: number,
-  path: ReadonlyArray<string | number>,
+  path: ReadonlyArray<string | number> = [],
 ): ReadonlyArray<string | number> | undefined => {
   switch (pattern._tag) {
     case "Ref":
@@ -55,339 +71,89 @@ const bindingPath = (
   }
 }
 
-const validateOwnKeys = (
-  value: Readonly<Record<string, Value>>,
-  fields: ReadonlyArray<string>,
-): Result.Result<Array<string | symbol>, PrintIssue> => {
-  let keys: Array<string | symbol>
-  try {
-    keys = Reflect.ownKeys(value)
-    for (const key of keys) Object.getOwnPropertyDescriptor(value, key)
-  } catch (error) {
-    return Result.fail({
-      _tag: "InvalidValue",
-      expected: `an inspectable object with exactly the fields ${fields.join(", ")}`,
-      actual: value,
-      detail: `could not inspect own fields: ${exceptionMessage(error)}`,
-    })
-  }
-  return keys.every((key) => Predicate.isString(key) && fields.includes(key))
-    ? Result.succeed(keys)
-    : Result.fail({
-        _tag: "InvalidValue",
-        expected: `exactly the fields ${fields.join(", ")}`,
-        actual: value,
-        detail: "unexpected own field",
-      })
+const printCount = (count: Value, what: string): Result.Result<number, PrintIssue> => {
+  if (count === Unbound) return Result.fail({ _tag: "MissingBinding", binding: what })
+  if (!isCount(count)) return Result.fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
+  return Result.succeed(count)
 }
 
-const unifyPattern = (pattern: Pattern, value: Value, values: Frame): Result.Result<void, PrintIssue> => {
-  switch (pattern._tag) {
-    case "Ref":
-      bind(values, pattern.slot, value)
-      return Result.void
-    case "Const":
-      return Equal.equals(value, pattern.value)
-        ? Result.void
-        : Result.fail({ _tag: "ConstantMismatch", expected: pattern.value, actual: value })
-    case "Object": {
-      if (!Predicate.isObject(value)) {
-        return Result.fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
-      }
-      const keys = validateOwnKeys(
-        value,
-        pattern.fields.map(([key]) => key),
-      )
-      if (Result.isFailure(keys)) return Result.fail(keys.failure)
-      for (const [key, field] of pattern.fields) {
-        if (!keys.success.includes(key)) {
-          return Result.fail({ _tag: "AtPath", path: key, issue: { _tag: "MissingField", field: key } })
-        }
-        let fieldValue: Value
-        try {
-          fieldValue = value[key]
-        } catch (error) {
-          return Result.fail({
-            _tag: "AtPath",
-            path: key,
-            issue: {
-              _tag: "InvalidValue",
-              expected: "a readable field",
-              actual: value,
-              detail: exceptionMessage(error),
-            },
-          })
-        }
-        const result = unifyPattern(field, fieldValue, values)
-        if (Result.isFailure(result)) {
-          return Result.fail({ _tag: "AtPath", path: key, issue: result.failure })
-        }
-      }
-      return Result.void
-    }
-    case "Array": {
-      if (!Array.isArray(value)) return Result.fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
-      if (value.length !== pattern.items.length) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: `${pattern.items.length} items`,
-          actual: value.length,
-          detail: `expected ${pattern.items.length} items, got ${value.length}`,
-        })
-      }
-      for (const [index, item] of pattern.items.entries()) {
-        const result = unifyPattern(item, value[index], values)
-        if (Result.isFailure(result)) {
-          return Result.fail({ _tag: "AtPath", path: index, issue: result.failure })
-        }
-      }
-      return Result.void
-    }
-  }
-}
-
-const printGrammar = (
-  grammar: GrammarInternal,
-  value: Value,
+const printItems = (
+  inner: AnyGrammar,
+  items: ReadonlyArray<Value>,
+  separator: string,
   env: Frame | undefined,
-  suspended: Set<Node> = new Set(),
-): Result.Result<string, PrintIssue> => {
+  state: State,
+): Printed => {
+  let text = ""
+  for (const [index, item] of items.entries()) {
+    const result = printGrammar(inner, item, env, state)
+    if (Result.isFailure(result)) return atPath(index, result)
+    text += index === 0 ? result.success : separator + result.success
+  }
+  return Result.succeed(text)
+}
+
+const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined, state: State): Printed => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
       return Result.succeed(node.value)
     case "Regex": {
-      if (!Predicate.isString(value)) return Result.fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      const expression = new RegExp(node.source, `${node.flags}y`)
-      const match = expression.exec(value)
+      if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
+      const match = new RegExp(node.source, `${node.flags}y`).exec(value)
       if (match === null || match[0].length !== value.length) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: node.name,
-          actual: value,
-          detail: `${JSON.stringify(value)} does not match /${node.source}/`,
-        })
+        return invalid(node.name, value, `${JSON.stringify(value)} does not match /${node.source}/`)
       }
       return Result.succeed(value)
     }
+    case "Take": {
+      const count = printCount(evaluate(node.count, env), "take count")
+      if (Result.isFailure(count)) return Result.fail(count.failure)
+      if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
+      if (node.unit === "char") {
+        return value.length === count.success
+          ? Result.succeed(value)
+          : invalid(`${count.success} UTF-16 code units`, value)
+      }
+      if (nonByte.test(value)) return invalid("a string of bytes", value)
+      // Report bytes rather than the internal binary string.
+      return value.length === count.success ? Result.succeed(value) : invalid(`${count.success} bytes`, toBytes(value))
+    }
     case "Gen": {
       const local = frame(node.scope, node.slotCount, env)
-      const result = unifyPattern(node.result, value, local)
-      if (Result.isFailure(result)) return Result.fail(result.failure)
+      const unified = unifyPattern(node.result, value, local)
+      if (Result.isFailure(unified)) return Result.fail(unified.failure)
 
       let text = ""
       for (const [index, step] of node.steps.entries()) {
-        const result =
-          step._tag === "Silent"
-            ? printGrammar(step.grammar, undefined, local)
-            : local.values[step.slot] === Unbound
-              ? Result.fail<PrintIssue>({
-                  _tag: "MissingBinding",
-                  binding: describeStep(step, index),
-                })
-              : printGrammar(step.grammar, local.values[step.slot], local)
-        if (Result.isFailure(result)) {
-          const path = step._tag === "Bind" ? bindingPath(node.result, node.scope, step.slot, []) : undefined
-          return Result.fail(
-            path === undefined
-              ? result.failure
-              : path.reduceRight<PrintIssue>((issue, path) => ({ _tag: "AtPath", path, issue }), result.failure),
-          )
+        let result: Printed
+        if (step._tag === "Silent") {
+          result = printGrammar(step.grammar, undefined, local, state)
+        } else if (local.values[step.slot] === Unbound) {
+          result = fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
+        } else {
+          result = printGrammar(step.grammar, local.values[step.slot], local, state)
+          const path = bindingPath(node.result, node.scope, step.slot)
+          if (Result.isFailure(result) && path !== undefined) {
+            result = path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
+          }
         }
+        if (Result.isFailure(result)) return result
         text += result.success
       }
       return Result.succeed(text)
     }
-    case "Wrap":
-      return Result.gen(function* () {
-        const open = yield* printGrammar(node.open, undefined, env)
-        const inner = yield* printGrammar(node.inner, value, env)
-        const close = yield* printGrammar(node.close, undefined, env)
-        return open + inner + close
-      })
-    case "Choice": {
-      if (node.on !== undefined) {
-        const { tag, keys } = node.on
-        if (!Predicate.isObject(value) || !Object.hasOwn(value, tag)) {
-          return Result.fail({
-            _tag: "TypeMismatch",
-            expected: `an object with a ${tag} field`,
-            actual: value,
-          })
-        }
-        const key = value[tag]
-        const index = keys.findIndex((candidate) => Object.is(candidate, key))
-        if (index === -1) {
-          return Result.fail({
-            _tag: "InvalidValue",
-            expected: `${tag} to be one of ${keys.map(preview).join(", ")}`,
-            actual: key,
-          })
-        }
-        return printGrammar(node.options[index]!, value, env)
-      }
-      const issues: Array<PrintIssue> = []
-      for (const option of node.options) {
-        const result = printGrammar(option, value, env)
-        if (Result.isFailure(result)) {
-          issues.push(result.failure)
-          continue
-        }
-        if (node.checked !== true) return result
-        const issue = roundTripIssue(grammar, value, result.success, env)
-        if (issue === undefined) return result
-        issues.push({
-          _tag: "InvalidValue",
-          expected: describe(option),
-          actual: value,
-          detail: describeRoundTrip(issue),
-        })
-      }
-      return Result.fail({ _tag: "NoAlternative", actual: value, issues })
-    }
-    case "Many": {
-      if (!Array.isArray(value)) return Result.fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
-      if (value.length < node.min || value.length > node.max) {
-        const expected = node.max === Number.POSITIVE_INFINITY ? `at least ${node.min}` : `${node.min}..${node.max}`
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: `${expected} items`,
-          actual: value,
-          detail: `expected ${expected} items, got ${value.length}`,
-        })
-      }
-      const separator = printGrammar(node.sep, undefined, env)
-      if (Result.isFailure(separator)) return separator
-      let text = ""
-      for (const [index, item] of value.entries()) {
-        const result = printGrammar(node.inner, item, env)
-        if (Result.isFailure(result)) {
-          return Result.fail({ _tag: "AtPath", path: index, issue: result.failure })
-        }
-        text += index === 0 ? result.success : separator.success + result.success
-      }
-      return Result.succeed(text)
-    }
-    case "Optional":
-      return value === undefined ? Result.succeed("") : printGrammar(node.inner, value, env)
-    case "Transform": {
-      try {
-        if (node.is?.(unsafeToNever(value)) === false) {
-          return Result.fail({
-            _tag: "InvalidValue",
-            expected: node.name ?? describe(node.inner),
-            actual: value,
-          })
-        }
-        const encoded = node.encode(unsafeToNever(value))
-        return Result.isFailure(encoded)
-          ? Result.fail({
-              _tag: "InvalidValue",
-              expected: node.name ?? describe(node.inner),
-              actual: value,
-              detail: encoded.failure.message,
-            })
-          : printGrammar(node.inner, encoded.success, env)
-      } catch (error) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: node.name ?? describe(node.inner),
-          actual: value,
-          detail: exceptionMessage(error),
-        })
-      }
-    }
-    case "Skip":
-      return printGrammar(node.inner, node.printAs, env)
-    case "Label":
-      return printGrammar(node.inner, value, env)
-    case "Suspend": {
-      if (suspended.has(node)) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: "a productive recursive grammar",
-          actual: value,
-          detail: `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`} recursed without consuming a value`,
-        })
-      }
-      let target: GrammarInternal
-      try {
-        target = resolve(node)
-      } catch (error) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: "a valid suspended grammar",
-          actual: value,
-          detail: exceptionMessage(error),
-        })
-      }
-      suspended.add(node)
-      try {
-        return printGrammar(target, value, env, suspended)
-      } finally {
-        suspended.delete(node)
-      }
-    }
-    case "Match": {
-      const key = evaluate(node.scrutinee, env)
-      if (key === Unbound) return Result.fail({ _tag: "MissingBinding", binding: "match selector" })
-      const matchCase = caseFor(node.cases, key)
-      return matchCase === undefined
-        ? Result.fail({
-            _tag: "InvalidValue",
-            expected: `a match case for ${preview(key)}`,
-            actual: value,
-          })
-        : printGrammar(matchCase.grammar, value, env)
-    }
-    case "Take": {
-      const count = evaluate(node.count, env)
-      if (count === Unbound) return Result.fail({ _tag: "MissingBinding", binding: "take count" })
-      if (!isCount(count)) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: "a non-negative count",
-          actual: count,
-        })
-      }
-      if (!Predicate.isString(value)) return Result.fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      if (node.unit === "char") {
-        return value.length === count
-          ? Result.succeed(value)
-          : Result.fail({ _tag: "InvalidValue", expected: `${count} UTF-16 code units`, actual: value })
-      }
-      if (nonByte.test(value)) {
-        return Result.fail({ _tag: "InvalidValue", expected: "a string of bytes", actual: value })
-      }
-      // Report bytes rather than the internal binary string.
-      return value.length === count
-        ? Result.succeed(value)
-        : Result.fail({ _tag: "InvalidValue", expected: `${count} bytes`, actual: toBytes(value) })
-    }
-    case "RepeatExact": {
-      const count = evaluate(node.count, env)
-      if (count === Unbound) return Result.fail({ _tag: "MissingBinding", binding: "repeat count" })
-      if (!isCount(count)) {
-        return Result.fail({ _tag: "InvalidValue", expected: "a non-negative count", actual: count })
-      }
-      if (!Array.isArray(value)) return Result.fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
-      if (value.length !== count) {
-        return Result.fail({ _tag: "InvalidValue", expected: `${count} items`, actual: value.length })
-      }
-      let text = ""
-      for (const [index, item] of value.entries()) {
-        const result = printGrammar(node.inner, item, env)
-        if (Result.isFailure(result)) {
-          return Result.fail({ _tag: "AtPath", path: index, issue: result.failure })
-        }
-        text += result.success
-      }
-      return Result.succeed(text)
+    case "Wrap": {
+      const open = printGrammar(node.open, undefined, env, state)
+      if (Result.isFailure(open)) return open
+      const inner = printGrammar(node.inner, value, env, state)
+      if (Result.isFailure(inner)) return inner
+      const close = printGrammar(node.close, undefined, env, state)
+      if (Result.isFailure(close)) return close
+      return Result.succeed(open.success + inner.success + close.success)
     }
     case "Merge": {
-      if (!Predicate.isObject(value)) {
-        return Result.fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
-      }
+      if (!Predicate.isObject(value)) return fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
       const keys = validateOwnKeys(
         value,
         node.parts.flatMap((part) => part.keys),
@@ -400,33 +166,124 @@ const printGrammar = (
         try {
           copyFields(fields, value, part.keys)
         } catch (error) {
-          return Result.fail({
-            _tag: "InvalidValue",
-            expected: "readable fields",
-            actual: value,
-            detail: exceptionMessage(error),
-          })
+          return invalid("readable fields", value, exceptionMessage(error))
         }
-        const result = printGrammar(part.grammar, fields, env)
+        const result = printGrammar(part.grammar, fields, env, state)
         if (Result.isFailure(result)) return result
         text += result.success
       }
       return Result.succeed(text)
     }
+    case "Choice": {
+      const issues: Array<PrintIssue> = []
+      for (const option of node.options) {
+        const result = printGrammar(option, value, env, state)
+        if (Result.isFailure(result)) {
+          issues.push(result.failure)
+          continue
+        }
+        if (!node.checked) return result
+        const issue = roundTripIssue(grammar, value, result.success, env)
+        if (issue === undefined) return result
+        issues.push({
+          _tag: "InvalidValue",
+          expected: describe(option),
+          actual: value,
+          detail: describeRoundTrip(issue),
+        })
+      }
+      return fail({ _tag: "NoAlternative", actual: value, issues })
+    }
+    case "Dispatch": {
+      if (!Predicate.isObject(value) || !Object.hasOwn(value, node.tag)) {
+        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
+      }
+      const key = value[node.tag]
+      const matchCase = caseFor(node.cases, key)
+      if (matchCase === undefined) {
+        const keys = node.cases.map((candidate) => preview(candidate.key)).join(", ")
+        return invalid(`${node.tag} to be one of ${keys}`, key)
+      }
+      return printGrammar(matchCase.grammar, value, env, state)
+    }
+    case "Match": {
+      const key = evaluate(node.scrutinee, env)
+      if (key === Unbound) return fail({ _tag: "MissingBinding", binding: "match selector" })
+      const matchCase = caseFor(node.cases, key)
+      if (matchCase === undefined) return invalid(`a match case for ${preview(key)}`, value)
+      return printGrammar(matchCase.grammar, value, env, state)
+    }
+    case "Optional":
+      return value === undefined ? Result.succeed("") : printGrammar(node.inner, value, env, state)
+    case "Repeat": {
+      const min = printCount(evaluate(node.min, env), "repeat count")
+      if (Result.isFailure(min)) return Result.fail(min.failure)
+      const max =
+        node.max === undefined ? Result.succeed(Infinity) : printCount(evaluate(node.max, env), "repeat count")
+      if (Result.isFailure(max)) return Result.fail(max.failure)
+      if (!Array.isArray(value)) return fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
+      if (value.length < min.success || value.length > max.success) {
+        const expected =
+          min.success === max.success
+            ? `${min.success}`
+            : max.success === Infinity
+              ? `at least ${min.success}`
+              : `${min.success}..${max.success}`
+        return invalid(`${expected} items`, value.length)
+      }
+      const separator = printGrammar(node.sep, undefined, env, state)
+      if (Result.isFailure(separator)) return separator
+      return printItems(node.inner, value, separator.success, env, state)
+    }
+    case "Transform": {
+      const name = node.name ?? describe(node.inner)
+      try {
+        if (node.is?.(value) === false) return invalid(name, value)
+        const encoded = node.encode(value)
+        if (Result.isFailure(encoded)) return invalid(name, value, encoded.failure.message)
+        return printGrammar(node.inner, encoded.success, env, state)
+      } catch (error) {
+        return invalid(name, value, exceptionMessage(error))
+      }
+    }
+    case "Skip":
+      return printGrammar(node.inner, node.printAs, env, state)
+    case "Label":
+      return printGrammar(node.inner, value, env, state)
+    case "Suspend": {
+      const values = state.activeFor.get(node) ?? new Set<Value>()
+      if (values.has(value)) {
+        const where = `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}`
+        return invalid("a productive recursive grammar", value, `${where} recursed with the same value`)
+      }
+      let target: AnyGrammar
+      try {
+        target = resolve(node)
+      } catch (error) {
+        return invalid("a valid suspended grammar", value, exceptionMessage(error))
+      }
+      state.activeFor.set(node, values)
+      values.add(value)
+      try {
+        return printGrammar(target, value, env, state)
+      } finally {
+        values.delete(value)
+        if (values.size === 0) state.activeFor.delete(node)
+      }
+    }
   }
 }
 
-export const printUnknown = (grammar: GrammarInternal, value: Value): Result.Result<string, PrintError> =>
-  Result.mapError(printGrammar(grammar, value, undefined), (issue) => new PrintError({ issue }))
-
 // Print with the grammar's branches and spellings, without a round-trip check. See `printChecked`.
-export const print: <A>(grammar: Grammar<A>, value: A) => Result.Result<string, PrintError> = printUnknown
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  Result.mapError(
+    printGrammar(grammar, value, undefined, { activeFor: new Map() }),
+    (issue) => new PrintError({ issue }),
+  )
 
-export const printCheckedUnknown = (grammar: GrammarInternal, value: Value): Result.Result<string, PrintError> =>
-  Result.flatMap(printUnknown(grammar, value), (printed) => {
+// Print a value and verify that parsing the whole output returns the original value.
+export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+  Result.flatMap(print(grammar, value), (printed) => {
     const issue = roundTripIssue(grammar, value, printed, undefined)
     return issue === undefined ? Result.succeed(printed) : Result.fail(new PrintError({ issue }))
   })
-
-// Print a value and verify that parsing the whole output returns the original value.
-export const printChecked: typeof print = printCheckedUnknown

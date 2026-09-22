@@ -10,11 +10,7 @@ type Nested = number | ReadonlyArray<Nested>
 const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
   Grammar.choice(
     Grammar.integer,
-    Grammar.between(
-      Grammar.symbol("["),
-      Grammar.sepBy(nested, Grammar.symbol(",")),
-      Grammar.symbol("]"),
-    ).pipe(
+    Grammar.between(Grammar.symbol("["), Grammar.sepBy(nested, Grammar.symbol(",")), Grammar.symbol("]")).pipe(
       Grammar.transform({
         decode: (a): Nested => a,
         // SAFETY: `sepBy` yields an array and `encode` only runs on values that passed `is: Array.isArray`.
@@ -59,12 +55,9 @@ describe("round-trip law: parse(print(a)) == a", () => {
   it.effect("integer", () =>
     Effect.sync(() => {
       FastCheck.assert(
-        FastCheck.property(
-          FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }),
-          (n) => {
-            assertRoundTrip(Grammar.integer, n)
-          },
-        ),
+        FastCheck.property(FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }), (n) => {
+          assertRoundTrip(Grammar.integer, n)
+        }),
       )
     }),
   )

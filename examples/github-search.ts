@@ -16,12 +16,7 @@ const RangeValueSchema = Schema.Struct({
   to: Schema.UndefinedOr(Schema.String),
 })
 
-const QualifierValueSchema = Schema.Union([
-  WordValueSchema,
-  QuotedValueSchema,
-  CompareValueSchema,
-  RangeValueSchema,
-])
+const QualifierValueSchema = Schema.Union([WordValueSchema, QuotedValueSchema, CompareValueSchema, RangeValueSchema])
 
 const TermWordSchema = Schema.Struct({
   kind: Schema.Literal("term"),
@@ -93,8 +88,7 @@ const compareValue = Grammar.gen(function* () {
   }),
 )
 
-const rangeBound = (name: string) =>
-  Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
+const rangeBound = (name: string) => Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
 
 const rangeValue = Grammar.gen(function* () {
   const from = yield* rangeBound("range start")
@@ -139,11 +133,7 @@ const qualifier = Grammar.gen(function* () {
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group = Grammar.between(
-  "(",
-  Grammar.between(Grammar.trivia, query, Grammar.trivia),
-  ")",
-).pipe(
+const group = Grammar.between("(", Grammar.between(Grammar.trivia, query, Grammar.trivia), ")").pipe(
   Grammar.decodeTo(GroupSchema)({
     decode: (inner) => ({ kind: "group", inner }),
     encode: (g) => g.inner,
@@ -195,8 +185,7 @@ const notBranch = Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws), notExp
 const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
   Grammar.sepBy(part, sep, { min: 1 }).pipe(
     Grammar.transform({
-      decode: (parts): Query =>
-        parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts },
+      decode: (parts): Query => (parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts }),
       encode: (q) => (q.kind === kind ? q.parts : [q]),
     }),
   )
@@ -223,24 +212,19 @@ const GithubUser = Schema.Union([
   Schema.Literal("@me"),
   pattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "GithubUser", "expected a GitHub username"),
 ])
-const GithubRepo = pattern(
-  /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/,
-  "GithubRepo",
-  "expected owner/name",
-)
+const GithubRepo = pattern(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, "GithubRepo", "expected owner/name")
 
 interface Spec {
   readonly decode: (atom: string) => Result.Result<unknown, Schema.SchemaError>
   readonly kinds?: ReadonlyArray<QualifierValue["kind"]> | undefined
 }
 
-const spec = (
-  atom: Schema.ConstraintDecoder<unknown>,
-  kinds?: ReadonlyArray<QualifierValue["kind"]>,
-): Spec => ({ decode: Schema.decodeResult(atom), kinds })
+const spec = (atom: Schema.ConstraintDecoder<unknown>, kinds?: ReadonlyArray<QualifierValue["kind"]>): Spec => ({
+  decode: Schema.decodeResult(atom),
+  kinds,
+})
 const word = (atom: Schema.ConstraintDecoder<unknown>): Spec => spec(atom, ["word"])
-const enumOf = <const L extends ReadonlyArray<string>>(values: L): Spec =>
-  word(Schema.Literals(values))
+const enumOf = <const L extends ReadonlyArray<string>>(values: L): Spec => word(Schema.Literals(values))
 
 const catalog = {
   is: enumOf([

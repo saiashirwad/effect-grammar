@@ -9,13 +9,7 @@ import { parseFail, parseOk, printFail, printOk } from "./helpers.ts"
 describe("correctness regressions", () => {
   it.effect("rejects invalid repetition bounds at construction", () =>
     Effect.sync(() => {
-      for (const n of [
-        -1,
-        1.5,
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-        Number.MAX_SAFE_INTEGER + 1,
-      ]) {
+      for (const n of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
         assert.throws(() => Grammar.many(Grammar.literal("x"), { min: n }), RangeError)
         assert.throws(() => Grammar.sepBy(Grammar.literal("x"), ",", { min: n }), RangeError)
       }
@@ -148,10 +142,7 @@ describe("correctness regressions", () => {
     Effect.sync(() => {
       const grammar = Grammar.struct({ value: Grammar.integer })
       // SAFETY: deliberately ill-typed value exercises exact object validation.
-      assert.match(
-        printFail(grammar, { value: 1, extra: true } as never).message,
-        /unexpected own field/,
-      )
+      assert.match(printFail(grammar, { value: 1, extra: true } as never).message, /unexpected own field/)
     }),
   )
 
@@ -180,10 +171,7 @@ describe("correctness regressions", () => {
           throw hostile
         },
       })
-      assert.match(
-        printFail(Grammar.struct({ value: Grammar.integer }), proxy).message,
-        /<unprintable value>/,
-      )
+      assert.match(printFail(Grammar.struct({ value: Grammar.integer }), proxy).message, /<unprintable value>/)
     }),
   )
 })

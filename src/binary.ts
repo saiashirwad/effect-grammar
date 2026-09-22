@@ -1,28 +1,23 @@
-import { Function as F, Predicate, Result, Schema } from "effect"
+import { Effect, flow, Function as F, Predicate, Result, Schema, SchemaIssue, SchemaTransformation } from "effect"
 
-import { iso, partialIso, prefixedBy, regex, takeBytes, withKeys } from "./combinators.ts"
-import {
-  type Grammar,
-  type GrammarInternal,
-  type Ref,
-  type Silent,
-  silent,
-  type Value,
-} from "./core.ts"
-import { isCount, nonByte, toBytes } from "./env.ts"
-import { describeExpected, hex, PrintError } from "./errors.ts"
+import { iso, partialIso, regex, takeBytes, transformNode } from "./combinators.ts"
+import { type Grammar, isCount, nonByte, type Ref, type Silent, silent, toBytes, toText, type Value } from "./core.ts"
+import { prefixedBy } from "./derived.ts"
+import { describeExpected, hex, PrintError, toSchemaIssue } from "./errors.ts"
 import { parse as parseText } from "./parse.ts"
-import { printCheckedUnknown, printUnknown } from "./print.ts"
-import { type CodecOptions, codecFrom } from "./schema.ts"
+import { print as printText, printChecked as printCheckedText } from "./print.ts"
+import { render } from "./render.ts"
+import type { CodecOptions } from "./schema.ts"
 
 export { hex } from "./errors.ts"
+
+// ---------------------------------------------------------------------------
+// Schemas for integers of a given bit width
 
 const isWidth = (size: number): boolean => Number.isInteger(size) && size >= 1 && size <= 53
 
 const assertWidth = (name: string, size: number): void => {
-  if (!isWidth(size)) {
-    throw new RangeError(`${name}: expected a width of 1 to 53 bits, got ${size}`)
-  }
+  if (!isWidth(size)) throw new RangeError(`${name}: expected a width of 1 to 53 bits, got ${size}`)
 }
 
 export const Bit = Schema.Literals([0, 1])
@@ -32,9 +27,7 @@ export const Uint = (size: number) => {
 }
 export const Int = (size: number) => {
   assertWidth("Int", size)
-  return Schema.Int.check(
-    Schema.isBetween({ minimum: -(2 ** (size - 1)), maximum: 2 ** (size - 1) - 1 }),
-  )
+  return Schema.Int.check(Schema.isBetween({ minimum: -(2 ** (size - 1)), maximum: 2 ** (size - 1) - 1 }))
 }
 export const Uint8 = Uint(8)
 export const Uint16 = Uint(16)
@@ -42,30 +35,13 @@ export const Uint32 = Uint(32)
 export const Int8 = Int(8)
 export const Int16 = Int(16)
 export const Int32 = Int(32)
-export const Uint64 = Schema.BigInt.check(
-  Schema.isBetweenBigInt({ minimum: 0n, maximum: 2n ** 64n - 1n }),
-)
-export const Int64 = Schema.BigInt.check(
-  Schema.isBetweenBigInt({ minimum: -(2n ** 63n), maximum: 2n ** 63n - 1n }),
-)
+export const Uint64 = Schema.BigInt.check(Schema.isBetweenBigInt({ minimum: 0n, maximum: 2n ** 64n - 1n }))
+export const Int64 = Schema.BigInt.check(Schema.isBetweenBigInt({ minimum: -(2n ** 63n), maximum: 2n ** 63n - 1n }))
 
-export class ParseError extends Schema.TaggedError<ParseError>()("BinaryParseError", {
-  offset: Schema.Finite,
-  expected: Schema.Array(Schema.String),
-  found: Schema.UndefinedOr(Schema.Finite),
-}) {
-  override get message(): string {
-    const found = this.found === undefined ? "end of input" : `0x${hex(Uint8Array.of(this.found))}`
-    return `byte ${this.offset}: expected ${describeExpected(this.expected)}, found ${found}`
-  }
-}
+// ---------------------------------------------------------------------------
+// Fixed-width integers and floats
 
-const toText = (bytes: Uint8Array): string => {
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return binary
-}
-
+// `size` bytes as an unsigned big-endian (or little-endian) integer.
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
   takeBytes(size, name).pipe(
     iso({
@@ -73,7 +49,6 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
         const bytes = littleEndian ? toBytes(binary).reverse() : toBytes(binary)
         return bytes.reduce((value, byte) => (value << 8n) | BigInt(byte), 0n)
       },
-      // A negative value is written as its two's complement.
       encode: (value) => {
         const bytes = Uint8Array.from({ length: size }, (_, index) =>
           Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))),
@@ -83,34 +58,41 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
     }),
   )
 
-const integer = <A extends number | bigint>(
-  size: number,
-  name: string,
-  schema: Schema.Codec<A>,
-  decode: (value: bigint) => A,
-  littleEndian: boolean,
-): Grammar<A> =>
-  word(size, name, littleEndian).pipe(iso({ name, decode, encode: BigInt, is: Schema.is(schema) }))
-
 const uint = (size: number, name: string, littleEndian = false): Grammar<number> =>
-  integer(size, name, Uint(8 * size), Number, littleEndian)
+  word(size, name, littleEndian).pipe(iso({ name, decode: Number, encode: BigInt, is: Schema.is(Uint(8 * size)) }))
 
 const int = (size: number, name: string, littleEndian = false): Grammar<number> =>
-  integer(
-    size,
-    name,
-    Int(8 * size),
-    (value) => Number(BigInt.asIntN(8 * size, value)),
-    littleEndian,
+  word(size, name, littleEndian).pipe(
+    iso({
+      name,
+      decode: (value) => Number(BigInt.asIntN(8 * size, value)),
+      encode: BigInt,
+      is: Schema.is(Int(8 * size)),
+    }),
   )
 
-const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
-  integer(8, name, Uint64, F.identity, littleEndian)
+export const uint8 = uint(1, "uint8")
+export const uint16 = uint(2, "uint16")
+export const uint32 = uint(4, "uint32")
+export const uint16le = uint(2, "uint16le", true)
+export const uint32le = uint(4, "uint32le", true)
 
-const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
-  integer(8, name, Int64, (value) => BigInt.asIntN(64, value), littleEndian)
+export const int8 = int(1, "int8")
+export const int16 = int(2, "int16")
+export const int32 = int(4, "int32")
+export const int16le = int(2, "int16le", true)
+export const int32le = int(4, "int32le", true)
 
-// Reuse the view to avoid allocating a buffer for each float.
+const uint64Iso = (name: string) =>
+  iso<bigint, bigint>({ name, decode: F.identity, encode: F.identity, is: Schema.is(Uint64) })
+const int64Iso = (name: string) =>
+  iso<bigint, bigint>({ name, decode: (value) => BigInt.asIntN(64, value), encode: F.identity, is: Schema.is(Int64) })
+
+export const uint64 = word(8, "uint64").pipe(uint64Iso("uint64"))
+export const uint64le = word(8, "uint64le", true).pipe(uint64Iso("uint64le"))
+export const int64 = word(8, "int64").pipe(int64Iso("int64"))
+export const int64le = word(8, "int64le", true).pipe(int64Iso("int64le"))
+
 const scratch = new DataView(new ArrayBuffer(8))
 
 // NaN payloads and signalling NaNs do not survive a parse/print round trip.
@@ -119,48 +101,30 @@ const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number>
     iso({
       name,
       // Reject values that would lose precision as float32.
-      is: (value) =>
-        Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)),
+      is: (value) => Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)),
       decode: (binary) => {
         for (let index = 0; index < size; index++) scratch.setUint8(index, binary.charCodeAt(index))
-        return size === 4
-          ? scratch.getFloat32(0, littleEndian)
-          : scratch.getFloat64(0, littleEndian)
+        return size === 4 ? scratch.getFloat32(0, littleEndian) : scratch.getFloat64(0, littleEndian)
       },
       encode: (value) => {
         if (size === 4) scratch.setFloat32(0, value, littleEndian)
         else scratch.setFloat64(0, value, littleEndian)
         let binary = ""
-        for (let index = 0; index < size; index++) {
-          binary += String.fromCharCode(scratch.getUint8(index))
-        }
+        for (let index = 0; index < size; index++) binary += String.fromCharCode(scratch.getUint8(index))
         return binary
       },
     }),
   )
-
-export const uint8 = uint(1, "uint8")
-export const uint16 = uint(2, "uint16")
-export const uint32 = uint(4, "uint32")
-export const uint64 = uint64Of("uint64")
-export const uint16le = uint(2, "uint16le", true)
-export const uint32le = uint(4, "uint32le", true)
-export const uint64le = uint64Of("uint64le", true)
-
-export const int8 = int(1, "int8")
-export const int16 = int(2, "int16")
-export const int32 = int(4, "int32")
-export const int64 = int64Of("int64")
-export const int16le = int(2, "int16le", true)
-export const int32le = int(4, "int32le", true)
-export const int64le = int64Of("int64le", true)
 
 export const float32 = float(4, "float32")
 export const float64 = float(8, "float64")
 export const float32le = float(4, "float32le", true)
 export const float64le = float(8, "float64le", true)
 
-// Allow padding of any length; decoding rejects out-of-range values.
+// ---------------------------------------------------------------------------
+// Variable-length integers
+
+// Parsing accepts padded encodings of any length; printing writes the shortest one.
 const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
 
 const fromLeb128 = (binary: string): number => {
@@ -181,8 +145,7 @@ const toLeb128 = (value: number): string => {
   return binary + String.fromCharCode(rest)
 }
 
-// Unsigned LEB128 within the safe integer range. Parsing accepts padded
-// encodings of any length; printing writes the shortest one.
+// Unsigned LEB128 within the safe integer range.
 export const varuint = leb128("varuint").pipe(
   partialIso({
     name: "varuint",
@@ -216,12 +179,16 @@ export const varint = leb128("varint").pipe(
   }),
 )
 
+// ---------------------------------------------------------------------------
+// Bit fields, byte strings, and text
+
 export type BitLayout = Readonly<Record<string, number>>
 
 export type Bits<Layout extends BitLayout> = {
   readonly [K in keyof Layout]: Layout[K] extends 1 ? 0 | 1 : number
 }
 
+// Pack named fields, most significant first, into a whole number of bytes.
 export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bits<Layout>> => {
   const fields = Object.entries(layout)
   const name = fields.map(([key, size]) => `${key}:${size}`).join(" ")
@@ -239,28 +206,32 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
     fits: Schema.is(Uint(size)),
   }))
 
-  const grammar = word(width / 8, name).pipe(
-    iso({
+  return transformNode(
+    word(width / 8, name),
+    {
       name,
+      // SAFETY: slots holds every key of the layout, each within its declared width.
       decode: (value) =>
-        // SAFETY: slots holds every key of the layout, each within its declared width.
-        Object.fromEntries(
-          slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
-        ) as Bits<Layout>,
+        Result.succeed(
+          Object.fromEntries(
+            slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
+          ) as Bits<Layout>,
+        ),
       encode: (value: Bits<Layout>) => {
         const extra = Reflect.ownKeys(value).find((key) => !Object.hasOwn(layout, key))
-        if (extra !== undefined) throw new RangeError(`unexpected field ${String(extra)}`)
-        return slots.reduce((result, { key, size, shift, fits }) => {
+        if (extra !== undefined) return Result.fail({ message: `unexpected field ${String(extra)}` })
+        let packed = 0n
+        for (const { key, size, shift, fits } of slots) {
           const field = value[key]
-          if (!fits(field)) {
-            throw new RangeError(`${key} must be an integer from 0 to ${2 ** size - 1}`)
-          }
-          return result | (BigInt(field) << shift)
-        }, 0n)
+          if (!fits(field)) return Result.fail({ message: `${key} must be an integer from 0 to ${2 ** size - 1}` })
+          packed |= BigInt(field) << shift
+        }
+        return Result.succeed(packed)
       },
-    }),
+    },
+    "claimed-iso",
+    Object.keys(layout),
   )
-  return withKeys(grammar, Object.keys(layout))
 }
 
 const asBytes = iso<string, Uint8Array>({
@@ -270,8 +241,7 @@ const asBytes = iso<string, Uint8Array>({
   encode: toText,
 })
 
-export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> =>
-  takeBytes(count).pipe(asBytes)
+export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => takeBytes(count).pipe(asBytes)
 
 export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> =>
   prefixedBy(length, takeBytes).pipe(asBytes)
@@ -298,9 +268,7 @@ export const utf8 = partialIso<Uint8Array, string>({
   name: "utf8",
   decode: (value) => {
     try {
-      return Result.succeed(
-        new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value),
-      )
+      return Result.succeed(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value))
     } catch {
       return Result.fail({ message: "valid UTF-8" })
     }
@@ -311,44 +279,65 @@ export const utf8 = partialIso<Uint8Array, string>({
       : Result.fail({ message: "expected a string without lone surrogates" }),
 })
 
+// ---------------------------------------------------------------------------
+// Parsing and printing bytes: the text interpreters over a byte string
+
+export class ParseError extends Schema.TaggedError<ParseError>()("BinaryParseError", {
+  offset: Schema.Finite,
+  expected: Schema.Array(Schema.String),
+  found: Schema.UndefinedOr(Schema.Finite),
+}) {
+  override get message(): string {
+    const found = this.found === undefined ? "end of input" : `0x${hex(Uint8Array.of(this.found))}`
+    return `byte ${this.offset}: expected ${describeExpected(this.expected)}, found ${found}`
+  }
+}
+
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
   Result.mapError(
     parseText(grammar, toText(input)),
-    ({ pos, expected, found }) =>
-      new ParseError({ offset: pos, expected, found: found?.charCodeAt(0) }),
+    ({ pos, expected, found }) => new ParseError({ offset: pos, expected, found: found?.charCodeAt(0) }),
   )
 
-const printBytes =
-  (printer: typeof printUnknown) =>
-  (grammar: GrammarInternal, value: Value): Result.Result<Uint8Array, PrintError> =>
-    Result.flatMap(printer(grammar, value), (binary) =>
-      nonByte.test(binary)
-        ? Result.fail(
-            new PrintError({
-              issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value },
-            }),
-          )
-        : Result.succeed(toBytes(binary)),
-    )
+const toByteResult = (
+  value: Value,
+  printed: Result.Result<string, PrintError>,
+): Result.Result<Uint8Array, PrintError> =>
+  Result.flatMap(printed, (binary) =>
+    nonByte.test(binary)
+      ? Result.fail(
+          new PrintError({ issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value } }),
+        )
+      : Result.succeed(toBytes(binary)),
+  )
 
-const printUnchecked = printBytes(printUnknown)
-const printVerified = printBytes(printCheckedUnknown)
+export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
+  toByteResult(value, printText(grammar, value))
 
-export const print: <A>(grammar: Grammar<A>, value: A) => Result.Result<Uint8Array, PrintError> =
-  printUnchecked
-
-export const printChecked: typeof print = printVerified
+export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
+  toByteResult(value, printCheckedText(grammar, value))
 
 export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,
   options?: CodecOptions,
 ) =>
-  codecFrom(
-    Schema.Uint8Array,
-    target,
-    grammar,
-    options?.identifier,
-    (input) => parse(grammar, input),
-    (value) => printVerified(grammar, value),
+  Schema.Uint8Array.pipe(
+    Schema.decodeTo(
+      target,
+      SchemaTransformation.transformOrFail<S["Encoded"], Uint8Array>({
+        decode: flow(
+          (input) => parse(grammar, input),
+          Effect.fromResult,
+          Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message })),
+        ),
+        encode: flow(
+          // SAFETY: the target schema encodes to A.
+          (value) => printChecked(grammar, value as A),
+          Effect.fromResult,
+          Effect.mapError(({ issue }) => toSchemaIssue(issue)),
+        ),
+      }),
+    ),
+    Schema.annotate({ identifier: options?.identifier, description: render(grammar) }),
   )

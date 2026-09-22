@@ -99,9 +99,7 @@ describe("validate", () => {
       const nonempty = G.regex(/x*/, "xs").pipe(
         G.transformOrFail({
           decode: (value) =>
-            value === ""
-              ? Result.fail({ message: "expected at least one x" })
-              : Result.succeed(value),
+            value === "" ? Result.fail({ message: "expected at least one x" }) : Result.succeed(value),
           encode: Result.succeed,
         }),
       )
@@ -169,25 +167,23 @@ describe("validate", () => {
     }),
   )
 
-  it.effect(
-    "has nothing to report for duplicate match keys, which matchValue rejects on construction",
-    () =>
-      Effect.sync(() => {
-        const selector = G.choice(G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2)))
-        assert.throws(
-          () =>
-            G.gen(function* () {
-              const kind = yield* selector
-              const value = yield* G.matchValue(kind, [
-                [1, G.integer],
-                [1, G.integer],
-                [2, G.integer],
-              ] as const)
-              return { kind, value }
-            }),
-          /matchValue: duplicate key 1/,
-        )
-      }),
+  it.effect("has nothing to report for duplicate match keys, which matchValue rejects on construction", () =>
+    Effect.sync(() => {
+      const selector = G.choice(G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2)))
+      assert.throws(
+        () =>
+          G.gen(function* () {
+            const kind = yield* selector
+            const value = yield* G.matchValue(kind, [
+              [1, G.integer],
+              [1, G.integer],
+              [2, G.integer],
+            ] as const)
+            return { kind, value }
+          }),
+        /matchValue: duplicate key 1/,
+      )
+    }),
   )
 })
 
@@ -222,9 +218,7 @@ describe("auditFidelity", () => {
 
   it.effect("lists transforms that claim no inverse law", () =>
     Effect.sync(() => {
-      const g = G.regex(/\d+/, "d").pipe(
-        G.transform({ decode: Number, encode: String, name: "num" }),
-      )
+      const g = G.regex(/\d+/, "d").pipe(G.transform({ decode: Number, encode: String, name: "num" }))
       assert.deepEqual(G.auditFidelity(g), [{ name: "num", fidelity: "unchecked" }])
     }),
   )

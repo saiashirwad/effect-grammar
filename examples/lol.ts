@@ -19,10 +19,7 @@ const attempt = (run: () => string): string => {
 }
 
 const header = G.gen(function* () {
-  const kind = yield* G.choice(
-    G.literal("raw:").pipe(G.as("raw")),
-    G.literal("pair:").pipe(G.as("pair")),
-  )
+  const kind = yield* G.choice(G.literal("raw:").pipe(G.as("raw")), G.literal("pair:").pipe(G.as("pair")))
   const size = yield* G.integer
   return { kind, size }
 })
@@ -49,10 +46,7 @@ const Frame = G.codec(
       kind: Schema.Union([Schema.Literal("raw"), Schema.Literal("pair")]),
       size: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 16 })),
     }),
-    body: Schema.Union([
-      Schema.String,
-      Schema.Struct({ name: Schema.String, value: Schema.String }),
-    ]),
+    body: Schema.Union([Schema.String, Schema.Struct({ name: Schema.String, value: Schema.String })]),
   }),
   { identifier: "Frame" },
 )

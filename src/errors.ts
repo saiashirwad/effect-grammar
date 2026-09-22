@@ -1,4 +1,4 @@
-import { Predicate, Schema } from "effect"
+import { Predicate, Schema, SchemaIssue } from "effect"
 
 import type { Value } from "./core.ts"
 
@@ -19,47 +19,25 @@ export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
 }
 
 export type PrintIssue =
-  | {
-      readonly _tag: "TypeMismatch"
-      readonly expected: string
-      readonly actual: Value
-    }
-  | {
-      readonly _tag: "ConstantMismatch"
-      readonly expected: Value
-      readonly actual: Value
-    }
-  | {
-      readonly _tag: "MissingField"
-      readonly field: string
-    }
-  | {
-      readonly _tag: "MissingBinding"
-      readonly binding: string
-    }
+  | { readonly _tag: "TypeMismatch"; readonly expected: string; readonly actual: Value }
+  | { readonly _tag: "ConstantMismatch"; readonly expected: Value; readonly actual: Value }
+  | { readonly _tag: "MissingField"; readonly field: string }
+  | { readonly _tag: "MissingBinding"; readonly binding: string }
   | {
       readonly _tag: "InvalidValue"
       readonly expected: string
       readonly actual: Value
       readonly detail?: string | undefined
     }
-  | {
-      readonly _tag: "NoAlternative"
-      readonly actual: Value
-      readonly issues: ReadonlyArray<PrintIssue>
-    }
+  | { readonly _tag: "NoAlternative"; readonly actual: Value; readonly issues: ReadonlyArray<PrintIssue> }
   | {
       readonly _tag: "RoundTrip"
       readonly value: Value
       readonly printed: string
-      readonly parsed?: Value | undefined
+      readonly parsed?: Value
       readonly error?: string | undefined
     }
-  | {
-      readonly _tag: "AtPath"
-      readonly path: string | number
-      readonly issue: PrintIssue
-    }
+  | { readonly _tag: "AtPath"; readonly path: string | number; readonly issue: PrintIssue }
 
 const pathText = (path: ReadonlyArray<string | number>) =>
   path.map((part) => (Predicate.isNumber(part) ? `[${part}]` : `.${part}`)).join("")
@@ -74,9 +52,7 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
     case "ConstantMismatch":
       return `${prefix}expected ${preview(issue.expected)}, got ${preview(issue.actual)}`
     case "MissingField":
-      return path.length === 0
-        ? `.${issue.field}: missing field`
-        : `${pathText(path)}: missing field`
+      return path.length === 0 ? `.${issue.field}: missing field` : `${pathText(path)}: missing field`
     case "MissingBinding":
       return `${prefix}${issue.binding} is not in the value`
     case "InvalidValue":
@@ -92,7 +68,8 @@ const formatAt = (issue: PrintIssue, path: ReadonlyArray<string | number>): stri
   }
 }
 
-// Message suffix describing the printed value and parse result.
+export const formatIssue = (issue: PrintIssue): string => formatAt(issue, [])
+
 export const describeRoundTrip = (issue: Extract<PrintIssue, { _tag: "RoundTrip" }>): string =>
   issue.error === undefined
     ? `prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
@@ -104,13 +81,18 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   declare readonly issue: PrintIssue
 
   override get message(): string {
-    return PrintError.format(this)
+    return formatIssue(this.issue)
   }
 
-  static format(error: PrintError | PrintIssue): string {
-    return formatAt(error._tag === "PrintError" ? error.issue : error, [])
+  static format(issue: PrintIssue): string {
+    return formatIssue(issue)
   }
 }
+
+export const toSchemaIssue = (issue: PrintIssue): SchemaIssue.Issue =>
+  issue._tag === "AtPath"
+    ? new SchemaIssue.Pointer([issue.path], toSchemaIssue(issue.issue))
+    : new SchemaIssue.InvalidValue({ message: formatIssue(issue) })
 
 export const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
@@ -146,5 +128,4 @@ export const preview = <T>(value: T): string => {
   }
 }
 
-export const exceptionMessage = (error: Value): string =>
-  Predicate.isError(error) ? error.message : preview(error)
+export const exceptionMessage = (error: Value): string => (Predicate.isError(error) ? error.message : preview(error))

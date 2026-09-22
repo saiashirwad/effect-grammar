@@ -22,9 +22,7 @@ const queryParams = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"
 const dsn = Grammar.gen(function* () {
   yield* Grammar.literal("postgres://")
   const user = yield* Grammar.regex(/[^:@/?#]+/, "user")
-  const password = yield* Grammar.optional(
-    Grammar.prefix(":", Grammar.regex(/[^@/?#]+/, "password")),
-  )
+  const password = yield* Grammar.optional(Grammar.prefix(":", Grammar.regex(/[^@/?#]+/, "password")))
   yield* Grammar.literal("@")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
   const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
@@ -81,7 +79,5 @@ Effect.gen(function* () {
 
   const encoded = yield* encode(value)
   const roundTripped = yield* decode(encoded)
-  yield* Console.log(
-    `\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`,
-  )
+  yield* Console.log(`\nencode ${json(value)}\n  →  ${encoded}\n  →  decode  →  ${json(roundTripped)}`)
 }).pipe(Effect.runSync)

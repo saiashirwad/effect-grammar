@@ -162,19 +162,14 @@ const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
   if (name === undefined || !isKnownForm(name)) return Result.failVoid
   const spec = catalog[name]
   const arity = node.elements.length - 1
-  const bound =
-    arity < spec.min ? `at least ${spec.min}` : arity > spec.max ? `at most ${spec.max}` : undefined
+  const bound = arity < spec.min ? `at least ${spec.min}` : arity > spec.max ? `at most ${spec.max}` : undefined
   if (bound === undefined) return Result.failVoid
   return Result.succeed({ path: [name], issue: `expected ${bound} argument(s), got ${arity}` })
 }
 
-const catalogIssues = Schema.makeFilter((e: Expr) =>
-  Array.from(Iterable.filterMap(walkLists(e), arityIssue)),
-)
+const catalogIssues = Schema.makeFilter((e: Expr) => Array.from(Iterable.filterMap(walkLists(e), arityIssue)))
 
-const ValidScheme = Grammar.codec(document, ExprSchema, { identifier: "Scheme" }).check(
-  catalogIssues,
-)
+const ValidScheme = Grammar.codec(document, ExprSchema, { identifier: "Scheme" }).check(catalogIssues)
 
 const decode = Schema.decodeEffect(ValidScheme)
 const encode = Schema.encodeEffect(ValidScheme)

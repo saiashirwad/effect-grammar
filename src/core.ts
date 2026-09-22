@@ -1,156 +1,32 @@
 import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
-const SilentTypeId: unique symbol = Symbol.for("effect-grammar/Silent")
+const SilentTypeId: unique symbol = Symbol("effect-grammar/Silent")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
-export const RefTypeId: unique symbol = Symbol.for("effect-grammar/Ref")
+export const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
 
 // Every JavaScript value; `{}` is TypeScript's non-nullish top type.
 export type Value = {} | null | undefined
 
-// Node callbacks use `never` parameters to preserve public combinator types.
-export const unsafeToNever = (value: Value): never => {
-  // SAFETY: erased Node callbacks accept the runtime value produced for that node.
-  return value as never
-}
-
-export interface ScopeId {
-  readonly _tag: "ScopeId"
-}
-
-export interface Bounds {
-  readonly min: number
-  readonly max: number
-}
-
-export interface RefExpr {
-  readonly _tag: "Ref"
-  readonly scope: ScopeId
-  readonly slot: number
-}
-
-export type Expr =
-  | RefExpr
-  | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
-  | { readonly _tag: "Count"; readonly value: number }
-
-export type Pattern =
-  | RefExpr
-  | { readonly _tag: "Const"; readonly value: Value }
-  | { readonly _tag: "Object"; readonly fields: ReadonlyArray<readonly [string, Pattern]> }
-  | { readonly _tag: "Array"; readonly items: ReadonlyArray<Pattern> }
-
-export type MatchKey = string | number | boolean
-
-// Laws claimed by a transform.
-//
-// - `unchecked`: no law claimed (`transform`, `transformOrFail`).
-// - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
-// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
-export type Fidelity = "unchecked" | "partial" | "claimed-iso"
-
-export interface GrammarIssue {
-  readonly message: string
-}
-
-export interface GrammarInternal extends Pipeable.Pipeable {
+// A grammar whose output type is not tracked.
+export interface AnyGrammar extends Pipeable.Pipeable {
   readonly [NodeTypeId]: Node
 }
 
-export interface Case {
-  readonly key: MatchKey
-  readonly grammar: GrammarInternal
-}
-
-export type Step =
-  | { readonly _tag: "Silent"; readonly grammar: Silent }
-  | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: GrammarInternal }
-
-export type Node =
-  | { readonly _tag: "Literal"; readonly value: string; readonly name?: string | undefined }
-  | {
-      readonly _tag: "Regex"
-      readonly source: string
-      readonly flags: string
-      readonly name: string
-    }
-  | {
-      readonly _tag: "Gen"
-      readonly scope: ScopeId
-      readonly slotCount: number
-      readonly steps: ReadonlyArray<Step>
-      readonly result: Pattern
-    }
-  | {
-      readonly _tag: "Wrap"
-      readonly open: Silent
-      readonly inner: GrammarInternal
-      readonly close: Silent
-    }
-  | {
-      readonly _tag: "Choice"
-      readonly options: ReadonlyArray<GrammarInternal>
-      readonly on?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
-      // Use the first branch whose printed text parses back to the input value.
-      readonly checked?: boolean | undefined
-    }
-  | ({ readonly _tag: "Many"; readonly inner: GrammarInternal; readonly sep: Silent } & Bounds)
-  | { readonly _tag: "Optional"; readonly inner: GrammarInternal }
-  | {
-      readonly _tag: "Transform"
-      readonly inner: GrammarInternal
-      readonly decode: (a: never) => Result.Result<Value, GrammarIssue>
-      readonly encode: (b: never) => Result.Result<Value, GrammarIssue>
-      readonly is?: ((value: never) => boolean) | undefined
-      readonly name?: string | undefined
-      readonly keys?: ReadonlyArray<string> | undefined
-      readonly fidelity: Fidelity
-      // Decoding cannot fail, so empty-input matching follows the inner grammar.
-      readonly total?: boolean | undefined
-    }
-  | {
-      readonly _tag: "Skip"
-      readonly inner: GrammarInternal
-      readonly printAs: Value
-      readonly show: boolean
-    }
-  | { readonly _tag: "Label"; readonly inner: GrammarInternal; readonly name: string }
-  | {
-      readonly _tag: "Suspend"
-      readonly thunk: () => GrammarInternal
-      readonly name?: string | undefined
-      resolved?: GrammarInternal | undefined
-    }
-  | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | {
-      readonly _tag: "Take"
-      readonly count: Expr
-      readonly unit: "char" | "byte"
-      readonly name?: string | undefined
-    }
-  | {
-      readonly _tag: "Merge"
-      readonly parts: ReadonlyArray<{
-        readonly grammar: GrammarInternal
-        readonly keys: ReadonlyArray<string>
-      }>
-    }
-  | { readonly _tag: "RepeatExact"; readonly count: Expr; readonly inner: GrammarInternal }
-
-export type Bound<A> = [A] extends [void] ? void : Ref<A>
-
-export interface GrammarIterator<A> {
-  next(...args: ReadonlyArray<unknown>): IteratorResult<Grammar<A>, Bound<A>>
-}
-
-export interface Grammar<in out A> extends GrammarInternal {
+export interface Grammar<in out A> extends AnyGrammar {
   readonly [GrammarTypeId]: Types.Invariant<A>
-  [Symbol.iterator](): GrammarIterator<A>
+  [Symbol.iterator](): Iterator<Grammar<A>, Yielded<A>, Yielded<A>>
 }
 
+// A grammar that binds nothing when yielded inside `gen`.
 export interface Silent extends Grammar<void> {
   readonly [SilentTypeId]: true
 }
+
+export type Type<G> = G extends Grammar<infer A> ? A : never
+
+// What `yield*` gives back inside `gen`: a ref to the parsed value.
+export type Yielded<A> = [A] extends [void] ? void : Ref<A>
 
 export interface RefBase<out A> {
   readonly [RefTypeId]: Types.Covariant<A>
@@ -164,6 +40,7 @@ type RefProps<A> = [A] extends [ReadonlyArray<unknown>]
 
 export type Ref<A> = RefBase<A> & RefProps<A>
 
+// The value a `gen` returns, with every ref replaced by what it refers to.
 export type Denote<T> =
   T extends RefBase<infer A>
     ? A
@@ -173,14 +50,15 @@ export type Denote<T> =
         ? { -readonly [K in keyof T]: Denote<T[K]> }
         : T
 
-export type Type<G> = G extends Grammar<infer A> ? A : never
-
 class GrammarImpl<A> implements Grammar<A> {
   declare readonly [GrammarTypeId]: Types.Invariant<A>
+  declare readonly [SilentTypeId]: true
   readonly [NodeTypeId]: Node
+  readonly silent: boolean
 
-  constructor(node: Node) {
+  constructor(node: Node, silent: boolean) {
     this[NodeTypeId] = node
+    this.silent = silent
   }
 
   pipe() {
@@ -188,82 +66,151 @@ class GrammarImpl<A> implements Grammar<A> {
   }
 
   [Symbol.iterator]() {
-    return new Utils.SingleShotGen<Grammar<A>, Bound<A>>(this)
+    return new Utils.SingleShotGen<Grammar<A>, Yielded<A>>(this)
   }
 }
 
 Object.defineProperty(GrammarImpl.prototype, GrammarTypeId, { value: GrammarTypeId })
 
-class SilentImpl extends GrammarImpl<void> implements Silent {
-  declare readonly [SilentTypeId]: true
+export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node, false)
+
+export const silent = (node: Node): Silent => new GrammarImpl<void>(node, true)
+
+export const nodeOf = (grammar: AnyGrammar): Node => grammar[NodeTypeId]
+
+export const isGrammar = <T>(value: T): value is T & AnyGrammar => Predicate.hasProperty(value, GrammarTypeId)
+
+export const isSilent = (grammar: AnyGrammar): grammar is Silent =>
+  // SAFETY: every grammar is a GrammarImpl; the interfaces only hide it.
+  (grammar as GrammarImpl<Value>).silent
+
+export interface ScopeId {
+  readonly _tag: "ScopeId"
 }
 
-Object.defineProperty(SilentImpl.prototype, SilentTypeId, { value: true })
+export interface RefExpr {
+  readonly _tag: "Ref"
+  readonly scope: ScopeId
+  readonly slot: number
+}
 
-export const nodeOf = (grammar: GrammarInternal): Node => grammar[NodeTypeId]
+// Reads a value bound earlier in an enclosing `gen`.
+export type Expr =
+  | RefExpr
+  | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
+  | { readonly _tag: "Const"; readonly value: number }
 
-export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
+export const isCount = (value: Value): value is number =>
+  Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
-export const silent = (node: Node): Silent => new SilentImpl(node)
+// The shape a `gen` returns, built from bound values when parsing and taken apart when printing.
+export type Pattern =
+  | RefExpr
+  | { readonly _tag: "Const"; readonly value: Value }
+  | { readonly _tag: "Object"; readonly fields: ReadonlyArray<readonly [string, Pattern]> }
+  | { readonly _tag: "Array"; readonly items: ReadonlyArray<Pattern> }
 
-export const isGrammar = <T>(value: T): value is T & GrammarInternal =>
-  Predicate.hasProperty(value, GrammarTypeId)
+export type MatchKey = string | number | boolean
 
-export const isSilent = (grammar: GrammarInternal): grammar is Silent =>
-  Predicate.hasProperty(grammar, SilentTypeId)
+export interface Case {
+  readonly key: MatchKey
+  readonly grammar: AnyGrammar
+}
 
-const Resolving = Symbol("effect-grammar/ResolvingSuspend")
+export type Step =
+  | { readonly _tag: "Silent"; readonly grammar: Silent }
+  | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: AnyGrammar }
 
-export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): GrammarInternal => {
+// Laws claimed by a transform.
+//
+// - `unchecked`: no law claimed (`transform`, `transformOrFail`).
+// - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
+// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
+export type Fidelity = "unchecked" | "partial" | "claimed-iso"
+
+export interface GrammarIssue {
+  readonly message: string
+}
+
+export type Node =
+  | { readonly _tag: "Literal"; readonly value: string; readonly name?: string | undefined }
+  | { readonly _tag: "Regex"; readonly source: string; readonly flags: string; readonly name: string }
+  | {
+      readonly _tag: "Take"
+      readonly count: Expr
+      readonly unit: "char" | "byte"
+      readonly name?: string | undefined
+    }
+  | {
+      readonly _tag: "Gen"
+      readonly scope: ScopeId
+      readonly slotCount: number
+      readonly steps: ReadonlyArray<Step>
+      readonly result: Pattern
+    }
+  | { readonly _tag: "Wrap"; readonly open: Silent; readonly inner: AnyGrammar; readonly close: Silent }
+  | {
+      readonly _tag: "Merge"
+      readonly parts: ReadonlyArray<{ readonly grammar: AnyGrammar; readonly keys: ReadonlyArray<string> }>
+    }
+  // Parse with the first branch that matches. Print with the first branch that accepts the value,
+  // or when `checked`, the first whose printed text parses back to the input value.
+  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly checked: boolean }
+  // Parse like `Choice`; print with the case whose key equals `value[tag]`.
+  | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
+  // Parse and print with the case whose key equals the scrutinee's bound value.
+  | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
+  | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
+  | {
+      readonly _tag: "Repeat"
+      readonly inner: AnyGrammar
+      readonly sep: Silent
+      readonly min: Expr
+      readonly max: Expr | undefined
+    }
+  | {
+      readonly _tag: "Transform"
+      readonly inner: AnyGrammar
+      readonly decode: (a: any) => Result.Result<Value, GrammarIssue>
+      readonly encode: (b: any) => Result.Result<Value, GrammarIssue>
+      readonly is?: ((value: any) => boolean) | undefined
+      readonly name?: string | undefined
+      readonly fidelity: Fidelity
+      // Fields known to be in the output, so `merge` can split a value between parts.
+      readonly keys?: ReadonlyArray<string> | undefined
+    }
+  | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
+  | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }
+  | {
+      readonly _tag: "Suspend"
+      readonly thunk: () => AnyGrammar
+      readonly name?: string | undefined
+      resolved?: AnyGrammar | undefined
+      resolving?: true | undefined
+    }
+
+// Byte grammars parse and print a string whose code units are the bytes 0..255.
+export const nonByte = /[^\0-\xff]/
+
+export const toBytes = (binary: string): Uint8Array => Uint8Array.from(binary, (char) => char.charCodeAt(0))
+
+export const toText = (bytes: Uint8Array): string => {
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return binary
+}
+
+export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): AnyGrammar => {
   if (node.resolved !== undefined) return node.resolved
-  // SAFETY: the private marker exists only while this suspend thunk is resolving.
-  const state = node as typeof node & { resolving?: symbol }
-  if (state.resolving === Resolving) {
-    throw new Error(
-      `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}: thunk resolved itself while it was being evaluated`,
-    )
-  }
-  state.resolving = Resolving
+  const where = `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}`
+  if (node.resolving) throw new Error(`${where}: thunk resolved itself while it was being evaluated`)
+  node.resolving = true
   try {
     const target = node.thunk()
-    if (!isGrammar(target)) {
-      throw new TypeError(
-        `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}: thunk must return a grammar`,
-      )
-    }
+    if (!isGrammar(target)) throw new TypeError(`${where}: thunk must return a grammar`)
     node.resolved = target
     return target
   } finally {
-    delete state.resolving
-  }
-}
-
-// The grammars a node refers to directly. A `Suspend` yields its resolved target.
-export const children = (node: Node): ReadonlyArray<GrammarInternal> => {
-  switch (node._tag) {
-    case "Literal":
-    case "Regex":
-    case "Take":
-      return []
-    case "Gen":
-      return node.steps.map((step) => step.grammar)
-    case "Wrap":
-      return [node.open, node.inner, node.close]
-    case "Choice":
-      return node.options
-    case "Many":
-      return [node.inner, node.sep]
-    case "Optional":
-    case "Transform":
-    case "Label":
-    case "Skip":
-    case "RepeatExact":
-      return [node.inner]
-    case "Suspend":
-      return [resolve(node)]
-    case "Match":
-      return node.cases.map((matchCase) => matchCase.grammar)
-    case "Merge":
-      return node.parts.map((part) => part.grammar)
+    delete node.resolving
   }
 }

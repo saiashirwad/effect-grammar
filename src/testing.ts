@@ -6,12 +6,8 @@ import { preview } from "./errors.ts"
 import { parse } from "./parse.ts"
 import { print, printChecked } from "./print.ts"
 
-// Choices, transforms, and silent spellings can make printing lossy or
-// non-idempotent. These helpers test individual grammars, not universal laws.
-
 const lawError = (message: string): Error => new Error(`grammar law: ${message}`)
 
-// Assert `parse(print(value))` equals `value`.
 export const assertPrintParse = <A>(grammar: Grammar<A>, value: A): void => {
   const printed = printChecked(grammar, value)
   if (Result.isFailure(printed)) {
@@ -19,8 +15,6 @@ export const assertPrintParse = <A>(grammar: Grammar<A>, value: A): void => {
   }
 }
 
-// Assert that `text` parses and survives a print/parse round trip with an equal
-// value and unchanged second print. Return the stable text, not a universal canonical form.
 export const assertParsePrintCanonical = <A>(grammar: Grammar<A>, text: string): string => {
   const parsed = parse(grammar, text)
   if (Result.isFailure(parsed)) {
@@ -56,7 +50,6 @@ const assertCanonical = <A>(grammar: Grammar<A>, text: string, value: A): string
   return canonical.success
 }
 
-// Check `parse(print(value)) = value` over an arbitrary of values.
 export const checkPrintParse = <A>(
   grammar: Grammar<A>,
   arbitrary: FastCheck.Arbitrary<A>,
@@ -70,7 +63,6 @@ export const checkPrintParse = <A>(
   )
 }
 
-// Check value preservation and stable printing for arbitrary text. Skip inputs that do not parse.
 export const checkCanonicalization = <A>(
   grammar: Grammar<A>,
   arbitraryText: FastCheck.Arbitrary<string>,

@@ -21,9 +21,7 @@ const SuffixRange = Schema.Struct({
   length: Schema.Int.check(Schema.isGreaterThan(0)),
 })
 
-export const ByteRanges = Schema.Array(Schema.Union([ClosedRange, OpenRange, SuffixRange])).check(
-  Schema.isMinLength(1),
-)
+export const ByteRanges = Schema.Array(Schema.Union([ClosedRange, OpenRange, SuffixRange])).check(Schema.isMinLength(1))
 
 export type ByteRangesValue = Schema.Schema.Type<typeof ByteRanges>
 export type ByteRange = ByteRangesValue[number]
@@ -55,9 +53,7 @@ export const ManualByteRangeCodec = Schema.String.pipe(
     SchemaTransformation.transformOrFail<ByteRangesValue, string>({
       decode: (source, options) => {
         const invalid = () =>
-          Effect.fail(
-            new SchemaIssue.InvalidValue({ message: "expected byte ranges" }, source, options),
-          )
+          Effect.fail(new SchemaIssue.InvalidValue({ message: "expected byte ranges" }, source, options))
         if (!source.startsWith("bytes=")) return invalid()
         return Effect.forEach(source.slice("bytes=".length).split(","), (text) => {
           const range = parseRange(text)
@@ -95,10 +91,7 @@ const suffix = Grammar.gen(function* () {
 })
 
 export const ByteRangeCodec = Grammar.codec(
-  Grammar.prefix(
-    "bytes=",
-    Grammar.sepBy(Grammar.choiceOn("kind", { closed, open, suffix }), ",", { min: 1 }),
-  ),
+  Grammar.prefix("bytes=", Grammar.sepBy(Grammar.choiceOn("kind", { closed, open, suffix }), ",", { min: 1 })),
   ByteRanges,
   { identifier: "ByteRanges" },
 )

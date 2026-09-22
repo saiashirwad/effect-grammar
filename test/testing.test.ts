@@ -5,12 +5,7 @@ import { Effect } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
 
 import * as G from "../src/index.ts"
-import {
-  assertParsePrintCanonical,
-  assertPrintParse,
-  checkCanonicalization,
-  checkPrintParse,
-} from "../src/testing.ts"
+import { assertParsePrintCanonical, assertPrintParse, checkCanonicalization, checkPrintParse } from "../src/testing.ts"
 import { hashed, plain, wrong } from "./helpers.ts"
 
 const canonical = G.between(G.spaces, G.integer, G.spaces)
@@ -46,10 +41,7 @@ describe("assertParsePrintCanonical", () => {
 describe("checkPrintParse", () => {
   it.effect("runs the round-trip law over an arbitrary of values", () =>
     Effect.sync(() => {
-      checkPrintParse(
-        G.integer,
-        FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }),
-      )
+      checkPrintParse(G.integer, FastCheck.integer({ min: Number.MIN_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER }))
     }),
   )
 })

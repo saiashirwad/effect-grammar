@@ -102,10 +102,7 @@ const program = Effect.gen(function* () {
   yield* Console.log("── url ──────────────────────────────────────────────")
   yield* Console.log(`grammar: ${Grammar.render(endpoint)}`)
   yield* Console.log(
-    show(
-      "print { host, port: 8080 }",
-      Grammar.print(endpoint, { host: "effect.website", port: 8080 }),
-    ),
+    show("print { host, port: 8080 }", Grammar.print(endpoint, { host: "effect.website", port: 8080 })),
   )
   yield* Console.log(
     show(
@@ -116,17 +113,9 @@ const program = Effect.gen(function* () {
 
   yield* Console.log("── query string ─────────────────────────────────────")
   yield* Console.log(`grammar: ${Grammar.render(query)}`)
+  yield* Console.log(show('parse "?sslmode=require&user=alice"', Grammar.parse(query, "?sslmode=require&user=alice")))
   yield* Console.log(
-    show(
-      'parse "?sslmode=require&user=alice"',
-      Grammar.parse(query, "?sslmode=require&user=alice"),
-    ),
-  )
-  yield* Console.log(
-    show(
-      'print { user: "alice", sslmode: "require" }',
-      Grammar.print(query, { user: "alice", sslmode: "require" }),
-    ),
+    show('print { user: "alice", sslmode: "require" }', Grammar.print(query, { user: "alice", sslmode: "require" })),
   )
 })
 

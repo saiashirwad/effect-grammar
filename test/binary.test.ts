@@ -9,10 +9,7 @@ import * as G from "../src/index.ts"
 const parseOk = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): A =>
   Result.getOrThrow(Binary.parse(grammar, Uint8Array.from(input)))
 
-const parseFail = <A>(
-  grammar: G.Grammar<A>,
-  ...input: ReadonlyArray<number>
-): Binary.ParseError => {
+const parseFail = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): Binary.ParseError => {
   const result = Binary.parse(grammar, Uint8Array.from(input))
   if (Result.isSuccess(result)) assert.fail("expected parse failure")
   return result.failure
@@ -61,10 +58,7 @@ describe("floats", () => {
   it.effect("round-trips IEEE 754 values and refuses to round a float32", () =>
     Effect.sync(() => {
       assert.deepEqual(printOk(Binary.float32, -1.5), [0xbf, 0xc0, 0, 0])
-      assert.deepEqual(
-        printOk(Binary.float64le, 0.1),
-        [0x9a, 0x99, 0x99, 0x99, 0x99, 0x99, 0xb9, 0x3f],
-      )
+      assert.deepEqual(printOk(Binary.float64le, 0.1), [0x9a, 0x99, 0x99, 0x99, 0x99, 0x99, 0xb9, 0x3f])
       assert.equal(parseOk(Binary.float32le, 0, 0, 0x80, 0x7f), Number.POSITIVE_INFINITY)
       assert.ok(Object.is(parseOk(Binary.float64, ...printOk(Binary.float64, -0)), -0))
       assert.ok(Number.isNaN(parseOk(Binary.float32, ...printOk(Binary.float32, Number.NaN))))
@@ -174,10 +168,7 @@ describe("bytes / lengthPrefixed / literal", () => {
       })
       assert.equal(G.render(frame), "0x89 0x50 size:<uint8> body:<byte>{size}")
       assert.deepEqual(parseOk(frame, 0x89, 0x50, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
-      assert.deepEqual(
-        printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }),
-        [0x89, 0x50, 2, 7, 8],
-      )
+      assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
       assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")
       assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /3 bytes/)
     }),
@@ -212,10 +203,7 @@ describe("bytes / lengthPrefixed / literal", () => {
   it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
       const either = G.choice(Binary.bytes(1), G.struct({ body: Binary.bytes(1) }))
-      assert.equal(
-        printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message,
-        "expected 1 bytes, got <07 ab>",
-      )
+      assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, "expected 1 bytes, got <07 ab>")
       assert.equal(
         printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
         [
@@ -233,10 +221,7 @@ describe("bytes / lengthPrefixed / literal", () => {
 
   it.effect("shows a bigint inside a value in print errors", () =>
     Effect.sync(() => {
-      const either = G.choice(
-        Binary.uint8,
-        G.struct({ id: Binary.uint64, tags: G.repeat(Binary.int64, 1) }),
-      )
+      const either = G.choice(Binary.uint8, G.struct({ id: Binary.uint64, tags: G.repeat(Binary.int64, 1) }))
       assert.match(
         printFail(either, { id: -1n, tags: [5n] }).message,
         /no choice branch accepts \{"id":-1n,"tags":\[5n\]\}:/,

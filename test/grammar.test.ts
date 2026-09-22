@@ -160,12 +160,8 @@ describe("gen", () => {
         address: { host: "x", port: 1 },
       })
       assert.equal(printOk(nested, { kind: "endpoint", address: { host: "y", port: 2 } }), "y:2")
-      const other: Grammar.Grammar<{ kind: string; address: { host: string; port: number } }> =
-        nested
-      assert.match(
-        printFail(other, { kind: "other", address: { host: "y", port: 2 } }).message,
-        /expected "endpoint"/,
-      )
+      const other: Grammar.Grammar<{ kind: string; address: { host: string; port: number } }> = nested
+      assert.match(printFail(other, { kind: "other", address: { host: "y", port: 2 } }).message, /expected "endpoint"/)
     }),
   )
 
@@ -308,10 +304,7 @@ describe("match", () => {
   it.effect("branches on a property of a binding", () =>
     Effect.sync(() => {
       const header = G.gen(function* () {
-        const kind = yield* G.choice(
-          G.literal("t").pipe(G.as("text")),
-          G.literal("b").pipe(G.as("bin")),
-        )
+        const kind = yield* G.choice(G.literal("t").pipe(G.as("text")), G.literal("b").pipe(G.as("bin")))
         const size = yield* G.integer
         return { kind, size }
       })
@@ -405,10 +398,7 @@ describe("take / repeat", () => {
       assert.equal(printOk(pair, ["x", "y"]), "xy")
       assert.match(printFail(pair, ["x"]).message, /2/)
       assert.equal(G.render(pair), "(<letter>){2}")
-      assert.throws(
-        () => G.repeat(G.integer, -1),
-        /repeat: count must be a non-negative safe integer/,
-      )
+      assert.throws(() => G.repeat(G.integer, -1), /repeat: count must be a non-negative safe integer/)
       assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 0))).length, 1)
       assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 1))), [])
     }),
@@ -468,10 +458,7 @@ describe("seq", () => {
 })
 
 describe("choice", () => {
-  const g = G.choice(
-    G.literal("ab").pipe(G.as<string>("ab")),
-    G.literal("ac").pipe(G.as<string>("ac")),
-  )
+  const g = G.choice(G.literal("ab").pipe(G.as<string>("ab")), G.literal("ac").pipe(G.as<string>("ac")))
 
   it.effect("backtracks: a later option can match after an earlier one consumed input", () =>
     Effect.sync(() => {
@@ -489,16 +476,14 @@ describe("choice", () => {
     }),
   )
 
-  it.effect(
-    "prints the first option that accepts the value, and lists every reason when none does",
-    () =>
-      Effect.sync(() => {
-        assert.equal(printOk(g, "ac"), "ac")
-        const e = printFail(g, "zz")
-        assert.match(e.message, /no choice branch accepts "zz"/)
-        assert.match(e.message, /expected "ab"/)
-        assert.match(e.message, /expected "ac"/)
-      }),
+  it.effect("prints the first option that accepts the value, and lists every reason when none does", () =>
+    Effect.sync(() => {
+      assert.equal(printOk(g, "ac"), "ac")
+      const e = printFail(g, "zz")
+      assert.match(e.message, /no choice branch accepts "zz"/)
+      assert.match(e.message, /expected "ab"/)
+      assert.match(e.message, /expected "ac"/)
+    }),
   )
 
   it.effect("round-trips", () =>
@@ -563,9 +548,7 @@ describe("many", () => {
 
   it.effect("honours min and max", () =>
     Effect.sync(() => {
-      assert.deepEqual(parseFail(G.many(G.regex(/[a-z]/, "letter"), { min: 2 }), "a").expected, [
-        "letter",
-      ])
+      assert.deepEqual(parseFail(G.many(G.regex(/[a-z]/, "letter"), { min: 2 }), "a").expected, ["letter"])
       assert.deepEqual(parseOk(G.many(G.regex(/[a-z]/, "letter"), { max: 2 }), "ab"), ["a", "b"])
       assert.equal(parseFail(G.many(G.regex(/[a-z]/, "letter"), { max: 2 }), "abc").pos, 2)
     }),
@@ -672,35 +655,31 @@ describe("transform / decodeTo", () => {
     }),
   )
 
-  it.effect(
-    "decodeTo uses the schema as the guard, so choice can pick a branch when printing",
-    () =>
-      Effect.sync(() => {
-        const Num = Schema.Struct({ kind: Schema.Literal("num"), value: Schema.Finite })
-        const Word = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
-        const num = G.integer.pipe(
-          G.decodeTo(Num)({ decode: (value) => ({ kind: "num", value }), encode: (n) => n.value }),
-        )
-        const w = word.pipe(
-          G.decodeTo(Word)({
-            decode: (value) => ({ kind: "word", value }),
-            encode: (w) => w.value,
-          }),
-        )
-        const g = G.choice(num, w)
-        assert.deepEqual(parseOk(g, "12"), { kind: "num", value: 12 })
-        assert.equal(printOk(g, { kind: "word", value: "ab" }), "ab")
-        assert.equal(printOk(g, { kind: "num", value: 3 }), "3")
-        assertRoundTrip(g, { kind: "word", value: "ab" })
-      }),
+  it.effect("decodeTo uses the schema as the guard, so choice can pick a branch when printing", () =>
+    Effect.sync(() => {
+      const Num = Schema.Struct({ kind: Schema.Literal("num"), value: Schema.Finite })
+      const Word = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
+      const num = G.integer.pipe(
+        G.decodeTo(Num)({ decode: (value) => ({ kind: "num", value }), encode: (n) => n.value }),
+      )
+      const w = word.pipe(
+        G.decodeTo(Word)({
+          decode: (value) => ({ kind: "word", value }),
+          encode: (w) => w.value,
+        }),
+      )
+      const g = G.choice(num, w)
+      assert.deepEqual(parseOk(g, "12"), { kind: "num", value: 12 })
+      assert.equal(printOk(g, { kind: "word", value: "ab" }), "ab")
+      assert.equal(printOk(g, { kind: "num", value: 3 }), "3")
+      assertRoundTrip(g, { kind: "word", value: "ab" })
+    }),
   )
 
   it.effect("decodeTo rejects on parse when the schema does", () =>
     Effect.sync(() => {
       const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
-      const g = G.integer.pipe(
-        G.decodeTo(Small)({ decode: (n) => n, encode: (n) => n, name: "digit" }),
-      )
+      const g = G.integer.pipe(G.decodeTo(Small)({ decode: (n) => n, encode: (n) => n, name: "digit" }))
       assert.deepEqual(parseFail(g, "10").expected, ["digit"])
     }),
   )

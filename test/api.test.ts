@@ -11,9 +11,7 @@ const word = Grammar.regex(/[a-z]+/, "word")
 describe("product and conditional APIs", () => {
   it.effect("defaults an omitted value and omits the default when printing", () =>
     Effect.sync(() => {
-      const port = Grammar.optional(Grammar.integer.pipe(Grammar.prefix(":"))).pipe(
-        Grammar.defaulted(443),
-      )
+      const port = Grammar.optional(Grammar.integer.pipe(Grammar.prefix(":"))).pipe(Grammar.defaulted(443))
 
       assert.equal(parseOk(port, ""), 443)
       assert.equal(parseOk(port, ":80"), 80)
@@ -42,7 +40,7 @@ describe("product and conditional APIs", () => {
         Grammar.between("[", "]"),
         Grammar.prefix("#"),
         Grammar.suffix(";"),
-        Grammar.optional(),
+        Grammar.optional,
       )
 
       assert.equal(parseOk(grammar, "#[2];"), 2)
