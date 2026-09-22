@@ -20,25 +20,17 @@ import { assertInScope, assertRefsReturnedOnce, keysOf, refFor, type Scope, toPa
 
 export { get } from "./ref.ts"
 
-// ---------------------------------------------------------------------------
-// Atoms
-
 export const literal = (value: string): Grammar<void> => make({ _tag: "Literal", value })
 
 export const empty = literal("")
 
 const toGrammar = (value: Grammar<void> | string): Grammar<void> => (Predicate.isString(value) ? literal(value) : value)
 
-// Name the inner grammar in `render` and in parse errors where no part of it consumed input.
 export const label =
   (name: string) =>
   <A>(inner: Grammar<A>): Grammar<A> =>
     make({ _tag: "Label", inner, name })
 
-// Match at the parser's current cursor using JavaScript `RegExp` semantics.
-// Parsing uses a fresh sticky matcher against the original full input; printing
-// requires the supplied string to match in full. `g`, `y`, and the caller's
-// `lastIndex` are ignored, and the caller's expression is never mutated.
 export const regex = (expression: RegExp, name?: string): Grammar<string> => {
   const grammar = make<string>({
     _tag: "Regex",
@@ -54,15 +46,9 @@ const countExpr = (count: Ref<number> | number, where: string): Expr => {
   return { _tag: "Const", value: count }
 }
 
-// Take `count` characters, where `count` may be a value bound earlier in the same gen.
 export const take = (count: Ref<number> | number): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "take") })
 
-// ---------------------------------------------------------------------------
-// Sequencing
-
-// Run the generator once at construction time. Each yielded grammar becomes a step bound to
-// a ref. The return value becomes the pattern; steps it does not mention print with `undefined`.
 export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<Denote<R>> => {
   const iterator = run()
   const steps: Array<AnyGrammar> = []
@@ -93,8 +79,6 @@ type StructValue<Fields extends Readonly<Record<string, AnyGrammar>>> = {
   readonly [K in keyof Fields]: Type<Fields[K]>
 }
 
-// Sequence fields and return an object. Printing requires exactly these own
-// keys: missing, extra, and symbol keys are rejected.
 export const struct = <const Fields extends Readonly<Record<string, AnyGrammar>>>(
   fields: Fields,
 ): Grammar<StructValue<Fields>> => {
@@ -124,7 +108,6 @@ export const tuple = <const Elements extends ReadonlyArray<AnyGrammar>>(
   })
 }
 
-// Parse the inner grammar and produce a constant; print the constant as that grammar.
 export const as =
   <const V>(value: V) =>
   (inner: Grammar<void>): Grammar<V> =>
@@ -147,18 +130,11 @@ const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void =>
   }
 }
 
-// ---------------------------------------------------------------------------
-// Choice
-
 type Options = readonly [AnyGrammar, ...Array<AnyGrammar>]
 
-// Parse with the first matching branch; print with the first accepting printer.
 export const choice = <const Grammars extends Options>(...options: Grammars): Grammar<Type<Grammars[number]>> =>
   make({ _tag: "Choice", options, checked: false })
 
-// `choice` whose printer selects the first branch that reads back to an
-// equal value. Each checked choice reparses its candidate output; nesting can
-// multiply that work, so keep it off hot paths.
 export const checkedChoice = <const Grammars extends Options>(...options: Grammars): Grammar<Type<Grammars[number]>> =>
   make({ _tag: "Choice", options, checked: true })
 
@@ -186,7 +162,6 @@ type TaggedEntries<Tag extends string, E extends Entries> = {
     : never
 }
 
-// Parse the cases in order; print with the case whose key equals `value[tag]`.
 export const dispatch = <const Tag extends string, const E extends Entries>(
   tag: Tag,
   entries: E & TaggedEntries<Tag, E>,
@@ -198,7 +173,6 @@ type TaggedValue<Tag extends string, E extends Entries> = {
     : never
 }[number]
 
-// Wrap each case's value as `{ [tag]: key, value }` and dispatch on the tag.
 export const taggedChoice = <const Tag extends string, const E extends Entries>(
   tag: Tag extends "value" ? never : Tag,
   entries: E,
@@ -227,15 +201,11 @@ export const taggedChoice = <const Tag extends string, const E extends Entries>(
 
 type CompleteEntries<K extends MatchKey, E extends Entries> = Exclude<K, E[number][0]> extends never ? E : never
 
-// Parse and print the case selected by a value bound earlier in the same gen.
 export const match = <K extends MatchKey, const E extends ReadonlyArray<readonly [K, AnyGrammar]>>(
   scrutinee: Ref<K>,
   entries: CompleteEntries<K, E>,
 ): Grammar<EntryOutput<E>> =>
   make({ _tag: "Match", scrutinee: assertInScope(scrutinee, "match"), cases: cases(entries, "match") })
-
-// ---------------------------------------------------------------------------
-// Repetition
 
 export const optional = <A>(inner: Grammar<A>): Grammar<A | undefined> => make({ _tag: "Optional", inner })
 
@@ -262,23 +232,17 @@ const repeatNode =
     })
   }
 
-// Repeat an item within bounds. Each item must consume input.
 export const many = (options?: RepeatOptions) => repeatNode("many", empty, options)
 
-// Repeat an item with a separator between items.
 export const sepBy = (separator: Grammar<void> | string, options?: RepeatOptions) =>
   repeatNode("sepBy", toGrammar(separator), options)
 
-// Repeat an item exactly `count` times, where `count` may be a value bound earlier in the same gen.
 export const repeat =
   (count: Ref<number> | number) =>
   <A>(inner: Grammar<A>): Grammar<ReadonlyArray<A>> => {
     const expr = countExpr(count, "repeat")
     return make({ _tag: "Repeat", inner, sep: empty, min: expr, max: expr })
   }
-
-// ---------------------------------------------------------------------------
-// Transforms
 
 export interface TransformOptions<A, B> {
   readonly decode: (a: A) => B
@@ -313,34 +277,26 @@ const throwingTransformNode = <A, B>(
   fidelity: Fidelity,
 ): Grammar<B> => transformNode(inner, { decode: attempt(options.decode), encode: attempt(options.encode) }, fidelity)
 
-// Transform values without claiming the functions are inverses. Printed text
-// may parse back to a different value. Use `iso` to claim inverses.
 export const transform =
   <A, B>(options: TransformOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
     throwingTransformNode(inner, options, "unchecked")
 
-// `transform` with directions that return a `Result`. No law is claimed.
 export const transformOrFail =
   <A, B>(options: TransformOrFailOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
     transformNode(inner, options, "unchecked")
 
-// Like `transform`, but claims the functions are inverses. This is not
-// verified; `auditFidelity` only reports transforms without this claim.
 export const iso =
   <A, B>(options: TransformOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
     throwingTransformNode(inner, options, "claimed-iso")
 
-// An `iso` whose two directions may each fail; they must agree where both succeed.
 export const partialIso =
   <A, B>(options: TransformOrFailOptions<A, B>) =>
   (inner: Grammar<A>): Grammar<B> =>
     transformNode(inner, options, "partial")
 
-// Reject values the predicate refuses, in both directions, reporting `name` as what was expected.
-// Keeps the inner grammar's fields, so a ref to it can still be spread.
 export function filter<A, B extends A>(
   refinement: (value: A) => value is B,
   name: string,
@@ -356,22 +312,12 @@ export function filter<A>(predicate: (value: A) => boolean, name: string) {
   }
 }
 
-// Parse the inner grammar but drop its value; print `printAs` in its place.
 export const skip =
   <A>(printAs: A) =>
   (inner: Grammar<A>): Grammar<void> =>
     make({ _tag: "Skip", inner, printAs, hidden: false })
 
-// ---------------------------------------------------------------------------
-// Recursion
-
-// Resolve and cache the thunk on first use. Parsing rejects recursion at the
-// same input position; printing rejects re-entering with the same value.
-// `name` stands for the grammar where `render` would otherwise loop.
 export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> => make({ _tag: "Suspend", thunk, name })
-
-// ---------------------------------------------------------------------------
-// Whitespace
 
 const hiddenWhitespace = (expression: RegExp, name: string, printAs: string): Grammar<void> =>
   make({ _tag: "Skip", inner: regex(expression, name), printAs, hidden: true })

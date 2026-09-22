@@ -11,9 +11,6 @@ import type { CodecOptions } from "./schema.ts"
 
 export { hex } from "./errors.ts"
 
-// ---------------------------------------------------------------------------
-// Schemas for integers of a given bit width
-
 const isWidth = (size: number): boolean => Number.isInteger(size) && size >= 1 && size <= 53
 
 const assertWidth = (name: string, size: number): void => {
@@ -38,12 +35,8 @@ export const int64Schema = Schema.BigInt.check(
   Schema.isBetweenBigInt({ minimum: -(2n ** 63n), maximum: 2n ** 63n - 1n }),
 )
 
-// ---------------------------------------------------------------------------
-// Bytes
-
 const isBinary = (value: string): boolean => !nonByte.test(value)
 
-// `count` characters, each of which must be a byte.
 export const takeBytes = (count: Ref<number> | number): Grammar<string> => take(count).pipe(filter(isBinary, "a byte"))
 
 const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
@@ -84,10 +77,6 @@ export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
     }),
   )
 
-// ---------------------------------------------------------------------------
-// Fixed-width integers and floats
-
-// `size` bytes as an unsigned big-endian (or little-endian) integer.
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
   takeBytes(size).pipe(
     label(name),
@@ -145,7 +134,6 @@ export const int64le = int64Of("int64le", true)
 
 const scratch = new DataView(new ArrayBuffer(8))
 
-// NaN payloads and signalling NaNs do not survive a parse/print round trip.
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
   takeBytes(size).pipe(
     label(name),
@@ -162,7 +150,6 @@ const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number>
         return binary
       },
     }),
-    // Reject values that would lose precision as float32.
     filter((value) => Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)), name),
   )
 
@@ -171,10 +158,6 @@ export const float64 = float(8, "float64")
 export const float32le = float(4, "float32le", true)
 export const float64le = float(8, "float64le", true)
 
-// ---------------------------------------------------------------------------
-// Variable-length integers
-
-// Parsing accepts padded encodings of any length; printing writes the shortest one.
 const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
 
 const fromLeb128 = (binary: string): number => {
@@ -195,7 +178,6 @@ const toLeb128 = (value: number): string => {
   return binary + String.fromCharCode(rest)
 }
 
-// Unsigned LEB128 within the safe integer range.
 export const varuint = leb128("varuint").pipe(
   partialIso({
     decode: (binary) => {
@@ -208,7 +190,6 @@ export const varuint = leb128("varuint").pipe(
   }),
 )
 
-// Zigzag-encoded LEB128, as in protobuf `sint64`, for integers from -(2 ** 52) to 2 ** 52 - 1.
 export const varint = leb128("varint").pipe(
   partialIso({
     decode: (binary) => {
@@ -224,16 +205,12 @@ export const varint = leb128("varint").pipe(
   }),
 )
 
-// ---------------------------------------------------------------------------
-// Bit fields
-
 export type BitLayout = Readonly<Record<string, number>>
 
 export type Bits<Layout extends BitLayout> = {
   readonly [K in keyof Layout]: Layout[K] extends 1 ? 0 | 1 : number
 }
 
-// Pack named fields, most significant first, into a whole number of bytes.
 export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bits<Layout>> => {
   const fields = Object.entries(layout)
   const name = fields.map(([key, size]) => `${key}:${size}`).join(" ")
@@ -277,9 +254,6 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
     Object.keys(layout),
   )
 }
-
-// ---------------------------------------------------------------------------
-// Parsing and printing bytes: the text interpreters over a byte string
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
   Result.mapError(

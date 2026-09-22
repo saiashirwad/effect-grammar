@@ -67,7 +67,6 @@ const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
   }),
 )
 
-// Printing dispatches on `kind`; parsing tries branches in order. No guards needed.
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () =>
     Grammar.dispatch("kind", [
@@ -81,7 +80,6 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   "expr",
 )
 
-// `trivia` prints nothing; `spaces` keeps "(+ 1 2)" from printing as "(+12)".
 const list = expr.pipe(
   Grammar.sepBy(Grammar.spaces),
   Grammar.between(Grammar.seq(Grammar.literal("("), Grammar.trivia), Grammar.seq(Grammar.trivia, Grammar.literal(")"))),

@@ -17,8 +17,6 @@ import {
 } from "./combinators.ts"
 import type { Grammar, Ref } from "./core.ts"
 
-// Return the matched string, trying longest first to avoid prefix shadowing.
-// Equal-length strings keep their listed order.
 export const literals = <const Values extends readonly [string, ...Array<string>]>(
   ...values: Values
 ): Grammar<Values[number]> => {
@@ -30,15 +28,12 @@ export const literals = <const Values extends readonly [string, ...Array<string>
 export const flag = (value: Grammar<void> | string): Grammar<boolean> =>
   choice(as(true)(Predicate.isString(value) ? literal(value) : value), as(false)(empty))
 
-// An `iso` whose output must satisfy the schema.
 export const decodeTo =
   <T>(schema: Schema.Codec<T, unknown, unknown, unknown>, name = "a value matching the schema") =>
   <A>(options: TransformOptions<A, T>) =>
   (inner: Grammar<A>): Grammar<T> =>
     inner.pipe(iso(options), filter(Schema.is(schema), name))
 
-// Replace `undefined` with the default when parsing; omit equal values when
-// printing. Other parsed values, including `null`, are unchanged.
 export const defaulted =
   <A>(value: A) =>
   (inner: Grammar<A | undefined>): Grammar<A> =>

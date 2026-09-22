@@ -4,10 +4,8 @@ const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
 export const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
 
-// Every JavaScript value; `{}` is TypeScript's non-nullish top type.
 export type Value = {} | null | undefined
 
-// A grammar whose output type is not tracked.
 export interface AnyGrammar extends Pipeable.Pipeable {
   readonly [NodeTypeId]: Node
 }
@@ -19,7 +17,6 @@ export interface Grammar<in out A> extends AnyGrammar {
 
 export type Type<G> = G extends Grammar<infer A> ? A : never
 
-// What `yield*` gives back inside `gen`: a ref to the parsed value.
 export type Yielded<A> = [A] extends [void] ? void : Ref<A>
 
 export interface RefBase<out A> {
@@ -36,8 +33,6 @@ export type Ref<A> = RefBase<A> & RefProps<A>
 
 type StringKeys<T> = Extract<keyof T, string>
 
-// The value a `gen` returns, with every ref replaced by what it refers to. Spreading a ref
-// copies its brand, so a branded type with fields beyond the ref's own is an object, not a ref.
 export type Denote<T> =
   T extends RefBase<infer A>
     ? Exclude<StringKeys<T>, StringKeys<A>> extends never
@@ -84,7 +79,6 @@ export interface RefExpr {
   readonly slot: number
 }
 
-// Reads a value bound earlier in an enclosing `gen`.
 export type Expr =
   | RefExpr
   | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
@@ -93,8 +87,6 @@ export type Expr =
 export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
-// The shape a `gen` returns, built from bound values when parsing and taken apart when printing.
-// A `Prop` is one field of a bound object, as produced by spreading a ref: `{ ...flags }`.
 export type Pattern =
   | RefExpr
   | { readonly _tag: "Prop"; readonly object: RefExpr; readonly key: string }
@@ -109,14 +101,8 @@ export interface Case {
   readonly grammar: AnyGrammar
 }
 
-// Laws claimed by a transform.
-//
-// - `unchecked`: no law claimed (`transform`, `transformOrFail`).
-// - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
-// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `filter`).
 export type Fidelity = "unchecked" | "partial" | "claimed-iso"
 
-// A finding from `validate`.
 export interface GrammarIssue {
   readonly message: string
 }
@@ -125,7 +111,6 @@ export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
   | { readonly _tag: "Regex"; readonly source: string; readonly flags: string }
   | { readonly _tag: "Take"; readonly count: Expr }
-  // Each step binds the slot of its index. Steps the pattern does not mention print with `undefined`.
   | {
       readonly _tag: "Gen"
       readonly scope: ScopeId
@@ -133,12 +118,8 @@ export type Node =
       readonly result: Pattern
     }
   | { readonly _tag: "Wrap"; readonly open: Grammar<void>; readonly inner: AnyGrammar; readonly close: Grammar<void> }
-  // Parse with the first branch that matches. Print with the first branch that accepts the value,
-  // or when `checked`, the first whose printed text parses back to the input value.
   | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly checked: boolean }
-  // Parse like `Choice`; print with the case whose key equals `value[tag]`.
   | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
-  // Parse and print with the case whose key equals the scrutinee's bound value.
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
   | {
@@ -154,22 +135,18 @@ export type Node =
       readonly decode: (a: any) => Result.Result<Value, string>
       readonly encode: (b: any) => Result.Result<Value, string>
       readonly fidelity: Fidelity
-      // Fields known to be in the output, so a ref to it can be spread in a gen's return.
       readonly keys?: ReadonlyArray<string> | undefined
     }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
-  // Names the inner grammar in `render`, and in parse errors when no part of it consumed input.
   | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }
   | {
       readonly _tag: "Suspend"
       readonly thunk: () => AnyGrammar
-      // Shown by `render` where the grammar refers back to itself.
       readonly name?: string | undefined
       resolved?: AnyGrammar | undefined
       resolving?: true | undefined
     }
 
-// Byte grammars parse and print a string whose code units are the bytes 0..255.
 export const nonByte = /[^\0-\xff]/
 
 export const toBytes = (binary: string): Uint8Array => Uint8Array.from(binary, (char) => char.charCodeAt(0))

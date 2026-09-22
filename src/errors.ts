@@ -5,7 +5,6 @@ import type { Value } from "./core.ts"
 const describeExpected = (expected: ReadonlyArray<string>): string =>
   expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
 
-// `line` and `column` are absent when the input was bytes; `pos` is then a byte offset.
 export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   pos: Schema.Finite,
   line: Schema.UndefinedOr(Schema.Finite),
@@ -103,8 +102,6 @@ export const toSchemaIssue = (issue: PrintIssue): SchemaIssue.Issue =>
 export const hex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
 
-// Keep bytes and bigints unquoted. A JSON replacer would quote them, and
-// Buffer.toJSON runs before the replacer can see the bytes.
 const show = (value: Value, seen: ReadonlyArray<Value>): string | undefined => {
   if (Predicate.isBigInt(value)) return `${value}n`
   if (Predicate.isUint8Array(value)) return `<${hex(value)}>`

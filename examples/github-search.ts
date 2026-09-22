@@ -1,4 +1,3 @@
-// https://docs.github.com/en/search-github
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"

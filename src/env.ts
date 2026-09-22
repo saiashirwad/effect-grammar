@@ -3,10 +3,8 @@ import { Equal, Predicate, Result } from "effect"
 import type { Case, Expr, Pattern, RefExpr, ScopeId, Value } from "./core.ts"
 import { exceptionMessage, type PrintIssue } from "./errors.ts"
 
-// An unbound slot; `undefined` is a valid bound value.
 export const Unbound = Symbol("effect-grammar/Unbound")
 
-// One gen's slots. A ref finds its frame by scope, so a gen nested in a repetition still resolves.
 export interface Frame {
   readonly scope: ScopeId
   readonly parent: Frame | undefined
@@ -38,12 +36,10 @@ export const evaluate = (expr: Expr, env: Frame | undefined): Value => {
 export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
   cases.find((matchCase) => Object.is(matchCase.key, value))
 
-// Plain assignment would follow a `__proto__` key; defining the property does not.
 const setOwn = (object: Record<string, Value>, key: string, value: Value): void => {
   Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true })
 }
 
-// Parsing: build the gen's return value from its bound slots.
 export const materialize = (pattern: Pattern, env: Frame): Value => {
   switch (pattern._tag) {
     case "Ref":
@@ -99,14 +95,12 @@ export const validateOwnKeys = (
       })
 }
 
-// Printing: take a value apart along the pattern, binding each ref's slot.
 export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result.Result<void, PrintIssue> => {
   switch (pattern._tag) {
     case "Ref":
       env.values[pattern.slot] = value
       return Result.void
     case "Prop": {
-      // Fields returned one by one rebuild the object the step printed.
       const object = env.values[pattern.object.slot]
       const target: Record<string, Value> = Predicate.isObject(object) ? object : {}
       setOwn(target, pattern.key, value)

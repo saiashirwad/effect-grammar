@@ -14,7 +14,6 @@ import {
 } from "./core.ts"
 import { describeStep } from "./render.ts"
 
-// A gen's scope stays open only while its generator body runs.
 export interface Scope {
   readonly id: ScopeId
   open: boolean
@@ -23,11 +22,9 @@ export interface Scope {
 interface RefEntry {
   readonly expr: Expr
   readonly scope: Scope
-  // The fields of the bound object, when the grammar declares them; spreading the ref yields these.
   readonly keys: ReadonlyArray<string> | undefined
 }
 
-// The fields a grammar's output is known to have.
 export const keysOf = (grammar: AnyGrammar): ReadonlyArray<string> | undefined => {
   const node = nodeOf(grammar)
   switch (node._tag) {
@@ -64,9 +61,6 @@ const entryOf = (ref: RefBase<Value>): RefEntry => {
   return entry
 }
 
-// Property access on a ref yields a ref to that property. A few keys are reserved so
-// refs behave when awaited, serialized, or coerced; use `get` to read those fields.
-// Spreading a ref enumerates its known fields, so `{ ...flags }` returns each field's ref.
 const refHandler: ProxyHandler<RefImpl<Value>> = {
   get(_target, key, receiver) {
     if (key === RefTypeId) return RefTypeId
@@ -126,7 +120,6 @@ const isPlainObject = <T extends object>(value: T): boolean => {
   return proto === Object.prototype || proto === null
 }
 
-// Turn a gen's return value into the pattern that parsing builds and printing takes apart.
 export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet()): Pattern => {
   if (isRef(value)) {
     const { expr } = entryOf(value)
@@ -194,8 +187,6 @@ export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet())
   }
 }
 
-// Printing reads a slot from wherever the pattern mentions it, so a ref may appear once:
-// either whole, or through every one of its fields.
 export const assertRefsReturnedOnce = (scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, result: Pattern): void => {
   const whole = new Set<number>()
   const byField = new Map<number, Set<string>>()

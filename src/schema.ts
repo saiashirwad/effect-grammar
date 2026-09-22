@@ -10,7 +10,6 @@ export interface CodecOptions {
   readonly identifier?: string
 }
 
-// Decoding consumes the whole string. Encoding always checks round trips.
 export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
   grammar: Grammar<A>,
   target: S,

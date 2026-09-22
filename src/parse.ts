@@ -8,12 +8,9 @@ import { describe } from "./render.ts"
 interface State {
   readonly input: string
   pos: number
-  // The furthest position any branch reached, and what was expected there.
   furthest: number
   expected: Set<string>
-  // How many parses consumed input, so a label can tell whether its inner grammar got anywhere.
   progress: number
-  // Suspensions being expanded, by input position, to reject left recursion.
   readonly activeAt: Map<Node, Set<number>>
 }
 
@@ -47,7 +44,6 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
         state.pos += node.value.length
         return Result.void
       }
-      // Report the first mismatch, not the start of the literal.
       const end = state.pos + node.value.length
       let current = state.pos
       while (current < end && state.input[current] === node.value[current - state.pos]) current++
@@ -156,7 +152,6 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       return Result.isFailure(result) ? result : Result.void
     }
     case "Label": {
-      // When no part of the inner grammar consumed input, report the label in place of its expectations.
       const start = state.pos
       const { furthest, progress } = state
       const siblings = furthest === start ? [...state.expected] : []

@@ -17,7 +17,6 @@ import { parseWithEnv } from "./parse.ts"
 import { describe, describeStep } from "./render.ts"
 
 interface State {
-  // Suspensions being printed, by value, to reject recursion that can never make progress.
   readonly activeFor: Map<Node, Set<Value>>
 }
 
@@ -42,7 +41,6 @@ const roundTripIssue = (
   return Equal.equals(back.success, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.success }
 }
 
-// Where a bound slot appears in the gen's return value, for error paths.
 const bindingPath = (
   pattern: Pattern,
   scope: ScopeId,
@@ -242,14 +240,12 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
   }
 }
 
-// Print with the grammar's branches and spellings, without a round-trip check. See `printChecked`.
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   Result.mapError(
     printGrammar(grammar, value, undefined, { activeFor: new Map() }),
     (issue) => new PrintError({ issue }),
   )
 
-// Print a value and verify that parsing the whole output returns the original value.
 export const printChecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
   Result.flatMap(print(grammar, value), (printed) => {
     const issue = roundTripIssue(grammar, value, printed, undefined)

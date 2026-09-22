@@ -213,7 +213,6 @@ describe("bytes / lengthPrefixed / literal", () => {
         ].join("\n"),
       )
       assert.match(printFail(either, Buffer.from([7, 0xab])).message, /accepts <07 ab>:/)
-      // Hex-like strings must stay quoted.
       // SAFETY: deliberately printing a string where bytes are expected.
       assert.match(printFail(either, "<07 ab>" as never).message, /accepts "<07 ab>":/)
     }),

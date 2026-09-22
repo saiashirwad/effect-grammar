@@ -166,7 +166,6 @@ describe("dispatch prints by reading the tag", () => {
       ] as const)
       assert.equal(printOk(atom, { kind: "symbol", value: "42" }), "42")
       assert.deepEqual(parseOk(atom, "42"), { kind: "number", value: 42 })
-      // Tag dispatch still needs a whole-grammar round-trip check.
       const r = G.printChecked(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
     }),

@@ -8,8 +8,6 @@ import * as G from "../src/index.ts"
 import { assertPrintParse } from "../src/testing.ts"
 import { parseOk } from "./helpers.ts"
 
-// Shared cases catch drift between interpreters. `satisfies` requires a row for every Node variant.
-
 interface Row<A = unknown> {
   readonly grammar: G.Grammar<A>
   readonly text: string

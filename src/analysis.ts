@@ -16,7 +16,6 @@ import { exceptionMessage } from "./errors.ts"
 import { print } from "./print.ts"
 import { describe, describeStep } from "./render.ts"
 
-// The grammars a node refers to directly. A `Suspend` yields its resolved target.
 const children = (node: Node): ReadonlyArray<AnyGrammar> => {
   switch (node._tag) {
     case "Literal":
@@ -43,9 +42,6 @@ const children = (node: Node): ReadonlyArray<AnyGrammar> => {
       return [resolve(node)]
   }
 }
-
-// ---------------------------------------------------------------------------
-// Can a grammar match the empty string?
 
 type EmptyMatch = "yes" | "no" | "unknown"
 
@@ -91,7 +87,6 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>): EmptyMatch => {
       if (node.min._tag !== "Const" || (node.max !== undefined && node.max._tag !== "Const")) return "unknown"
       if (node.max?.value === 0) return "yes"
       const item = matchesEmpty(node.inner, seen)
-      // A zero-width item makes the repetition fail its own progress guard.
       if (item === "yes") return "no"
       if (item === "unknown") return "unknown"
       return node.min.value === 0 ? "yes" : "no"
@@ -132,9 +127,6 @@ const mentionedSlots = (pattern: Pattern, slots: Set<number> = new Set()): Set<n
   return slots
 }
 
-// ---------------------------------------------------------------------------
-// Static checks
-
 type ScopePath = ReadonlyArray<ScopeId>
 
 const exprScope = (expr: Expr): ScopeId | undefined =>
@@ -146,7 +138,6 @@ const sameScopePath = (left: ScopePath, right: ScopePath): boolean =>
 interface Walk {
   readonly issues: Array<GrammarIssue>
   readonly visiting: Set<Node>
-  // A suspend's target depends on the enclosing gens, so it is walked once per scope path.
   readonly walkedUnder: WeakMap<Node, Array<ScopePath>>
 }
 
@@ -211,7 +202,6 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
     case "Repeat": {
       if (node.min._tag !== "Const") checkRef(node.min, "repeat")
       if (node.max !== undefined && node.max._tag !== "Const") checkRef(node.max, "repeat")
-      // Only a repetition that must run zero times can tolerate a zero-width item.
       if (node.max === undefined || node.max._tag !== "Const" || node.max.value > 0) {
         checkProgress(node.inner, node.max === undefined ? "unbounded repetition" : "repetition")
       }
@@ -227,9 +217,6 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
   for (const child of children(node)) walk(child, active, state)
 }
 
-// Check for refs outside their gen and nonzero repetitions of grammars proven
-// to match empty input. May evaluate and cache suspension thunks.
-// An empty result does not guarantee runtime success.
 export const validate = (grammar: AnyGrammar): ReadonlyArray<GrammarIssue> => {
   const state: Walk = { issues: [], visiting: new Set(), walkedUnder: new WeakMap() }
   walk(grammar, [], state)
@@ -241,9 +228,6 @@ export interface FidelityEntry {
   readonly fidelity: Fidelity
 }
 
-// List the transforms in a grammar that do not claim a full inverse law
-// (`transform`, `transformOrFail`, `partialIso`). An empty result means each
-// transform makes that claim; it does not prove the claim or a round trip.
 export const auditFidelity = (grammar: AnyGrammar): ReadonlyArray<FidelityEntry> => {
   const entries: Array<FidelityEntry> = []
   const seen = new Set<Node>()

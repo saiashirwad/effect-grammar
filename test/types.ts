@@ -4,11 +4,9 @@ const kindOf = G.literals("a", "b")
 
 // @ts-expect-error taggedChoice cannot use "value" as its tag
 G.taggedChoice("value", [["number", G.integer]] as const)
-// Dynamic tags rely on the runtime reserved-name check.
 const dynamicTag: string = "kind"
 G.taggedChoice(dynamicTag, [["number", G.integer]] as const)
 
-// A ref has no value while the grammar is built, so JavaScript cannot branch on it.
 G.gen(function* () {
   const kind = yield* kindOf
   // @ts-expect-error a Ref is not a string
@@ -37,7 +35,6 @@ G.gen(function* () {
   return { w, s }
 })
 
-// The return type unwraps each Ref<A> to A.
 const g = G.gen(function* () {
   yield* G.literal("(")
   const n = yield* G.integer
@@ -87,7 +84,6 @@ const matched = G.gen(function* () {
 const okMatched: G.Type<typeof matched> = { kind: "a", value: 1 }
 const okMatchedB: G.Type<typeof matched> = { kind: "b", value: "x" }
 
-// Ref properties remain refs, so they can drive dependent grammars.
 const header = G.gen(function* () {
   const kind = yield* kindOf
   const size = yield* G.integer
