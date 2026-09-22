@@ -84,10 +84,13 @@ Use `transform` for value-returning decode/encode callbacks and
 claims an inverse law; `print` checks the round trip for each value. Callback
 exceptions become parse or print failures with grammar context.
 
-`choice` prints with the first branch that accepts the value. `checkedChoice`
-tries later branches when a candidate's output reads back differently through
-the choice. This branch search also applies with `printUnchecked`; `print`
-checks the final output of the whole grammar.
+`choice([first, second])` takes a nonempty readonly tuple of branches. By
+default, it prints with the first branch that accepts the value. Use
+`choice([first, second], { print: "roundTrip" })` to try later branches when a
+candidate's output reads back differently through the choice. `ChoiceOptions`
+defines the optional `print` policy, either `"first"` or `"roundTrip"`. This
+branch search also applies with `printUnchecked`. `print` checks the final
+output of the whole grammar. Both policies parse branches in the same order.
 
 Printing a `gen` object requires exactly its declared fields. Repeated items
 must consume input. Empty matches fail rather than loop.
@@ -132,18 +135,21 @@ G.diagnose(incomplete)
 The issue tags are `OmittedValue`, `OutOfScopeRef`, `EmptyRepetition`, and
 `InvalidSuspend`. Paths start at the root and use zero-based indices. Edges
 include `steps`, `options`, `cases` (followed by an index and `grammar`),
-`open`, `inner`, `close`, `sep`, and `resolved` for a suspension's target. Ref
-issues end at `count`, `min`, `max`, or `scrutinee`. Empty-repetition issues
-point to the repeated `inner` grammar. Shared suspensions are checked once per
-ancestor scope path, with issues at the first graph path visited in that scope.
+`inner`, `sep`, and `resolved` for a suspension's target. Ref issues end at
+`count`, `min`, `max`, or `scrutinee`. Empty-repetition issues point to the
+repeated `inner` grammar. Shared suspensions are checked once per ancestor scope
+path, with issues at the first graph path visited in that scope.
 
 An omitted `gen` step must be structurally syntax-only:
 
 - `literal` and `skip` can be omitted.
-- Labels and wrappers preserve this property when their children have it.
+- Labels preserve this property. `between`, `prefix`, and `suffix` use `gen`
+  sequences that explicitly supply `undefined` to their opening and closing
+  syntax. A wrapper is syntax-only when its inner grammar is syntax-only.
 - `optional`, `choice`, and `match` require every child or branch to have it.
-- A nested `gen` must return constant `undefined` and contain only syntax-only
-  steps. An empty object or tuple is a value, not an empty result.
+- A nested `gen` must contain only syntax-only steps and return constant
+  `undefined` or a whole ref to one of its steps. An empty object or tuple is a
+  value.
 - A suspension must resolve to syntax-only structure without a cycle.
 
 Return other outputs or discard them explicitly with `skip(printAs)`.

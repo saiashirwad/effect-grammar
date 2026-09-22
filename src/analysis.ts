@@ -1,6 +1,7 @@
 import { type AnyGrammar, type Expr, type Node, nodeOf, resolve, type ScopeId } from "./core.ts"
 import { exceptionMessage } from "./errors.ts"
 import { describe, describeStep } from "./internal/describe.ts"
+import { isSyntaxOnly } from "./internal/syntax.ts"
 
 export interface GrammarIssue {
   readonly _tag: "OutOfScopeRef" | "EmptyRepetition" | "OmittedValue" | "InvalidSuspend"
@@ -23,12 +24,6 @@ const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyAr
       return []
     case "Gen":
       return node.steps.map((grammar, index) => ({ path: ["steps", index], grammar }))
-    case "Wrap":
-      return [
-        { path: ["open"], grammar: node.open },
-        { path: ["inner"], grammar: node.inner },
-        { path: ["close"], grammar: node.close },
-      ]
     case "Choice":
       return node.options.map((grammar, index) => ({ path: ["options", index], grammar }))
     case "Dispatch":
@@ -68,45 +63,6 @@ const inspect = (node: Suspension, resolutions: Resolutions): Resolution => {
   return result
 }
 
-// Only prove syntax/discard output. A cycle or an opaque value producer needs an
-// explicit skip, even when its printer happens to accept undefined.
-const canOmit = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolutions): boolean => {
-  const node = nodeOf(grammar)
-  switch (node._tag) {
-    case "Literal":
-    case "Skip":
-      return true
-    case "Regex":
-    case "Take":
-    case "Transform":
-    case "Repeat":
-    case "Dispatch":
-      return false
-    case "Gen":
-      return (
-        node.result.tree._tag === "Const" &&
-        node.result.tree.value === undefined &&
-        node.steps.every((step) => canOmit(step, seen, resolutions))
-      )
-    case "Wrap":
-    case "Choice":
-    case "Match":
-      return children(node).every(({ grammar }) => canOmit(grammar, seen, resolutions))
-    case "Label":
-    case "Optional":
-      return canOmit(node.inner, seen, resolutions)
-    case "Suspend": {
-      if (seen.has(node)) return false
-      const target = inspect(node, resolutions)
-      if (target._tag === "Failed") return false
-      seen.add(node)
-      const omitted = canOmit(target.grammar, seen, resolutions)
-      seen.delete(node)
-      return omitted
-    }
-  }
-}
-
 type EmptyMatch = "yes" | "no" | "unknown"
 
 const allMatchEmpty = (grammars: Iterable<AnyGrammar>, seen: Set<Node>, resolutions: Resolutions): EmptyMatch => {
@@ -131,8 +87,6 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
       return node.count.value === 0 ? "yes" : "no"
     case "Gen":
       return allMatchEmpty(node.steps, seen, resolutions)
-    case "Wrap":
-      return allMatchEmpty([node.open, node.inner, node.close], seen, resolutions)
     case "Choice":
     case "Dispatch": {
       let result: EmptyMatch = "no"
@@ -236,7 +190,14 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
   switch (node._tag) {
     case "Gen":
       for (const [slot, step] of node.steps.entries()) {
-        if (!node.result.bindings.has(slot) && !canOmit(step, new Set(), state.resolutions)) {
+        const omitted = !node.result.bindings.has(slot)
+        if (
+          omitted &&
+          !isSyntaxOnly(step, (suspension) => {
+            const target = inspect(suspension, state.resolutions)
+            return target._tag === "Resolved" ? target.grammar : undefined
+          })
+        ) {
           state.issues.push({
             _tag: "OmittedValue",
             path: [...path, "steps", slot],
@@ -267,8 +228,9 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
  * Inspect structural problems without running encode, decode, or predicate callbacks.
  * Suspensions resolve for graph inspection; thunk failures become InvalidSuspend issues.
  * Omitted gen steps must be provably syntax/discard-only. Optional, choice, and match
- * require syntax-only children, and a gen must return constant undefined with syntax-only
- * steps. Recursive or opaque outputs require a returned ref or explicit skip.
+ * require syntax-only children. A gen must have syntax-only steps and return constant
+ * undefined or a whole ref to one of its steps. Recursive or opaque outputs require
+ * a returned ref or explicit skip.
  * Empty-match checks leave dependent and opaque cases to runtime progress checks.
  * An empty issue list does not prove that parsing or printing succeeds for every value.
  */

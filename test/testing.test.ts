@@ -19,7 +19,7 @@ describe("assertPrintParse", () => {
 
   it.effect("throws when print produces text that reads back differently", () =>
     Effect.sync(() => {
-      assert.throws(() => assertPrintParse(G.choice(plain, hashed), wrong), /reads back as/)
+      assert.throws(() => assertPrintParse(G.choice([plain, hashed]), wrong), /reads back as/)
     }),
   )
 })

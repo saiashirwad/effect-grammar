@@ -6,8 +6,8 @@ import { Effect, Result } from "effect"
 import * as G from "../src/index.ts"
 import { assertRoundTrip, hashed, number, parseOk, plain, printOk, symbol, word, wrong } from "./helpers.ts"
 
-describe("positional choice picks the first branch whose printer accepts", () => {
-  const g = G.choice(plain, hashed)
+describe("first choice policy picks the first branch whose printer accepts", () => {
+  const g = G.choice([plain, hashed])
 
   it.effect("mis-prints a hashed value as plain", () =>
     Effect.sync(() => {
@@ -32,10 +32,23 @@ describe("positional choice picks the first branch whose printer accepts", () =>
       assert.equal(Result.getOrThrow(G.printUnchecked(g, wrong)), "x")
     }),
   )
+
+  it.effect("has the same default, empty-options, and explicit first policies", () =>
+    Effect.sync(() => {
+      for (const options of [undefined, {}, { print: "first" }] as const) {
+        const grammar = G.choice([plain, hashed], options)
+        assert.deepEqual(parseOk(grammar, "#x"), wrong)
+        assert.equal(Result.getOrThrow(G.printUnchecked(grammar, wrong)), "x")
+        const result = G.print(grammar, wrong)
+        assert.ok(Result.isFailure(result))
+        assert.equal(result.failure.issue._tag, "RoundTrip")
+      }
+    }),
+  )
 })
 
-describe("checkedChoice selects a branch that reads back", () => {
-  const g = G.checkedChoice(plain, hashed)
+describe("roundTrip choice policy selects a branch that reads back", () => {
+  const g = G.choice([plain, hashed], { print: "roundTrip" })
 
   it.effect("prints with the branch whose text round-trips", () =>
     Effect.sync(() => {
@@ -47,7 +60,7 @@ describe("checkedChoice selects a branch that reads back", () => {
 
   it.effect("explains a value no branch can print faithfully", () =>
     Effect.sync(() => {
-      const atom = G.checkedChoice(number, symbol)
+      const atom = G.choice([number, symbol], { print: "roundTrip" })
       const r = G.print(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
       assert.equal(
@@ -60,12 +73,40 @@ describe("checkedChoice selects a branch that reads back", () => {
       )
     }),
   )
+
+  it.effect("uses parent refs for local candidate checks inside wrappers", () =>
+    Effect.sync(() => {
+      const grammar = G.gen(function* () {
+        const size = yield* G.integer.pipe(G.suffix(":"))
+        const payload = G.take(size).pipe(G.filter((value: string) => /^[a-z]+$/.test(value), "word"))
+        const plain = payload.pipe(
+          G.transform({
+            decode: (value) => ({ kind: "plain" as const, value }),
+            encode: (value) => value.value,
+          }),
+        )
+        const hashed = payload.pipe(
+          G.prefix("#"),
+          G.transform({
+            decode: (value) => ({ kind: "hashed" as const, value }),
+            encode: (value) => value.value,
+          }),
+        )
+        const body = yield* G.choice([plain, hashed], { print: "roundTrip" }).pipe(G.between("[", "]"))
+        return { size, body }
+      })
+      const value = { size: 1, body: wrong }
+      assert.deepEqual(G.diagnose(grammar), [])
+      assert.equal(Result.getOrThrow(G.printUnchecked(grammar, value)), "1:[#x]")
+      assert.equal(printOk(grammar, value), "1:[#x]")
+    }),
+  )
 })
 
 describe("print is the whole-grammar round-trip guarantee", () => {
-  it.effect("rejects output that cannot parse even when a nested checkedChoice succeeds", () =>
+  it.effect("rejects output that cannot parse even when a nested roundTrip choice succeeds", () =>
     Effect.sync(() => {
-      const grammar = G.tuple(G.checkedChoice(G.integer), G.integer)
+      const grammar = G.tuple(G.choice([G.integer], { print: "roundTrip" }), G.integer)
       assert.equal(Result.getOrThrow(G.printUnchecked(grammar, [1, 2])), "12")
       const result = G.print(grammar, [1, 2])
       assert.ok(Result.isFailure(result))
@@ -76,7 +117,7 @@ describe("print is the whole-grammar round-trip guarantee", () => {
 
   it.effect("catches an ambiguous plain choice that no branch selection fixes", () =>
     Effect.sync(() => {
-      const atom = G.choice(number, symbol)
+      const atom = G.choice([number, symbol])
       const r = G.print(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
       assert.equal(
@@ -88,7 +129,7 @@ describe("print is the whole-grammar round-trip guarantee", () => {
 
   it.effect("succeeds when the round trip holds", () =>
     Effect.sync(() => {
-      const atom = G.choice(number, symbol)
+      const atom = G.choice([number, symbol])
       assert.equal(Result.getOrThrow(G.print(atom, { kind: "number", value: 42 })), "42")
     }),
   )
@@ -200,13 +241,14 @@ describe("taggedChoice dispatches on its tag", () => {
 
   it.effect("rejects duplicate keys, the reserved tag, and malformed print values", () =>
     Effect.sync(() => {
+      assert.throws(() => G.taggedChoice("_tag", []), /dispatch: at least one case is required/)
       assert.throws(
         () =>
           G.taggedChoice("_tag", [
             [1, G.integer],
             [1, word],
           ] as const),
-        /taggedChoice: duplicate key 1/,
+        /dispatch: duplicate key 1/,
       )
       // SAFETY: the reserved tag name is rejected at runtime before types matter.
       assert.throws(() => G.taggedChoice("value" as never, [["a", word]] as const), /reserved/)

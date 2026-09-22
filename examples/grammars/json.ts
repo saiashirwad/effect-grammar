@@ -12,10 +12,10 @@ export type JsonValue =
 
 const jsonNull = Grammar.symbol("null").pipe(Grammar.as(null))
 
-const jsonBool = Grammar.choice(
+const jsonBool = Grammar.choice([
   Grammar.symbol("true").pipe(Grammar.as(true)),
   Grammar.symbol("false").pipe(Grammar.as(false)),
-)
+])
 
 const jsonNumber = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number")).pipe(
   Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }),
@@ -39,7 +39,7 @@ export const jsonString = Grammar.lexeme(
 )
 
 export const jsonValue: Grammar.Grammar<JsonValue> = Grammar.suspend(
-  () => Grammar.choice(jsonNull, jsonBool, jsonNumber, jsonString, jsonArray, jsonObject),
+  () => Grammar.choice([jsonNull, jsonBool, jsonNumber, jsonString, jsonArray, jsonObject]),
   "value",
 )
 

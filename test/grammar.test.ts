@@ -299,7 +299,7 @@ describe("gen", () => {
 })
 
 describe("match", () => {
-  const kindOf = G.choice(G.literal("n:").pipe(G.as("num")), G.literal("w:").pipe(G.as("word")))
+  const kindOf = G.choice([G.literal("n:").pipe(G.as("num")), G.literal("w:").pipe(G.as("word"))])
   const tagged = G.gen(function* () {
     const kind = yield* kindOf
     const value = yield* G.match(kind, [
@@ -322,7 +322,7 @@ describe("match", () => {
   it.effect("branches on a property of a binding", () =>
     Effect.sync(() => {
       const header = G.gen(function* () {
-        const kind = yield* G.choice(G.literal("t").pipe(G.as("text")), G.literal("b").pipe(G.as("bin")))
+        const kind = yield* G.choice([G.literal("t").pipe(G.as("text")), G.literal("b").pipe(G.as("bin"))])
         const size = yield* G.integer
         return { kind, size }
       })
@@ -477,7 +477,7 @@ describe("seq", () => {
 })
 
 describe("choice", () => {
-  const g = G.choice(G.literal("ab").pipe(G.as<string>("ab")), G.literal("ac").pipe(G.as<string>("ac")))
+  const g = G.choice([G.literal("ab").pipe(G.as<string>("ab")), G.literal("ac").pipe(G.as<string>("ac"))])
 
   it.effect("backtracks: a later option can match after an earlier one consumed input", () =>
     Effect.sync(() => {
@@ -683,7 +683,7 @@ describe("transform / decodeTo", () => {
           encode: (w) => w.value,
         }),
       )
-      const g = G.choice(num, w)
+      const g = G.choice([num, w])
       assert.deepEqual(parseOk(g, "12"), { kind: "num", value: 12 })
       assert.equal(printOk(g, { kind: "word", value: "ab" }), "ab")
       assert.equal(printOk(g, { kind: "num", value: 3 }), "3")
@@ -731,7 +731,7 @@ describe("transform / decodeTo", () => {
 describe("as / flag / skip", () => {
   it.effect("as gives a silent grammar a constant, and prints only for that constant", () =>
     Effect.sync(() => {
-      const g = G.choice(G.literal("yes").pipe(G.as(true)), G.literal("no").pipe(G.as(false)))
+      const g = G.choice([G.literal("yes").pipe(G.as(true)), G.literal("no").pipe(G.as(false))])
       assert.equal(parseOk(g, "no"), false)
       assert.equal(printOk(g, true), "yes")
       assert.equal(printOk(g, false), "no")
@@ -832,7 +832,7 @@ describe("label", () => {
 
   it.effect("keeps sibling expectations recorded at the same position", () =>
     Effect.sync(() => {
-      const c = G.choice(G.literal("x"), g, G.regex(/\d/, "digit").pipe(G.label("num")))
+      const c = G.choice([G.literal("x"), g, G.regex(/\d/, "digit").pipe(G.label("num"))])
       assert.deepEqual(parseFail(c, "!").expected, ['"x"', "pair", "num"])
     }),
   )
@@ -856,7 +856,7 @@ describe("suspend", () => {
   type Nested = number | ReadonlyArray<Nested>
   const nested: Grammar.Grammar<Nested> = G.suspend(
     () =>
-      G.choice(
+      G.choice([
         G.integer,
         nested.pipe(
           G.sepBy(","),
@@ -871,7 +871,7 @@ describe("suspend", () => {
             },
           }),
         ),
-      ),
+      ]),
     "nested",
   )
 

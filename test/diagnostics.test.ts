@@ -137,7 +137,7 @@ describe("diagnose", () => {
         return { length, payload }
       })
 
-      const grammar = G.choice(owner, delayed!)
+      const grammar = G.choice([owner, delayed!])
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
       assert.deepEqual(issues[0]!.path, ["options", 1, "resolved", "steps", 0, "count"])
@@ -158,13 +158,13 @@ describe("diagnose", () => {
         return length
       })
 
-      assert.equal(G.diagnose(G.choice(delayed!, delayed!)).length, 1)
+      assert.equal(G.diagnose(G.choice([delayed!, delayed!])).length, 1)
     }),
   )
 
   it.effect("has nothing to report for duplicate match keys, which match rejects on construction", () =>
     Effect.sync(() => {
-      const selector = G.choice(G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2)))
+      const selector = G.choice([G.literal("a").pipe(G.as(1)), G.literal("b").pipe(G.as(2))])
       assert.throws(
         () =>
           G.gen(function* () {
@@ -254,16 +254,16 @@ describe("diagnose", () => {
     Effect.sync(() => {
       const syntax = G.seq(
         G.optional(G.literal("a")),
-        G.choice(G.literal("b"), word.pipe(G.skip("word"))),
-        G.checkedChoice(G.literal("c"), G.empty),
+        G.choice([G.literal("b"), word.pipe(G.skip("word"))]),
+        G.choice([G.literal("c"), G.empty], { print: "roundTrip" }),
         G.suspend(() => G.seq(G.literal("d"), G.trivia)).pipe(G.between("[", "]"), G.label("syntax")),
       )
       assert.deepEqual(G.diagnose(syntax), [])
 
       const values = G.gen(function* () {
         yield* G.optional(word)
-        yield* G.choice(G.empty, word)
-        yield* G.checkedChoice(G.empty, word)
+        yield* G.choice([G.empty, word])
+        yield* G.choice([G.empty, word], { print: "roundTrip" })
       })
       assert.deepEqual(
         G.diagnose(values).map(({ _tag, path }) => ({ _tag, path })),
@@ -318,6 +318,32 @@ describe("diagnose", () => {
     }),
   )
 
+  it.effect("accepts whole syntax refs and explicitly supplied wrapper delimiters", () =>
+    Effect.sync(() => {
+      let calls = 0
+      const delimiter = G.literal("!").pipe(
+        G.transform<void, void>({
+          decode: () => {
+            calls++
+          },
+          encode: () => {
+            calls++
+          },
+        }),
+      )
+      const syntax = G.gen(function* () {
+        return yield* G.literal("x")
+      }).pipe(G.between(delimiter, delimiter), G.prefix("["), G.suffix("]"))
+      const grammar = G.seq(syntax)
+      assert.deepEqual(G.diagnose(grammar), [])
+      assert.equal(calls, 0)
+      assert.equal(Result.getOrThrow(G.parse(grammar, "[!x!]")), undefined)
+      assert.equal(Result.getOrThrow(G.print(grammar, undefined)), "[!x!]")
+      // Wrapping an opaque output does not make that output safe to omit.
+      assert.equal(G.diagnose(G.seq(delimiter.pipe(G.between("[", "]"))))[0]!._tag, "OmittedValue")
+    }),
+  )
+
   it.effect("reports throwing suspensions under repetition and omitted steps without throwing", () =>
     Effect.sync(() => {
       let calls = 0
@@ -339,7 +365,7 @@ describe("diagnose", () => {
       )
       assert.equal(calls, 2)
       // Queries can short-circuit, but graph inspection must still visit every branch.
-      const issues = G.diagnose(G.choice(G.empty, broken).pipe(G.many()))
+      const issues = G.diagnose(G.choice([G.empty, broken]).pipe(G.many()))
       assert.deepEqual(
         issues.map(({ _tag, path }) => ({ _tag, path })),
         [
@@ -357,14 +383,14 @@ describe("diagnose", () => {
     Effect.sync(() => {
       type Tree = number | ReadonlyArray<Tree>
       const tree: G.Grammar<Tree> = G.suspend(
-        () => G.choice(G.integer, tree.pipe(G.sepBy(","), G.between("[", "]"))),
+        () => G.choice([G.integer, tree.pipe(G.sepBy(","), G.between("[", "]"))]),
         "tree",
       )
       assert.deepEqual(G.diagnose(tree), [])
       assert.deepEqual(G.diagnose(tree.pipe(G.many())), [])
 
       const recursiveSyntax: G.Grammar<void> = G.suspend(() =>
-        G.choice(G.literal("x"), recursiveSyntax.pipe(G.between("[", "]"))),
+        G.choice([G.literal("x"), recursiveSyntax.pipe(G.between("[", "]"))]),
       )
       assert.deepEqual(G.diagnose(recursiveSyntax), [])
       assert.deepEqual(
@@ -381,7 +407,7 @@ describe("diagnose", () => {
       const owner = G.gen(function* () {
         const size = yield* G.integer
         const payload = G.take(size)
-        const recursive: G.Grammar<string> = G.suspend(() => G.choice(payload, recursive.pipe(G.between("[", "]"))))
+        const recursive: G.Grammar<string> = G.suspend(() => G.choice([payload, recursive.pipe(G.between("[", "]"))]))
         shared = recursive
         const value = yield* recursive
         return { size, value }
@@ -391,7 +417,7 @@ describe("diagnose", () => {
         [owner, shared!],
         [shared!, owner],
       ] as const) {
-        const issues = G.diagnose(G.choice(...options))
+        const issues = G.diagnose(G.choice(options))
         assert.equal(issues.length, 1)
         assert.equal(issues[0]!._tag, "OutOfScopeRef")
         assert.deepEqual(issues[0]!.path, ["options", options[0] === owner ? 1 : 0, "resolved", "options", 0, "count"])
@@ -408,7 +434,7 @@ describe("diagnose", () => {
       })
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
-      assert.deepEqual(issues[0]!.path, ["steps", 1, "cases", 0, "grammar", "inner", "count"])
+      assert.deepEqual(issues[0]!.path, ["steps", 1, "cases", 0, "grammar", "steps", 1, "count"])
     }),
   )
 })
@@ -437,7 +463,7 @@ describe("direct operations", () => {
       })
       assert.equal(Result.isFailure(G.printUnchecked(omitted, undefined)), true)
 
-      const transform = G.choice(G.literal("x"), unrelated).pipe(
+      const transform = G.choice([G.literal("x"), unrelated]).pipe(
         G.transform<void, void>({
           decode: () => {
             throw new Error("decode failed")

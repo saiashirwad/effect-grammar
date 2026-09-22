@@ -2,8 +2,8 @@ export { diagnose, type GrammarIssue } from "./analysis.ts"
 export {
   as,
   between,
-  checkedChoice,
   choice,
+  type ChoiceOptions,
   dispatch,
   empty,
   filter,
@@ -27,7 +27,6 @@ export {
   suffix,
   suspend,
   take,
-  taggedChoice,
   transform,
   transformOrFail,
   type TransformOptions,
@@ -46,6 +45,7 @@ export {
   lexeme,
   literals,
   symbol,
+  taggedChoice,
 } from "./derived.ts"
 export { ParseError, PrintError, type PrintIssue } from "./errors.ts"
 export { describe } from "./internal/describe.ts"

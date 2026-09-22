@@ -12,7 +12,6 @@ import {
   type Ref,
   type ScopeId,
   type Type,
-  type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
 import { describeStep } from "./internal/describe.ts"
@@ -116,8 +115,14 @@ export const as =
 
 export const between =
   (open: Grammar<void> | string, close: Grammar<void> | string) =>
-  <A>(inner: Grammar<A>): Grammar<A> =>
-    make({ _tag: "Wrap", open: toGrammar(open), inner, close: toGrammar(close) })
+  <A>(inner: Grammar<A>): Grammar<A> => {
+    const scope: ScopeId = { _tag: "ScopeId" }
+    return makeGen(scope, [skip<void>(undefined)(toGrammar(open)), inner, skip<void>(undefined)(toGrammar(close))], {
+      _tag: "Ref",
+      scope,
+      slot: 1,
+    })
+  }
 
 export const prefix = (open: Grammar<void> | string) => between(open, empty)
 
@@ -133,11 +138,14 @@ const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void =>
 
 type Options = readonly [AnyGrammar, ...Array<AnyGrammar>]
 
-export const choice = <const Grammars extends Options>(...options: Grammars): Grammar<Type<Grammars[number]>> =>
-  make({ _tag: "Choice", options, checked: false })
+export interface ChoiceOptions {
+  readonly print?: "first" | "roundTrip"
+}
 
-export const checkedChoice = <const Grammars extends Options>(...options: Grammars): Grammar<Type<Grammars[number]>> =>
-  make({ _tag: "Choice", options, checked: true })
+export const choice = <const Grammars extends Options>(
+  options: Grammars,
+  policy?: ChoiceOptions,
+): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options, print: policy?.print ?? "first" })
 
 type Entries = ReadonlyArray<readonly [MatchKey, AnyGrammar]>
 
@@ -167,37 +175,6 @@ export const dispatch = <const Tag extends string, const E extends Entries>(
   tag: Tag,
   entries: E & TaggedEntries<Tag, E>,
 ): Grammar<EntryOutput<E>> => make({ _tag: "Dispatch", tag, cases: cases(entries, "dispatch") })
-
-type TaggedValue<Tag extends string, E extends Entries> = {
-  readonly [I in keyof E]: E[I] extends readonly [infer K extends MatchKey, infer G]
-    ? Readonly<Record<Tag, K>> & { readonly value: Type<G> }
-    : never
-}[number]
-
-export const taggedChoice = <const Tag extends string, const E extends Entries>(
-  tag: Tag extends "value" ? never : Tag,
-  entries: E,
-): Grammar<TaggedValue<Tag, E>> => {
-  if (tag === "value") throw new RangeError('taggedChoice: tag name "value" is reserved')
-  const branches = entries.map(([key, grammar]) => {
-    const branch = transformNode(
-      // SAFETY: entries pair keys with grammars; only the output type is erased.
-      grammar as Grammar<Value>,
-      {
-        decode: (value) => Result.succeed({ [tag]: key, value }),
-        encode: (value) => {
-          if (!Predicate.isObject(value) || !Object.hasOwn(value, tag) || value[tag] !== key) {
-            return Result.fail(`expected an object with ${tag} equal to ${preview(key)}`)
-          }
-          if (!Object.hasOwn(value, "value")) return Result.fail("expected an object with a value field")
-          return Result.succeed(value.value)
-        },
-      },
-    )
-    return [key, branch] as const
-  })
-  return make({ _tag: "Dispatch", tag, cases: cases(branches, "taggedChoice") })
-}
 
 type CompleteEntries<K extends MatchKey, E extends Entries> = Exclude<K, E[number][0]> extends never ? E : never
 

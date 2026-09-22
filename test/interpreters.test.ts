@@ -21,7 +21,7 @@ const row = <A>(spec: Row<A>): Row => spec as Row
 const word = G.regex(/[a-z]+/, "word")
 
 const matchGrammar = G.gen(function* () {
-  const kind = yield* G.choice(G.literal("n").pipe(G.as("n" as const)), G.literal("s").pipe(G.as("s" as const)))
+  const kind = yield* G.choice([G.literal("n").pipe(G.as("n" as const)), G.literal("s").pipe(G.as("s" as const))])
   const value = yield* G.match(kind, [
     ["n", G.integer],
     ["s", word],
@@ -51,14 +51,8 @@ const table = {
     value: { n: 5, w: "ab" },
     render: "n:<integer> w:<word>",
   }),
-  Wrap: row({
-    grammar: G.integer.pipe(G.between("(", ")")),
-    text: "(5)",
-    value: 5,
-    render: '"(" <integer> ")"',
-  }),
   Choice: row({
-    grammar: G.choice(G.literal("a").pipe(G.as<number>(1)), G.literal("b").pipe(G.as<number>(2))),
+    grammar: G.choice([G.literal("a").pipe(G.as<number>(1)), G.literal("b").pipe(G.as<number>(2))]),
     text: "a",
     value: 1,
     render: '("a" | "b")',

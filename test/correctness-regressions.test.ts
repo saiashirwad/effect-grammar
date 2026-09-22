@@ -19,10 +19,10 @@ describe("correctness regressions", () => {
   it.effect("a failing choice option does not leave the cursor moved", () =>
     Effect.sync(() => {
       const g = Grammar.gen(function* () {
-        const head = yield* Grammar.choice(
+        const head = yield* Grammar.choice([
           Grammar.literal("abc").pipe(Grammar.as(1)),
           Grammar.literal("ab").pipe(Grammar.as(2)),
-        )
+        ])
         yield* Grammar.literal("!")
         return { head }
       })
@@ -39,7 +39,7 @@ describe("correctness regressions", () => {
         }),
         Grammar.filter((u: number) => Number.isSafeInteger(u) && u < 10, "small"),
       )
-      const g = Grammar.choice(small, Grammar.regex(/\d+/, "digits"))
+      const g = Grammar.choice([small, Grammar.regex(/\d+/, "digits")])
       assert.equal(parseOk(g, "123"), "123")
       assert.equal(parseOk(g, "3"), 3)
     }),
@@ -74,7 +74,7 @@ describe("correctness regressions", () => {
         return { a, b }
       })
       const g = Grammar.gen(function* () {
-        const first = yield* Grammar.choice(pair, Grammar.integer)
+        const first = yield* Grammar.choice([pair, Grammar.integer])
         yield* Grammar.literal(";")
         const second = yield* pair
         return { first, second }

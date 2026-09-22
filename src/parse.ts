@@ -79,14 +79,6 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       const value = materialize(node.result.tree, local)
       return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
     }
-    case "Wrap": {
-      const open = parseGrammar(node.open, state, env)
-      if (Result.isFailure(open)) return open
-      const inner = parseGrammar(node.inner, state, env)
-      if (Result.isFailure(inner)) return inner
-      const close = parseGrammar(node.close, state, env)
-      return Result.isFailure(close) ? close : inner
-    }
     case "Choice":
     case "Dispatch": {
       const start = state.pos

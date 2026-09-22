@@ -29,10 +29,40 @@ describe("parser result regressions", () => {
 
   it.effect("whole-input checks retain farther diagnostics from a backtracked option", () =>
     Effect.sync(() => {
-      const grammar = G.choice(G.literal("abc"), G.literal("a"))
+      const grammar = G.choice([G.literal("abc"), G.literal("a")])
       const error = parseFail(grammar, "ab!")
       assert.equal(error.pos, 2)
       assert.deepEqual(error.expected, ['"abc"'])
+    }),
+  )
+
+  it.effect("stops wrapper syntax in opening, inner, closing order", () =>
+    Effect.sync(() => {
+      const calls: Array<string> = []
+      const character = (name: string, expected: string) =>
+        G.regex(/./).pipe(
+          G.transformOrFail({
+            decode: (value) => {
+              calls.push(name)
+              return value === expected ? Result.succeed(value) : Result.fail(name)
+            },
+            encode: (value: string) => Result.succeed(value),
+          }),
+        )
+      const grammar = character("inner", "x").pipe(
+        G.between(character("open", "(").pipe(G.skip("(")), character("close", ")").pipe(G.skip(")"))),
+      )
+      for (const [input, expectedCalls] of [
+        ["?x)", ["open"]],
+        ["(?)", ["open", "inner"]],
+        ["(x?", ["open", "inner", "close"]],
+      ] as const) {
+        calls.length = 0
+        const error = parseFail(grammar, input)
+        assert.deepEqual(calls, expectedCalls)
+        assert.deepEqual(error.expected, [expectedCalls.at(-1)])
+        assert.equal(error.pos, expectedCalls.length)
+      }
     }),
   )
 
@@ -43,7 +73,7 @@ describe("parser result regressions", () => {
         if (++attempts === 1) throw new Error("try again")
         return G.regex(/ok/, "ok")
       })
-      assert.equal(parseOk(G.choice(grammar, grammar), "ok"), "ok")
+      assert.equal(parseOk(G.choice([grammar, grammar]), "ok"), "ok")
       assert.equal(attempts, 2)
     }),
   )
@@ -54,7 +84,7 @@ describe("parser result regressions", () => {
       const grammar = G.suspend<string>(() => {
         throw new Error(`attempt ${++attempts}`)
       })
-      const error = parseFail(G.choice(grammar, grammar), "")
+      const error = parseFail(G.choice([grammar, grammar]), "")
       assert.equal(attempts, 2)
       assert.equal(error.pos, 0)
       assert.deepEqual(error.expected, ["attempt 1", "attempt 2"])

@@ -1,8 +1,9 @@
-import { Equal, Predicate, Schema } from "effect"
+import { Equal, Predicate, Result, Schema } from "effect"
 
 import {
   as,
   choice,
+  dispatch,
   empty,
   filter,
   gen,
@@ -12,21 +13,58 @@ import {
   suffix,
   take,
   transform,
+  transformOrFail,
   type TransformOptions,
   trivia,
 } from "./combinators.ts"
-import type { Grammar, Ref } from "./core.ts"
+import type { AnyGrammar, Grammar, MatchKey, Ref, Type, Value } from "./core.ts"
+import { preview } from "./errors.ts"
+
+type Entries = ReadonlyArray<readonly [MatchKey, AnyGrammar]>
+
+type TaggedValue<Tag extends string, E extends Entries> = {
+  readonly [I in keyof E]: E[I] extends readonly [infer K extends MatchKey, infer G]
+    ? Readonly<Record<Tag, K>> & { readonly value: Type<G> }
+    : never
+}[number]
+
+export function taggedChoice<const Tag extends string, const E extends Entries>(
+  tag: Tag extends "value" ? never : Tag,
+  entries: E,
+): Grammar<TaggedValue<Tag, E>>
+export function taggedChoice<Tag extends string>(tag: Tag, entries: Entries): AnyGrammar {
+  if (tag === "value") throw new RangeError('taggedChoice: tag name "value" is reserved')
+  type Branch = Readonly<Record<Tag, MatchKey>> & { readonly value: Value }
+  const branches = entries.map(([key, grammar]) => {
+    // SAFETY: entries pair keys with grammars; only the payload type is erased.
+    const branch = (grammar as Grammar<Value>).pipe(
+      transformOrFail<Value, Branch>({
+        // SAFETY: the computed field has exactly the supplied tag and key.
+        decode: (value) => Result.succeed({ [tag]: key, value } as Branch),
+        encode: (value) => {
+          if (!Predicate.isObject(value) || !Object.hasOwn(value, tag) || value[tag] !== key) {
+            return Result.fail(`expected an object with ${tag} equal to ${preview(key)}`)
+          }
+          if (!Object.hasOwn(value, "value")) return Result.fail("expected an object with a value field")
+          return Result.succeed(value.value)
+        },
+      }),
+    )
+    return [key, branch] as const
+  })
+  return dispatch(tag, branches)
+}
 
 export const literals = <const Values extends readonly [string, ...Array<string>]>(
   ...values: Values
 ): Grammar<Values[number]> => {
   const longestFirst = values.toSorted((left, right) => right.length - left.length)
   // SAFETY: `values` is non-empty, so the sorted branches are too.
-  return choice(...(longestFirst.map((value) => as(value)(literal(value))) as [Grammar<Values[number]>]))
+  return choice(longestFirst.map((value) => as(value)(literal(value))) as [Grammar<Values[number]>])
 }
 
 export const flag = (value: Grammar<void> | string): Grammar<boolean> =>
-  choice(as(true)(Predicate.isString(value) ? literal(value) : value), as(false)(empty))
+  choice([as(true)(Predicate.isString(value) ? literal(value) : value), as(false)(empty)])
 
 export const decodeTo =
   <T>(schema: Schema.Codec<T, unknown, unknown, unknown>, name = "a value matching the schema") =>

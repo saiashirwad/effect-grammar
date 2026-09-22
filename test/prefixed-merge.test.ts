@@ -90,7 +90,7 @@ describe("whole-ref composition", () => {
         point.pipe(G.label("point")),
         point.pipe(G.filter((p: G.Type<typeof point>) => p.x >= 0, "positive x")),
         point.pipe(G.transform({ decode: (p) => p, encode: (p) => p })),
-        G.choice(point, point),
+        G.choice([point, point]),
         G.suspend(() => point),
       ]
       for (const wrapped of wrappers) {

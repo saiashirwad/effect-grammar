@@ -76,8 +76,6 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
         }),
       )
     }
-    case "Wrap":
-      return sequence([notation(node.open, context), notation(node.inner, context), notation(node.close, context)])
     case "Choice":
       return {
         precedence: ChoicePrecedence,

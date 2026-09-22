@@ -115,7 +115,7 @@ const quotedValue = doubleQuoted.pipe(
   }),
 )
 
-const qualifierValue = Grammar.choice(quotedValue, compareValue, rangeValue, wordValue)
+const qualifierValue = Grammar.choice([quotedValue, compareValue, rangeValue, wordValue])
 
 const qualifier = Grammar.gen(function* () {
   const negate = yield* Grammar.flag("-")
@@ -155,11 +155,11 @@ const termQuoted = doubleQuoted.pipe(
   }),
 )
 
-const atom = Grammar.choice(qualifier, group, termQuoted, termWord)
+const atom = Grammar.choice([qualifier, group, termQuoted, termWord])
 
 const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
   () =>
-    Grammar.choice(notBranch, atom).pipe(
+    Grammar.choice([notBranch, atom]).pipe(
       Grammar.transform({
         decode: (value): Query => value,
         encode: (value) => {

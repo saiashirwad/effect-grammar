@@ -4,6 +4,7 @@ import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, typ
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
 import { describe, describeStep } from "./internal/describe.ts"
+import { isSyntaxOnly } from "./internal/syntax.ts"
 import { parseWithEnv } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 
@@ -83,7 +84,8 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
         const bound = local.values[slot]
         const result = printGrammar(step, bound === Unbound ? undefined : bound, local, state)
         if (Result.isFailure(result)) {
-          if (bound === Unbound) {
+          // Error classification must not resolve suspensions that execution never reached.
+          if (bound === Unbound && !isSyntaxOnly(step, (suspension) => suspension.resolved)) {
             return invalid(
               describeStep(step, slot),
               undefined,
@@ -97,15 +99,6 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
       }
       return Result.succeed(text)
     }
-    case "Wrap": {
-      const open = printGrammar(node.open, undefined, env, state)
-      if (Result.isFailure(open)) return open
-      const inner = printGrammar(node.inner, value, env, state)
-      if (Result.isFailure(inner)) return inner
-      const close = printGrammar(node.close, undefined, env, state)
-      if (Result.isFailure(close)) return close
-      return Result.succeed(open.success + inner.success + close.success)
-    }
     case "Choice": {
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
@@ -114,7 +107,7 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
           issues.push(result.failure)
           continue
         }
-        if (!node.checked) return result
+        if (node.print === "first") return result
         const issue = roundTripIssue(grammar, value, result.success, env)
         if (issue === undefined) return result
         issues.push({

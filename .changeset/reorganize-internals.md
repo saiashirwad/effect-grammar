@@ -13,7 +13,18 @@ Simplify the API around fewer concepts.
   `inner.pipe(transform(...))`. Data-first forms are removed.
 - `choiceOn`, `choiceOnEntries`, and `matchValue` are replaced by `dispatch` and
   `match`, which take `[key, grammar]` entries; `taggedChoice` takes entries
-  too. Integer-like keys are allowed.
+  too. Integer-like keys are allowed. `taggedChoice` is derived from `dispatch`
+  and `transformOrFail`, so empty or duplicate cases report `dispatch` errors.
+- `choice` takes a nonempty readonly tuple of branches and optional
+  `ChoiceOptions`: `choice([a, b], { print: "roundTrip" })`. The default
+  `"first"` policy accepts the first printable candidate. The `"roundTrip"`
+  policy replaces the separate checked-choice constructor and searches for a
+  candidate that parses back equally through the choice.
+- `between`, `prefix`, and `suffix` use `gen` sequences with a whole-ref result.
+  Their diagnostic paths now use `steps` instead of opening, inner, and closing
+  wrapper edges. Supplied syntax keeps its original print failure instead of an
+  omitted-value error. Syntax-only generators can return a whole syntax-step
+  ref.
 - Transforms no longer take `is` or `name`. Use `filter(predicate, name)` for
   guards and `label(name)` to name a grammar. `transformOrFail` fails with a
   string. `decodeTo(schema, name?)` applies the schema guard.
@@ -21,8 +32,8 @@ Simplify the API around fewer concepts.
   `Fidelity`, and `auditFidelity` are removed.
 - `print` now checks that its output parses back to an equal value. The previous
   unchecked printer is `printUnchecked`; `printChecked` is removed. This applies
-  to text and Binary. `checkedChoice` still searches for a branch that
-  round-trips.
+  to text and Binary. The `"roundTrip"` choice policy searches for a branch that
+  round-trips even under `printUnchecked`.
 - `regex(re, name)` is `regex(re).pipe(label(name))`; `take` has no byte unit.
   `Binary.takeBytes` replaces `takeBytes`.
 - One `ParseError`: `Binary.parse` returns it with `line` and `column` undefined

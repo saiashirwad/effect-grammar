@@ -7,7 +7,7 @@ import * as G from "../src/index.ts"
 import { printFail, printOk } from "./helpers.ts"
 
 describe("printer sequencing and exception boundaries", () => {
-  it.effect("stops wraps and generators at the first failure", () =>
+  it.effect("stops wrappers and generators at the first failure and retains the failing value", () =>
     Effect.sync(() => {
       const calls: Array<string> = []
       const tracked = (name: string) =>
@@ -22,12 +22,20 @@ describe("printer sequencing and exception boundaries", () => {
         )
       const open = tracked("open").pipe(G.skip("bad"))
       const close = tracked("close").pipe(G.skip("ok"))
-      printFail(tracked("inner").pipe(G.between(open, close)), "ok")
+      const openFailure = printFail(tracked("inner").pipe(G.between(open, close)), "ok")
+      assert.match(openFailure.message, /expected \/ok\/, got "bad"/)
+      assert.doesNotMatch(openFailure.message, /not returned/)
       assert.deepEqual(calls, ["open"])
 
       calls.length = 0
       printFail(tracked("inner").pipe(G.between("(", close)), "bad")
       assert.deepEqual(calls, ["inner"])
+
+      calls.length = 0
+      const closeFailure = printFail(tracked("inner").pipe(G.between("(", tracked("close").pipe(G.skip("bad")))), "ok")
+      assert.deepEqual(calls, ["inner", "close"])
+      assert.match(closeFailure.message, /expected \/ok\/, got "bad"/)
+      assert.doesNotMatch(closeFailure.message, /not returned/)
 
       calls.length = 0
       const grammar = G.gen(function* () {
@@ -39,6 +47,22 @@ describe("printer sequencing and exception boundaries", () => {
       assert.deepEqual(calls, ["first"])
       assert.equal(error.issue._tag, "AtPath")
       assert.match(error.message, /nested.*first/)
+    }),
+  )
+
+  it.effect("keeps syntax failures through omitted generators without resolving later suspensions", () =>
+    Effect.sync(() => {
+      const bad = G.regex(/ok/).pipe(G.skip("bad"))
+      const syntax = G.seq(bad).pipe(G.between("[", "]"))
+      assert.match(printFail(G.seq(syntax), undefined).message, /expected \/ok\/, got "bad"/)
+      let calls = 0
+      const later = G.suspend(() => {
+        calls++
+        return G.empty
+      })
+      const unresolved = G.empty.pipe(G.between(bad, later))
+      assert.match(printFail(G.seq(unresolved), undefined).message, /expected \/ok\/, got "bad"/)
+      assert.equal(calls, 0)
     }),
   )
 
@@ -269,7 +293,7 @@ describe("printer sequencing and exception boundaries", () => {
           },
         }),
       )
-      assert.equal(printOk(G.choice(G.regex(/ok/, "ok"), later), "ok"), "ok")
+      assert.equal(printOk(G.choice([G.regex(/ok/, "ok"), later]), "ok"), "ok")
       assert.equal(calls, 0)
       G.print(later, "bad")
       assert.equal(calls, 1)

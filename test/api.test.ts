@@ -22,7 +22,7 @@ describe("product and conditional APIs", () => {
 
   it.effect("does not replace an explicitly parsed null with the default", () =>
     Effect.sync(() => {
-      const nullable = Grammar.choice(Grammar.literal("null").pipe(Grammar.as(null)), Grammar.integer)
+      const nullable = Grammar.choice([Grammar.literal("null").pipe(Grammar.as(null)), Grammar.integer])
       const grammar = Grammar.optional(nullable).pipe(Grammar.defaulted<number | null>(0))
 
       assert.equal(parseOk(grammar, "null"), null)

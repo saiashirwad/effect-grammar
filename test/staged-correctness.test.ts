@@ -133,10 +133,10 @@ describe("staged correctness", () => {
 
   it.effect("keeps mixed match keys distinct", () =>
     Effect.sync(() => {
-      const selector = Grammar.choice(
+      const selector = Grammar.choice([
         Grammar.literal("n:").pipe(Grammar.as(1)),
         Grammar.literal("s:").pipe(Grammar.as("1")),
-      )
+      ])
       const grammar = Grammar.gen(function* () {
         const kind = yield* selector
         const value = yield* Grammar.match(kind, [

@@ -123,7 +123,25 @@ G.integer.pipe(G.as(1))
 
 const s2: G.Grammar<void> = G.seq(G.literal("a"), G.optional(G.symbol("b").pipe(G.between("<", ">"))))
 
-const voidChoice: G.Grammar<void> = G.choice(G.literal("a"), G.literal("b"))
+const voidChoice: G.Grammar<void> = G.choice([G.literal("a"), G.literal("b")])
+
+// @ts-expect-error a choice needs at least one branch
+G.choice([])
+// @ts-expect-error unknown printing policy
+G.choice([G.integer], { print: "checked" })
+const choiceBranches = [G.integer, G.literal("x").pipe(G.as("x"))] as const
+const choicePolicy: G.ChoiceOptions = { print: "roundTrip" }
+const policyChoice: G.Grammar<number | "x"> = G.choice(choiceBranches, choicePolicy)
+void policyChoice
+
+const tagged = G.taggedChoice("kind", [
+  ["number", G.integer],
+  [true, G.literal("x").pipe(G.as("x"))],
+] as const)
+const taggedValue: G.Type<typeof tagged> = { kind: true, value: "x" }
+// @ts-expect-error the payload must match the selected tag
+const wrongPayload: G.Type<typeof tagged> = { kind: "number", value: "x" }
+void [taggedValue, wrongPayload]
 
 const wordGrammar = G.regex(/[a-z]+/, "word")
 // @ts-expect-error Grammar is invariant because printing consumes its value
@@ -139,7 +157,7 @@ G.gen(function* () {
   return { value, body }
 })
 
-const mixedKind = G.choice(G.literal("n").pipe(G.as(1)), G.literal("s").pipe(G.as("1")))
+const mixedKind = G.choice([G.literal("n").pipe(G.as(1)), G.literal("s").pipe(G.as("1"))])
 G.gen(function* () {
   const kind = yield* mixedKind
   // @ts-expect-error match must cover every selector literal
@@ -194,7 +212,7 @@ void onValue
 
 type Variant = { readonly kind: "a"; readonly n: 0 } | { readonly kind: "b"; readonly n: number }
 const variant = G.struct({
-  kind: G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b"))),
+  kind: G.choice([G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b"))]),
   n: G.integer,
 }).pipe(
   G.filter(

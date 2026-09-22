@@ -8,7 +8,7 @@ import { assertRoundTrip } from "./helpers.ts"
 type Nested = number | ReadonlyArray<Nested>
 
 const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
-  Grammar.choice(
+  Grammar.choice([
     Grammar.integer,
     nested.pipe(
       Grammar.sepBy(Grammar.symbol(",")),
@@ -20,7 +20,7 @@ const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
       }),
       Grammar.filter((a: Nested): boolean => Array.isArray(a), "array"),
     ),
-  ),
+  ]),
 )
 
 const nestedArb: FastCheck.Arbitrary<Nested> = FastCheck.letrec<{ nested: Nested }>((tie) => ({

@@ -205,7 +205,7 @@ describe("bytes / lengthPrefixed / literal", () => {
 
   it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
-      const either = G.choice(Binary.bytes(1), G.struct({ body: Binary.bytes(1) }))
+      const either = G.choice([Binary.bytes(1), G.struct({ body: Binary.bytes(1) })])
       assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, 'expected 1 character, got "\\u0007«"')
       assert.equal(
         printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
@@ -223,7 +223,7 @@ describe("bytes / lengthPrefixed / literal", () => {
 
   it.effect("shows a bigint inside a value in print errors", () =>
     Effect.sync(() => {
-      const either = G.choice(Binary.uint8, G.struct({ id: Binary.uint64, tags: Binary.int64.pipe(G.repeat(1)) }))
+      const either = G.choice([Binary.uint8, G.struct({ id: Binary.uint64, tags: Binary.int64.pipe(G.repeat(1)) })])
       assert.match(
         printFail(either, { id: -1n, tags: [5n] }).message,
         /no choice branch accepts \{"id":-1n,"tags":\[5n\]\}:/,
@@ -233,7 +233,7 @@ describe("bytes / lengthPrefixed / literal", () => {
 
   it.effect("does not let ascii claim a number in a choice", () =>
     Effect.sync(() => {
-      const either = G.choice(Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii), Binary.uint8)
+      const either = G.choice([Binary.lengthPrefixed(Binary.uint8).pipe(Binary.ascii), Binary.uint8])
       assert.deepEqual(printOk(either, 65), [65])
     }),
   )

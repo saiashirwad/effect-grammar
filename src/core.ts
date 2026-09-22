@@ -95,8 +95,7 @@ export type Node =
       readonly steps: ReadonlyArray<AnyGrammar>
       readonly result: ReturnPattern
     }
-  | { readonly _tag: "Wrap"; readonly open: Grammar<void>; readonly inner: AnyGrammar; readonly close: Grammar<void> }
-  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly checked: boolean }
+  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly print: "first" | "roundTrip" }
   | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
