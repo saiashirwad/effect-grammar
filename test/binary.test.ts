@@ -174,7 +174,7 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.deepEqual(parseOk(frame, 0x89, 0x50, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
       assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
       assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")
-      assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /\.body: expected 3 characters/)
+      assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /\.body: expected 3 bytes/)
     }),
   )
 
@@ -202,13 +202,13 @@ describe("bytes / lengthPrefixed / literal", () => {
   it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
       const either = G.choice([Binary.bytes(1), G.struct({ body: Binary.bytes(1) })])
-      assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, 'expected 1 character, got "\\u0007«"')
+      assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, "expected 1 byte, got <07 ab>")
       assert.equal(
         printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
         [
           'no choice branch accepts {"body":<07 ab>}:',
           '  expected bytes, got {"body":<07 ab>}',
-          '  .body: expected 1 character, got "\\u0007«"',
+          "  .body: expected 1 byte, got <07 ab>",
         ].join("\n"),
       )
       assert.match(printFail(either, Buffer.from([7, 0xab])).message, /accepts <07 ab>:/)
@@ -243,7 +243,7 @@ describe("printing policy", () => {
       assert.equal(printFail(rounded, 1.5).issue._tag, "RoundTrip")
       assert.deepEqual(printOk(rounded, 1), [1])
       const error = yield* Effect.flip(Schema.encodeEffect(Binary.codec(rounded, Schema.Finite))(1.5))
-      assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /reads back as 1/)
+      assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /1\.5 prints as <01>, which reads back as 1/)
     }),
   )
 })
@@ -279,10 +279,7 @@ describe("codec", () => {
   it.effect("reports decode failures by byte offset", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(Schema.decodeEffect(FrameFromBytes)(wire.slice(0, 6)))
-      assert.match(
-        SchemaIssue.makeFormatterDefault()(error.issue),
-        /byte 6: expected 2 more characters, found end of input/,
-      )
+      assert.match(SchemaIssue.makeFormatterDefault()(error.issue), /byte 6: expected 2 more bytes, found end of input/)
     }),
   )
 })

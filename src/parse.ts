@@ -4,9 +4,11 @@ import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf,
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./internal/describe.ts"
+import { catchResult } from "./internal/runtime.ts"
 import { materialize } from "./pattern.ts"
 
 interface State {
+  readonly domain: Domain
   readonly input: string
   pos: number
   furthest: number
@@ -33,7 +35,12 @@ const parseCount = (state: State, count: Value, what: string): Result.Result<num
 
 const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined): Result.Result<Value, void> => {
   const start = state.pos
-  const result = parseNode(nodeOf(grammar), state, env)
+  const result = catchResult(
+    () => parseNode(nodeOf(grammar), state, env),
+    (error) => {
+      failAt(state, `${describe(grammar)}: ${exceptionMessage(error)}`)
+    },
+  )
   if (Result.isSuccess(result) && state.pos > start) state.progress++
   return result
 }
@@ -64,7 +71,11 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       if (count === Unbound) return failAt(state, "a bound take count")
       if (!isCount(count)) return failAt(state, `take{${preview(count)}}`)
       if (state.input.length - state.pos < count)
-        return failAt(state, `${count} more character${count === 1 ? "" : "s"}`, state.input.length)
+        return failAt(
+          state,
+          `${count} more ${state.domain === "bytes" ? "byte" : "character"}${count === 1 ? "" : "s"}`,
+          state.input.length,
+        )
       const value = state.input.slice(state.pos, state.pos + count)
       state.pos += count
       return Result.succeed(value)
@@ -181,8 +192,17 @@ export const parseWithEnv = (
   grammar: AnyGrammar,
   text: string,
   env: Frame | undefined,
+  domain: Domain = "text",
 ): Result.Result<Value, ParseError> => {
-  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set(), progress: 0, activeAt: new Map() }
+  const state: State = {
+    domain,
+    input: text,
+    pos: 0,
+    furthest: 0,
+    expected: new Set(),
+    progress: 0,
+    activeAt: new Map(),
+  }
   const result = parseGrammar(grammar, state, env)
   if (Result.isSuccess(result)) {
     if (state.pos === text.length) return Result.succeed(result.success)
@@ -193,16 +213,20 @@ export const parseWithEnv = (
   return Result.fail(
     new ParseError({
       pos: state.furthest,
-      line: before.split("\n").length,
-      column: before.length - before.lastIndexOf("\n"),
+      line: domain === "bytes" ? undefined : before.split("\n").length,
+      column: domain === "bytes" ? undefined : before.length - before.lastIndexOf("\n"),
       expected: [...state.expected],
       found: code === undefined ? undefined : String.fromCodePoint(code),
     }),
   )
 }
 
-export const parseDomain = <A, D extends Domain>(grammar: Grammar<A, D>, input: string): Result.Result<A, ParseError> =>
+export const parseDomain = <A, D extends Domain>(
+  grammar: Grammar<A, D>,
+  input: string,
+  domain: Domain = "text",
+): Result.Result<A, ParseError> =>
   // SAFETY: interpreting Grammar<A> preserves its output type across every node.
-  parseWithEnv(grammar, input, undefined) as Result.Result<A, ParseError>
+  parseWithEnv(grammar, input, undefined, domain) as Result.Result<A, ParseError>
 
 export const parse: <A>(grammar: Grammar<A, "text">, input: string) => Result.Result<A, ParseError> = parseDomain

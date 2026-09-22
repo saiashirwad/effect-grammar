@@ -39,7 +39,7 @@ export type PrintIssue =
   | {
       readonly _tag: "RoundTrip"
       readonly value: Value
-      readonly printed: string
+      readonly printed: string | Uint8Array
       readonly parsed?: Value
       readonly error?: string | undefined
     }
@@ -78,8 +78,8 @@ export const formatIssue = (issue: PrintIssue): string => formatAt(issue, [])
 
 export const describeRoundTrip = (issue: Extract<PrintIssue, { _tag: "RoundTrip" }>): string =>
   issue.error === undefined
-    ? `prints as ${JSON.stringify(issue.printed)}, which reads back as ${preview(issue.parsed)}`
-    : `prints as ${JSON.stringify(issue.printed)}, which does not parse back: ${issue.error}`
+    ? `prints as ${preview(issue.printed)}, which reads back as ${preview(issue.parsed)}`
+    : `prints as ${preview(issue.printed)}, which does not parse back: ${issue.error}`
 
 export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
   issue: Schema.Unknown,
@@ -124,4 +124,14 @@ export const preview = <T>(value: T): string => {
   }
 }
 
-export const exceptionMessage = (error: Value): string => (Predicate.isError(error) ? error.message : preview(error))
+export const exceptionMessage = (error: Value): string => {
+  try {
+    if (Predicate.isError(error)) {
+      const message = error.message
+      if (Predicate.isString(message)) return message
+    }
+    return preview(error)
+  } catch {
+    return preview(error)
+  }
+}

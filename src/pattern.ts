@@ -3,6 +3,7 @@ import { Equal, Predicate, Result } from "effect"
 import { isGrammar, type RefExpr, type ScopeId, type Value } from "./core.ts"
 import { evaluate, type Frame, Unbound } from "./env.ts"
 import { exceptionMessage, type PrintIssue } from "./errors.ts"
+import { atPath, catchResult, inspect } from "./internal/runtime.ts"
 import { entryOf, isRef } from "./ref.ts"
 
 export type Pattern =
@@ -145,20 +146,19 @@ const validateOwnKeys = (
   value: Readonly<Record<string, Value>>,
   fields: ReadonlyArray<string>,
 ): Result.Result<Array<string | symbol>, PrintIssue> => {
-  let keys: Array<string | symbol>
-  try {
-    keys = Reflect.ownKeys(value)
-    for (const key of keys) Object.getOwnPropertyDescriptor(value, key)
-  } catch (error) {
-    return Result.fail({
-      _tag: "InvalidValue",
-      expected: `an inspectable object with exactly the fields ${fields.join(", ")}`,
-      actual: value,
-      detail: `could not inspect own fields: ${exceptionMessage(error)}`,
-    })
-  }
-  return keys.every((key) => Predicate.isString(key) && fields.includes(key))
-    ? Result.succeed(keys)
+  const keys = inspect(
+    value,
+    `an inspectable object with exactly the fields ${fields.join(", ")}`,
+    () => {
+      const keys = Reflect.ownKeys(value)
+      for (const key of keys) Object.getOwnPropertyDescriptor(value, key)
+      return keys
+    },
+    (message) => `could not inspect own fields: ${message}`,
+  )
+  if (Result.isFailure(keys)) return keys
+  return keys.success.every((key) => Predicate.isString(key) && fields.includes(key))
+    ? keys
     : Result.fail({
         _tag: "InvalidValue",
         expected: `exactly the fields ${fields.join(", ")}`,
@@ -168,6 +168,18 @@ const validateOwnKeys = (
 }
 
 export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result.Result<void, PrintIssue> => {
+  return catchResult(
+    () => unifyNode(pattern, value, env),
+    (error): PrintIssue => ({
+      _tag: "InvalidValue",
+      expected: `an inspectable ${pattern._tag.toLowerCase()} pattern value`,
+      actual: value,
+      detail: exceptionMessage(error),
+    }),
+  )
+}
+
+const unifyNode = (pattern: Pattern, value: Value, env: Frame): Result.Result<void, PrintIssue> => {
   switch (pattern._tag) {
     case "Ref":
       env.values[pattern.slot] = value
@@ -189,23 +201,14 @@ export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result
         if (!keys.success.includes(key)) {
           return Result.fail({ _tag: "AtPath", path: key, issue: { _tag: "MissingField", field: key } })
         }
-        let fieldValue: Value
-        try {
-          fieldValue = value[key]
-        } catch (error) {
-          return Result.fail({
-            _tag: "AtPath",
-            path: key,
-            issue: {
-              _tag: "InvalidValue",
-              expected: "a readable field",
-              actual: value,
-              detail: exceptionMessage(error),
-            },
-          })
-        }
-        const result = unifyPattern(field, fieldValue, env)
-        if (Result.isFailure(result)) return Result.fail({ _tag: "AtPath", path: key, issue: result.failure })
+        const result = atPath(
+          key,
+          Result.flatMap(
+            inspect(value, "a readable field", () => value[key]),
+            (fieldValue) => unifyPattern(field, fieldValue, env),
+          ),
+        )
+        if (Result.isFailure(result)) return result
       }
       return Result.void
     }
@@ -220,8 +223,14 @@ export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result
         })
       }
       for (const [index, item] of pattern.items.entries()) {
-        const result = unifyPattern(item, value[index], env)
-        if (Result.isFailure(result)) return Result.fail({ _tag: "AtPath", path: index, issue: result.failure })
+        const result = atPath(
+          index,
+          Result.flatMap(
+            inspect(value, "a readable array element", () => value[index]),
+            (itemValue) => unifyPattern(item, itemValue, env),
+          ),
+        )
+        if (Result.isFailure(result)) return result
       }
       return Result.void
     }

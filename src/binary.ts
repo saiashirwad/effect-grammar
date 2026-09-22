@@ -2,9 +2,10 @@ import { Predicate, Result, Schema } from "effect"
 
 import { filter, label, countExpr, transform, transformNode, transformOrFail } from "./combinators.ts"
 import { type Grammar as CoreGrammar, isCount, make, type Ref, type Value } from "./core.ts"
-import { ParseError, PrintError } from "./errors.ts"
+import { exceptionMessage, ParseError, PrintError } from "./errors.ts"
 import { hex, nonByte, toBytes, toText } from "./internal/bytes.ts"
 import { prefixedBy } from "./internal/prefixed.ts"
+import { catchResult } from "./internal/runtime.ts"
 import { codecWith } from "./internal/schema.ts"
 import { parseDomain } from "./parse.ts"
 import { printDomain, printUncheckedDomain } from "./print.ts"
@@ -256,9 +257,19 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
-  Result.mapError(
-    parseDomain(grammar, toText(input)),
-    ({ pos, expected, found }) => new ParseError({ pos, line: undefined, column: undefined, expected, found }),
+  Result.flatMap(
+    catchResult(
+      () => Result.succeed(toText(input)),
+      (error) =>
+        new ParseError({
+          pos: 0,
+          line: undefined,
+          column: undefined,
+          expected: [`readable bytes: ${exceptionMessage(error)}`],
+          found: undefined,
+        }),
+    ),
+    (binary) => parseDomain(grammar, binary, "bytes"),
   )
 
 const toByteResult = (
@@ -274,9 +285,9 @@ const toByteResult = (
   )
 
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
-  toByteResult(value, printDomain(grammar, value))
+  toByteResult(value, printDomain(grammar, value, "bytes"))
 
 export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
-  toByteResult(value, printUncheckedDomain(grammar, value))
+  toByteResult(value, printUncheckedDomain(grammar, value, "bytes"))
 
 export const codec = codecWith(Schema.Uint8Array, parse, print)

@@ -85,8 +85,20 @@ whole-output check. Both printers still enforce the grammar's local constraints.
 
 Use `transform` for value-returning decode/encode callbacks and
 `transformOrFail` for callbacks returning `Result` with a string error. Neither
-claims an inverse law; `print` checks the round trip for each value. Callback
-exceptions become parse or print failures with grammar context.
+claims an inverse law; `print` checks the round trip for each value.
+
+During parsing and printing, exceptions from callbacks, lazy thunks, property
+getters, proxy traps, and equality hooks become `ParseError` or `PrintError`
+failures. This policy also applies through transforms, labels, suspensions, and
+syntax wrappers. Print failures retain the field or index path where available.
+Sequences stop at the first failure. Parsing uses the normal backtracking rules
+for choices, optional values, and repetitions. Printing follows the selected
+choice policy. Error names are shallow and do not resolve unrelated lazy thunks.
+Grammar constructors can still throw for malformed definitions.
+
+Binary diagnostics use byte offsets and byte counts. A binary `RoundTrip` issue
+stores its `printed` output as a `Uint8Array` and formats it as hexadecimal
+bytes.
 
 To validate a transformed value with a Schema guard, use
 `inner.pipe(G.transform({ decode, encode }), G.filter(Schema.is(schema), name))`.

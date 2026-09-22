@@ -248,7 +248,7 @@ describe("printer sequencing and exception boundaries", () => {
     }),
   )
 
-  it.effect("keeps transform catches broad and suspend catches limited to resolution", () =>
+  it.effect("returns the same tag getter failure through transforms, suspensions, labels, and wrappers", () =>
     Effect.sync(() => {
       const thrown = new Error("tag getter failed")
       const value = {
@@ -257,20 +257,24 @@ describe("printer sequencing and exception boundaries", () => {
         },
       }
       const grammar = G.dispatch("kind", [["x", G.literal("x").pipe(G.as({ kind: "x" as const }))]] as const)
-      assert.throws(
-        () => G.print(grammar, value),
-        (error) => error === thrown,
-      )
-      assert.throws(
-        () =>
-          G.print(
-            G.suspend(() => grammar),
-            value,
-          ),
-        (error) => error === thrown,
-      )
       const transformed = grammar.pipe(G.transform({ decode: (value) => value, encode: (value) => value }))
-      assert.match(printFail(transformed, value).message, /tag getter failed/)
+      const issue: G.PrintIssue = {
+        _tag: "AtPath",
+        path: "kind",
+        issue: { _tag: "InvalidValue", expected: "a readable field", actual: value, detail: "tag getter failed" },
+      }
+      for (const wrapped of [
+        grammar,
+        transformed,
+        G.suspend(() => grammar),
+        grammar.pipe(G.label("tagged")),
+        grammar.pipe(G.between("[", "]")),
+      ]) {
+        assert.deepEqual(printFail(wrapped, value).issue, issue)
+        const unchecked = G.printUnchecked(wrapped, value)
+        assert.ok(Result.isFailure(unchecked))
+        assert.deepEqual(unchecked.failure.issue, issue)
+      }
       const unresolved = G.suspend<string>(() => {
         throw new Error("resolution failed")
       })

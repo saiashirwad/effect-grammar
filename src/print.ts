@@ -3,12 +3,15 @@ import { Equal, Predicate, Result } from "effect"
 import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
+import { nonByte, toBytes } from "./internal/bytes.ts"
 import { describe, describeStep } from "./internal/describe.ts"
+import { atPath, catchResult, inspect } from "./internal/runtime.ts"
 import { isSyntaxOnly } from "./internal/syntax.ts"
 import { parseWithEnv } from "./parse.ts"
 import { unifyPattern } from "./pattern.ts"
 
 interface State {
+  readonly domain: Domain
   readonly activeFor: Map<Node, Set<Value>>
 }
 
@@ -19,18 +22,22 @@ const fail = (issue: PrintIssue): Printed => Result.fail(issue)
 const invalid = (expected: string, actual: Value, detail?: string): Printed =>
   fail({ _tag: "InvalidValue", expected, actual, detail })
 
-const atPath = (path: string | number, result: Printed): Printed =>
-  Result.mapError(result, (issue) => ({ _tag: "AtPath", path, issue }))
-
 const roundTripIssue = (
   grammar: AnyGrammar,
   value: Value,
   printed: string,
   env: Frame | undefined,
-): Extract<PrintIssue, { _tag: "RoundTrip" }> | undefined => {
-  const back = parseWithEnv(grammar, printed, env)
-  if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed, error: back.failure.message }
-  return Equal.equals(back.success, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.success }
+  domain: Domain,
+): PrintIssue | undefined => {
+  if (domain === "bytes" && nonByte.test(printed)) {
+    return { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value }
+  }
+  const output = domain === "bytes" ? toBytes(printed) : printed
+  const back = parseWithEnv(grammar, printed, env, domain)
+  if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed: output, error: back.failure.message }
+  const equal = inspect(value, "round-trip equality", () => Equal.equals(back.success, value))
+  if (Result.isFailure(equal)) return equal.failure
+  return equal.success ? undefined : { _tag: "RoundTrip", value, printed: output, parsed: back.success }
 }
 
 const printCount = (count: Value, what: string): Result.Result<number, PrintIssue> => {
@@ -47,8 +54,11 @@ const printItems = (
   state: State,
 ): Printed => {
   let text = ""
-  for (const [index, item] of items.entries()) {
-    const result = printGrammar(inner, item, env, state)
+  for (let index = 0; index < items.length; index++) {
+    const result = Result.flatMap(
+      inspect(items, "a readable array element", () => items[index]),
+      (item) => printGrammar(inner, item, env, state),
+    )
     if (Result.isFailure(result)) return atPath(index, result)
     text += index === 0 ? result.success : separator + result.success
   }
@@ -56,6 +66,18 @@ const printItems = (
 }
 
 const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined, state: State): Printed => {
+  return catchResult(
+    () => printNode(grammar, value, env, state),
+    (error): PrintIssue => ({
+      _tag: "InvalidValue",
+      expected: describe(grammar),
+      actual: value,
+      detail: exceptionMessage(error),
+    }),
+  )
+}
+
+const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, state: State): Printed => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
@@ -72,7 +94,10 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
       if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
       return value.length === count.success
         ? Result.succeed(value)
-        : invalid(`${count.success} character${count.success === 1 ? "" : "s"}`, value)
+        : invalid(
+            `${count.success} ${state.domain === "bytes" ? "byte" : "character"}${count.success === 1 ? "" : "s"}`,
+            state.domain === "bytes" ? toBytes(value) : value,
+          )
     }
     case "Gen": {
       const local = frame(node.scope, node.steps.length, env)
@@ -108,22 +133,34 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
           continue
         }
         if (node.print === "first") return result
-        const issue = roundTripIssue(grammar, value, result.success, env)
+        const issue = roundTripIssue(grammar, value, result.success, env, state.domain)
         if (issue === undefined) return result
-        issues.push({
-          _tag: "InvalidValue",
-          expected: describe(option),
-          actual: value,
-          detail: describeRoundTrip(issue),
-        })
+        issues.push(
+          issue._tag === "RoundTrip"
+            ? {
+                _tag: "InvalidValue",
+                expected: describe(option),
+                actual: value,
+                detail: describeRoundTrip(issue),
+              }
+            : issue,
+        )
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
     }
     case "Dispatch": {
-      if (!Predicate.isObject(value) || !Object.hasOwn(value, node.tag)) {
+      if (!Predicate.isObject(value)) {
         return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
       }
-      const key = value[node.tag]
+      const tag = atPath(
+        node.tag,
+        inspect(value, "a readable field", () => (Object.hasOwn(value, node.tag) ? value[node.tag] : Unbound)),
+      )
+      if (Result.isFailure(tag)) return fail(tag.failure)
+      if (tag.success === Unbound) {
+        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
+      }
+      const key = tag.success
       const matchCase = caseFor(node.cases, key)
       if (matchCase === undefined) {
         const keys = node.cases.map((candidate) => preview(candidate.key)).join(", ")
@@ -161,13 +198,10 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
       return printItems(node.inner, value, separator.success, env, state)
     }
     case "Transform": {
-      try {
-        const encoded = node.encode(value)
-        if (Result.isFailure(encoded)) return invalid(encoded.failure, value)
-        return printGrammar(node.inner, encoded.success, env, state)
-      } catch (error) {
-        return invalid(describe(node.inner), value, exceptionMessage(error))
-      }
+      const encoded = inspect(value, describe(node.inner), () => node.encode(value))
+      if (Result.isFailure(encoded)) return fail(encoded.failure)
+      if (Result.isFailure(encoded.success)) return invalid(encoded.success.failure, value)
+      return printGrammar(node.inner, encoded.success.success, env, state)
     }
     case "Skip":
       return printGrammar(node.inner, node.printAs, env, state)
@@ -200,15 +234,20 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
 export const printUncheckedDomain = <A, D extends Domain>(
   grammar: Grammar<A, D>,
   value: A,
+  domain: Domain = "text",
 ): Result.Result<string, PrintError> =>
   Result.mapError(
-    printGrammar(grammar, value, undefined, { activeFor: new Map() }),
+    printGrammar(grammar, value, undefined, { domain, activeFor: new Map() }),
     (issue) => new PrintError({ issue }),
   )
 
-export const printDomain = <A, D extends Domain>(grammar: Grammar<A, D>, value: A): Result.Result<string, PrintError> =>
-  Result.flatMap(printUncheckedDomain(grammar, value), (printed) => {
-    const issue = roundTripIssue(grammar, value, printed, undefined)
+export const printDomain = <A, D extends Domain>(
+  grammar: Grammar<A, D>,
+  value: A,
+  domain: Domain = "text",
+): Result.Result<string, PrintError> =>
+  Result.flatMap(printUncheckedDomain(grammar, value, domain), (printed) => {
+    const issue = roundTripIssue(grammar, value, printed, undefined, domain)
     return issue === undefined ? Result.succeed(printed) : Result.fail(new PrintError({ issue }))
   })
 
