@@ -9,7 +9,10 @@ const pair = Grammar.gen(function* () {
   return { key, value }
 })
 
-const queryParams = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"))).pipe(
+const queryParams = pair.pipe(
+  Grammar.sepBy("&"),
+  Grammar.prefix("?"),
+  Grammar.optional,
   Grammar.decodeTo(Schema.Record(Schema.String, Schema.String))({
     decode: (pairs) => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
     encode: (record) => {
@@ -22,10 +25,10 @@ const queryParams = Grammar.optional(Grammar.prefix("?", Grammar.sepBy(pair, "&"
 const dsn = Grammar.gen(function* () {
   yield* Grammar.literal("postgres://")
   const user = yield* Grammar.regex(/[^:@/?#]+/, "user")
-  const password = yield* Grammar.optional(Grammar.prefix(":", Grammar.regex(/[^@/?#]+/, "password")))
+  const password = yield* Grammar.regex(/[^@/?#]+/, "password").pipe(Grammar.prefix(":"), Grammar.optional)
   yield* Grammar.literal("@")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
+  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
   yield* Grammar.literal("/")
   const database = yield* Grammar.regex(/[^/?#]+/, "database")
   const params = yield* queryParams

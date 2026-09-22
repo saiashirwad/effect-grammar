@@ -1,7 +1,6 @@
 import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
-const SilentTypeId: unique symbol = Symbol("effect-grammar/Silent")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
 export const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
 
@@ -16,11 +15,6 @@ export interface AnyGrammar extends Pipeable.Pipeable {
 export interface Grammar<in out A> extends AnyGrammar {
   readonly [GrammarTypeId]: Types.Invariant<A>
   [Symbol.iterator](): Iterator<Grammar<A>, Yielded<A>, Yielded<A>>
-}
-
-// A grammar that binds nothing when yielded inside `gen`.
-export interface Silent extends Grammar<void> {
-  readonly [SilentTypeId]: true
 }
 
 export type Type<G> = G extends Grammar<infer A> ? A : never
@@ -52,13 +46,10 @@ export type Denote<T> =
 
 class GrammarImpl<A> implements Grammar<A> {
   declare readonly [GrammarTypeId]: Types.Invariant<A>
-  declare readonly [SilentTypeId]: true
   readonly [NodeTypeId]: Node
-  readonly silent: boolean
 
-  constructor(node: Node, silent: boolean) {
+  constructor(node: Node) {
     this[NodeTypeId] = node
-    this.silent = silent
   }
 
   pipe() {
@@ -72,17 +63,11 @@ class GrammarImpl<A> implements Grammar<A> {
 
 Object.defineProperty(GrammarImpl.prototype, GrammarTypeId, { value: GrammarTypeId })
 
-export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node, false)
-
-export const silent = (node: Node): Silent => new GrammarImpl<void>(node, true)
+export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
 
 export const nodeOf = (grammar: AnyGrammar): Node => grammar[NodeTypeId]
 
 export const isGrammar = <T>(value: T): value is T & AnyGrammar => Predicate.hasProperty(value, GrammarTypeId)
-
-export const isSilent = (grammar: AnyGrammar): grammar is Silent =>
-  // SAFETY: every grammar is a GrammarImpl; the interfaces only hide it.
-  (grammar as GrammarImpl<Value>).silent
 
 export interface ScopeId {
   readonly _tag: "ScopeId"
@@ -117,38 +102,30 @@ export interface Case {
   readonly grammar: AnyGrammar
 }
 
-export type Step =
-  | { readonly _tag: "Silent"; readonly grammar: Silent }
-  | { readonly _tag: "Bind"; readonly slot: number; readonly grammar: AnyGrammar }
-
 // Laws claimed by a transform.
 //
 // - `unchecked`: no law claimed (`transform`, `transformOrFail`).
 // - `partial`: both directions may fail, and agree where they succeed (`partialIso`).
-// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `as`).
+// - `claimed-iso`: the author claims the directions are inverse (`iso`, `decodeTo`, `filter`).
 export type Fidelity = "unchecked" | "partial" | "claimed-iso"
 
+// A finding from `validate`.
 export interface GrammarIssue {
   readonly message: string
 }
 
 export type Node =
-  | { readonly _tag: "Literal"; readonly value: string; readonly name?: string | undefined }
-  | { readonly _tag: "Regex"; readonly source: string; readonly flags: string; readonly name: string }
-  | {
-      readonly _tag: "Take"
-      readonly count: Expr
-      readonly unit: "char" | "byte"
-      readonly name?: string | undefined
-    }
+  | { readonly _tag: "Literal"; readonly value: string }
+  | { readonly _tag: "Regex"; readonly source: string; readonly flags: string }
+  | { readonly _tag: "Take"; readonly count: Expr }
+  // Each step binds the slot of its index. Steps the pattern does not mention print with `undefined`.
   | {
       readonly _tag: "Gen"
       readonly scope: ScopeId
-      readonly slotCount: number
-      readonly steps: ReadonlyArray<Step>
+      readonly steps: ReadonlyArray<AnyGrammar>
       readonly result: Pattern
     }
-  | { readonly _tag: "Wrap"; readonly open: Silent; readonly inner: AnyGrammar; readonly close: Silent }
+  | { readonly _tag: "Wrap"; readonly open: Grammar<void>; readonly inner: AnyGrammar; readonly close: Grammar<void> }
   | {
       readonly _tag: "Merge"
       readonly parts: ReadonlyArray<{ readonly grammar: AnyGrammar; readonly keys: ReadonlyArray<string> }>
@@ -164,26 +141,26 @@ export type Node =
   | {
       readonly _tag: "Repeat"
       readonly inner: AnyGrammar
-      readonly sep: Silent
+      readonly sep: Grammar<void>
       readonly min: Expr
       readonly max: Expr | undefined
     }
   | {
       readonly _tag: "Transform"
       readonly inner: AnyGrammar
-      readonly decode: (a: any) => Result.Result<Value, GrammarIssue>
-      readonly encode: (b: any) => Result.Result<Value, GrammarIssue>
-      readonly is?: ((value: any) => boolean) | undefined
-      readonly name?: string | undefined
+      readonly decode: (a: any) => Result.Result<Value, string>
+      readonly encode: (b: any) => Result.Result<Value, string>
       readonly fidelity: Fidelity
       // Fields known to be in the output, so `merge` can split a value between parts.
       readonly keys?: ReadonlyArray<string> | undefined
     }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
+  // Names the inner grammar in `render`, and in parse errors when no part of it consumed input.
   | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }
   | {
       readonly _tag: "Suspend"
       readonly thunk: () => AnyGrammar
+      // Shown by `render` where the grammar refers back to itself.
       readonly name?: string | undefined
       resolved?: AnyGrammar | undefined
       resolving?: true | undefined

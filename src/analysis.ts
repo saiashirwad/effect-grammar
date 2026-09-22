@@ -1,4 +1,4 @@
-import { Result, Schema } from "effect"
+import { Result } from "effect"
 
 import {
   type AnyGrammar,
@@ -8,13 +8,13 @@ import {
   type GrammarIssue,
   type Node,
   nodeOf,
+  type Pattern,
   resolve,
   type ScopeId,
 } from "./core.ts"
-import { exceptionMessage, type ParseError, type PrintError } from "./errors.ts"
-import { parse } from "./parse.ts"
-import { print, printChecked } from "./print.ts"
-import { describe, render } from "./render.ts"
+import { exceptionMessage } from "./errors.ts"
+import { print } from "./print.ts"
+import { describe, describeStep } from "./render.ts"
 
 // The grammars a node refers to directly. A `Suspend` yields its resolved target.
 const children = (node: Node): ReadonlyArray<AnyGrammar> => {
@@ -24,7 +24,7 @@ const children = (node: Node): ReadonlyArray<AnyGrammar> => {
     case "Take":
       return []
     case "Gen":
-      return node.steps.map((step) => step.grammar)
+      return node.steps
     case "Wrap":
       return [node.open, node.inner, node.close]
     case "Merge":
@@ -72,10 +72,7 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>): EmptyMatch => {
       if (node.count._tag !== "Const") return "unknown"
       return node.count.value === 0 ? "yes" : "no"
     case "Gen":
-      return allMatchEmpty(
-        node.steps.map((step) => step.grammar),
-        seen,
-      )
+      return allMatchEmpty(node.steps, seen)
     case "Wrap":
       return allMatchEmpty([node.open, node.inner, node.close], seen)
     case "Merge":
@@ -123,6 +120,22 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>): EmptyMatch => {
   }
 }
 
+const mentionedSlots = (pattern: Pattern, slots: Set<number> = new Set()): Set<number> => {
+  switch (pattern._tag) {
+    case "Ref":
+      slots.add(pattern.slot)
+      break
+    case "Const":
+      break
+    case "Object":
+      for (const [, field] of pattern.fields) mentionedSlots(field, slots)
+      break
+    case "Array":
+      for (const item of pattern.items) mentionedSlots(item, slots)
+  }
+  return slots
+}
+
 // ---------------------------------------------------------------------------
 // Static checks
 
@@ -162,8 +175,17 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
   }
 
   if (node._tag === "Gen") {
+    const returned = mentionedSlots(node.result)
+    for (const [slot, step] of node.steps.entries()) {
+      // SAFETY: the step is printed with no value, exactly as the printer would.
+      if (!returned.has(slot) && Result.isFailure(print(step as Grammar<undefined>, undefined))) {
+        state.issues.push({
+          message: `gen: ${describeStep(step, slot)} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
+        })
+      }
+    }
     const inner = [...active, node.scope]
-    for (const step of node.steps) walk(step.grammar, inner, state)
+    for (const step of node.steps) walk(step, inner, state)
     return
   }
 
@@ -203,7 +225,7 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
       checkRef(node.scrutinee, "match")
       break
     case "Take":
-      checkRef(node.count, node.unit === "char" ? "take" : "bytes")
+      checkRef(node.count, "take")
       break
   }
   for (const child of children(node)) walk(child, active, state)
@@ -236,43 +258,10 @@ export const auditFidelity = (grammar: AnyGrammar): ReadonlyArray<FidelityEntry>
       seen.add(node)
     }
     if (node._tag === "Transform" && node.fidelity !== "claimed-iso") {
-      entries.push({ name: node.name ?? describe(node.inner), fidelity: node.fidelity })
+      entries.push({ name: describe(node.inner), fidelity: node.fidelity })
     }
     for (const child of children(node)) visit(child)
   }
   visit(grammar)
   return entries
-}
-
-// ---------------------------------------------------------------------------
-// Validate once, then use the grammar
-
-export interface Prepared<A> {
-  readonly parse: (text: string) => Result.Result<A, ParseError>
-  readonly print: (value: A) => Result.Result<string, PrintError>
-  readonly printChecked: (value: A) => Result.Result<string, PrintError>
-  readonly render: string
-  readonly audit: ReadonlyArray<FidelityEntry>
-}
-
-export class GrammarValidationError extends Schema.TaggedError<GrammarValidationError>()("GrammarValidationError", {
-  issues: Schema.Array(Schema.Struct({ message: Schema.String })),
-}) {
-  override get message(): string {
-    return `prepare: the grammar has ${this.issues.length} issue${this.issues.length === 1 ? "" : "s"}:\n  ${this.issues
-      .map((issue) => issue.message)
-      .join("\n  ")}`
-  }
-}
-
-export const prepare = <A>(grammar: Grammar<A>): Result.Result<Prepared<A>, GrammarValidationError> => {
-  const issues = validate(grammar)
-  if (issues.length > 0) return Result.fail(new GrammarValidationError({ issues: [...issues] }))
-  return Result.succeed({
-    parse: (text: string) => parse(grammar, text),
-    print: (value: A) => print(grammar, value),
-    printChecked: (value: A) => printChecked(grammar, value),
-    render: render(grammar),
-    audit: auditFidelity(grammar),
-  })
 }

@@ -8,7 +8,6 @@ import {
   type Pattern,
   resolve,
   type ScopeId,
-  type Step,
   type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
@@ -86,19 +85,19 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
-      return atom(node.value === "" ? "" : (node.name ?? JSON.stringify(node.value)))
+      return atom(node.value === "" ? "" : JSON.stringify(node.value))
     case "Regex":
-      return atom(`<${node.name}>`)
+      return atom(`/${node.source}/`)
     case "Take":
-      return atom(node.name === undefined ? `<${node.unit}>{${showExpr(node.count, context)}}` : `<${node.name}>`)
+      return atom(`<take>{${showExpr(node.count, context)}}`)
     case "Gen": {
       let names = context.names.get(node.scope)
       if (names === undefined) context.names.set(node.scope, (names = new Map()))
       nameBindings(node.result, undefined, node.scope, names)
       return sequence(
-        node.steps.map((step) => {
-          const inner = notation(step.grammar, context)
-          const name = step._tag === "Bind" ? names.get(step.slot) : undefined
+        node.steps.map((step, slot) => {
+          const inner = notation(step, context)
+          const name = names.get(slot)
           return name === undefined ? inner : atom(`${name}:${parenthesize(inner, PostfixPrecedence)}`)
         }),
       )
@@ -138,8 +137,9 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
         : { precedence: SequencePrecedence, text: body }
     }
     case "Transform":
-    case "Label":
       return notation(node.inner, context)
+    case "Label":
+      return atom(`<${node.name}>`)
     case "Skip":
       return node.hidden ? atom("") : notation(node.inner, context)
     case "Suspend": {
@@ -161,7 +161,7 @@ export const render = (grammar: AnyGrammar): string =>
 
 export const describe = (grammar: AnyGrammar): string => {
   const node = nodeOf(grammar)
-  return node._tag === "Regex" || node._tag === "Label" ? node.name : render(grammar)
+  return node._tag === "Label" ? node.name : render(grammar)
 }
 
-export const describeStep = (step: Step, index: number): string => `step ${index + 1} (${describe(step.grammar)})`
+export const describeStep = (step: AnyGrammar, index: number): string => `step ${index + 1} (${describe(step)})`

@@ -91,7 +91,11 @@ const suffix = Grammar.gen(function* () {
 })
 
 export const ByteRangeCodec = Grammar.codec(
-  Grammar.prefix("bytes=", Grammar.sepBy(Grammar.choiceOn("kind", { closed, open, suffix }), ",", { min: 1 })),
+  Grammar.dispatch("kind", [
+    ["closed", closed],
+    ["open", open],
+    ["suffix", suffix],
+  ] as const).pipe(Grammar.sepBy(",", { min: 1 }), Grammar.prefix("bytes=")),
   ByteRanges,
   { identifier: "ByteRanges" },
 )

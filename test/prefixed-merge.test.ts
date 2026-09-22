@@ -13,28 +13,24 @@ describe("take with a constant count", () => {
     Effect.sync(() => {
       const code = G.take(3)
       assert.equal(parseOk(code, "abc"), "abc")
-      assert.deepEqual(parseFail(code, "ab").expected, ["3 chars"])
-      assert.match(printFail(code, "abcd").message, /3 UTF-16 code units/)
+      assert.deepEqual(parseFail(code, "ab").expected, ["3 more characters"])
+      assert.match(printFail(code, "abcd").message, /expected 3 characters/)
       assert.throws(() => G.take(1.5), RangeError)
-      assert.equal(G.validate(G.many(G.take(0))).length, 1)
+      assert.equal(G.validate(G.take(0).pipe(G.many())).length, 1)
     }),
   )
 })
 
 describe("filter", () => {
-  it.effect("rejects values in both directions, data-first and data-last", () =>
+  it.effect("rejects values in both directions", () =>
     Effect.sync(() => {
-      const small = G.integer.pipe(G.filter((n) => n <= 63, "small"))
+      const small = G.integer.pipe(G.filter((n: number) => n <= 63, "small"))
       assert.equal(parseOk(small, "42"), 42)
       assert.deepEqual(parseFail(small, "64").expected, ["small"])
       assert.match(printFail(small, 64).message, /expected small/)
-      assert.deepEqual(
-        parseFail(
-          G.filter(G.integer, (n) => n > 0, "positive"),
-          "0",
-        ).expected,
-        ["positive"],
-      )
+      assert.deepEqual(parseFail(G.integer.pipe(G.filter((n: number) => n > 0, "positive")), "0").expected, [
+        "positive",
+      ])
     }),
   )
 })
@@ -45,14 +41,14 @@ describe("lengthPrefixed / countPrefixed", () => {
       const netstring = G.lengthPrefixed(G.integer.pipe(G.suffix(":"))).pipe(G.suffix(","))
       assert.equal(parseOk(netstring, "5:hello,"), "hello")
       assert.equal(printOk(netstring, "hello world!"), "12:hello world!,")
-      assert.deepEqual(parseFail(netstring, "5:hi,").expected, ["5 chars"])
+      assert.deepEqual(parseFail(netstring, "5:hi,").expected, ["5 more characters"])
     }),
   )
 
-  it.effect("derives the count from the items when printing, data-first and data-last", () =>
+  it.effect("derives the count from the items when printing", () =>
     Effect.sync(() => {
       const item = word.pipe(G.suffix(";"))
-      const words = G.countPrefixed(item, G.integer.pipe(G.suffix(":")))
+      const words = item.pipe(G.countPrefixed(G.integer.pipe(G.suffix(":"))))
       assert.deepEqual(parseOk(words, "2:ab;cd;"), ["ab", "cd"])
       assert.equal(printOk(words, ["x", "y", "z"]), "3:x;y;z;")
       assert.deepEqual(parseFail(words, "3:ab;cd;").expected, ["word"])
@@ -67,7 +63,7 @@ describe("merge", () => {
   it.effect("flattens its parts, nests, and sees through filter", () =>
     Effect.sync(() => {
       const named = G.merge(
-        point.pipe(G.filter((value) => value.x >= 0, "a point right of the origin")),
+        point.pipe(G.filter((value: G.Type<typeof point>) => value.x >= 0, "a point right of the origin")),
         G.struct({ name: word.pipe(G.prefix(";")) }),
       )
       assert.deepEqual(parseOk(named, "1,2;p"), { x: 1, y: 2, name: "p" })

@@ -10,13 +10,15 @@ type Nested = number | ReadonlyArray<Nested>
 const nested: Grammar.Grammar<Nested> = Grammar.suspend(() =>
   Grammar.choice(
     Grammar.integer,
-    Grammar.between(Grammar.symbol("["), Grammar.sepBy(nested, Grammar.symbol(",")), Grammar.symbol("]")).pipe(
+    nested.pipe(
+      Grammar.sepBy(Grammar.symbol(",")),
+      Grammar.between(Grammar.symbol("["), Grammar.symbol("]")),
       Grammar.transform({
         decode: (a): Nested => a,
-        // SAFETY: `sepBy` yields an array and `encode` only runs on values that passed `is: Array.isArray`.
+        // SAFETY: `sepBy` yields an array and `encode` only runs on values that passed the `Array.isArray` filter.
         encode: (a) => a as ReadonlyArray<Nested>,
-        is: Array.isArray,
       }),
+      Grammar.filter((a: Nested): boolean => Array.isArray(a), "array"),
     ),
   ),
 )
@@ -32,8 +34,8 @@ const nestedArb: FastCheck.Arbitrary<Nested> = FastCheck.letrec<{ nested: Nested
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[a-z][a-z0-9.-]*/, "host")
-  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
-  const path = yield* Grammar.many(Grammar.prefix("/", Grammar.regex(/[a-z0-9]+/, "segment")))
+  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
+  const path = yield* Grammar.regex(/[a-z0-9]+/, "segment").pipe(Grammar.prefix("/"), Grammar.many())
   return { host, port, path }
 })
 

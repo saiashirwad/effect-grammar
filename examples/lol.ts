@@ -27,15 +27,18 @@ const header = G.gen(function* () {
 const frame = G.gen(function* () {
   const h = yield* header
   yield* G.literal("#")
-  const body = yield* G.match(h.kind, {
-    raw: G.take(h.size),
-    pair: G.gen(function* () {
-      const name = yield* G.regex(/[a-z]+/, "name")
-      yield* G.literal("=")
-      const value = yield* G.take(h.size)
-      return { name, value }
-    }),
-  })
+  const body = yield* G.match(h.kind, [
+    ["raw", G.take(h.size)],
+    [
+      "pair",
+      G.gen(function* () {
+        const name = yield* G.regex(/[a-z]+/, "name")
+        yield* G.literal("=")
+        const value = yield* G.take(h.size)
+        return { name, value }
+      }),
+    ],
+  ] as const)
   return { h, body }
 })
 

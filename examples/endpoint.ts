@@ -5,7 +5,7 @@ import * as Grammar from "../src/index.ts"
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
+  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
   return { host, port }
 })
 

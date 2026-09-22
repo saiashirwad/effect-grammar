@@ -24,7 +24,10 @@ const word = G.regex(/[a-z]+/, "word")
 
 const matchGrammar = G.gen(function* () {
   const kind = yield* G.choice(G.literal("n").pipe(G.as("n" as const)), G.literal("s").pipe(G.as("s" as const)))
-  const value = yield* G.match(kind, { n: G.integer, s: word })
+  const value = yield* G.match(kind, [
+    ["n", G.integer],
+    ["s", word],
+  ] as const)
   return { kind, value }
 })
 
@@ -47,7 +50,7 @@ const table = {
     render: "n:<integer>",
   }),
   Wrap: row({
-    grammar: G.between("(", G.integer, ")"),
+    grammar: G.integer.pipe(G.between("(", ")")),
     text: "(5)",
     value: 5,
     render: '"(" <integer> ")"',
@@ -59,16 +62,16 @@ const table = {
     render: '("a" | "b")',
   }),
   Dispatch: row({
-    grammar: G.choiceOn("kind", {
-      n: G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer }),
-      s: G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word }),
-    }),
+    grammar: G.dispatch("kind", [
+      ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
+      ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
+    ] as const),
     text: "sab",
     value: { kind: "s", value: "ab" },
     renderIncludes: "on(kind)",
   }),
   Repeat: row({
-    grammar: G.many(G.regex(/[a-z]/, "ch")),
+    grammar: G.regex(/[a-z]/, "ch").pipe(G.many()),
     text: "abc",
     value: ["a", "b", "c"],
     render: "(<ch>)*",
@@ -95,7 +98,7 @@ const table = {
     grammar: G.integer.pipe(G.label("num")),
     text: "5",
     value: 5,
-    render: "<integer>",
+    render: "<num>",
   }),
   Suspend: row({ grammar: recursive, text: "9", value: 9, render: "<integer>" }),
   Match: row({
@@ -108,7 +111,7 @@ const table = {
     grammar: takeGrammar,
     text: "2:ab",
     value: { length: 2, payload: "ab" },
-    renderIncludes: "<char>{",
+    renderIncludes: "<take>{",
   }),
   Merge: row({
     grammar: G.merge(G.struct({ n: G.integer }), G.struct({ w: word })),

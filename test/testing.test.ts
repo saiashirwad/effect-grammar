@@ -8,7 +8,7 @@ import * as G from "../src/index.ts"
 import { assertParsePrintCanonical, assertPrintParse, checkCanonicalization, checkPrintParse } from "../src/testing.ts"
 import { hashed, plain, wrong } from "./helpers.ts"
 
-const canonical = G.between(G.spaces, G.integer, G.spaces)
+const canonical = G.integer.pipe(G.between(G.spaces, G.spaces))
 
 describe("assertPrintParse", () => {
   it.effect("passes when the value round-trips", () =>

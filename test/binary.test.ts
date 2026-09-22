@@ -9,7 +9,7 @@ import * as G from "../src/index.ts"
 const parseOk = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): A =>
   Result.getOrThrow(Binary.parse(grammar, Uint8Array.from(input)))
 
-const parseFail = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): Binary.ParseError => {
+const parseFail = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): G.ParseError => {
   const result = Binary.parse(grammar, Uint8Array.from(input))
   if (Result.isSuccess(result)) assert.fail("expected parse failure")
   return result.failure
@@ -103,14 +103,14 @@ describe("varints", () => {
   )
 })
 
-describe("Uint", () => {
+describe("uintSchema", () => {
   it.effect("accepts exactly the values that fit and rejects widths a number cannot hold", () =>
     Effect.sync(() => {
-      assert.ok(Schema.is(Binary.Uint(1))(1))
-      assert.ok(!Schema.is(Binary.Uint(1))(2))
-      assert.ok(Schema.is(Binary.Uint(53))(Number.MAX_SAFE_INTEGER))
-      assert.ok(!Schema.is(Binary.Uint(53))(2 ** 53))
-      for (const size of [0, 1.5, 54]) assert.throws(() => Binary.Uint(size), /1 to 53 bits/)
+      assert.ok(Schema.is(Binary.uintSchema(1))(1))
+      assert.ok(!Schema.is(Binary.uintSchema(1))(2))
+      assert.ok(Schema.is(Binary.uintSchema(53))(Number.MAX_SAFE_INTEGER))
+      assert.ok(!Schema.is(Binary.uintSchema(53))(2 ** 53))
+      for (const size of [0, 1.5, 54]) assert.throws(() => Binary.uintSchema(size), /1 to 53 bits/)
     }),
   )
 })
@@ -134,8 +134,8 @@ describe("bits", () => {
       const byte = Binary.bits({ a: 8 })
       // SAFETY: deliberately adding a field to show the printer rejects it.
       const extra = { a: 1, extra: true } as G.Type<typeof byte>
-      assert.match(printFail(byte, extra).message, /unexpected field extra/)
-      assert.match(printFail(byte, { a: 256 }).message, /a must be an integer from 0 to 255/)
+      assert.match(printFail(byte, extra).message, /expected no field named extra/)
+      assert.match(printFail(byte, { a: 256 }).message, /expected an integer from 0 to 255 for a/)
     }),
   )
 
@@ -143,7 +143,7 @@ describe("bits", () => {
     Effect.sync(() => {
       assert.equal(
         parseFail(flags, 0x85).message,
-        "byte 1: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4: 2 bytes but only 1 remain, found end of input",
+        "byte 1: expected qr:1 opcode:4 aa:1 tc:1 rd:1 ra:1 z:3 rcode:4, found end of input",
       )
     }),
   )
@@ -166,11 +166,11 @@ describe("bytes / lengthPrefixed / literal", () => {
         const body = yield* Binary.bytes(size)
         return { size, body }
       })
-      assert.equal(G.render(frame), "0x89 0x50 size:<uint8> body:<byte>{size}")
+      assert.equal(G.render(frame), "<0x89 0x50> size:<uint8> body:<take>{size}")
       assert.deepEqual(parseOk(frame, 0x89, 0x50, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
       assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
       assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")
-      assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /3 bytes/)
+      assert.match(printFail(frame, { size: 3, body: Uint8Array.of(7, 8) }).message, /\.body: expected 3 characters/)
     }),
   )
 
@@ -185,7 +185,7 @@ describe("bytes / lengthPrefixed / literal", () => {
       assert.equal(parseOk(utf8, 3, 0xef, 0xbb, 0xbf), "\ufeff")
       assert.deepEqual(parseFail(utf8, 1, 0xff).expected, ["valid UTF-8"])
       assert.match(printFail(utf8, "\ud800").message, /lone surrogates/)
-      assert.deepEqual(G.auditFidelity(utf8), [{ name: "utf8", fidelity: "partial" }])
+      assert.deepEqual(G.auditFidelity(utf8), [{ name: "size:<uint8> body:<take>{size}", fidelity: "partial" }])
     }),
   )
 
@@ -194,7 +194,7 @@ describe("bytes / lengthPrefixed / literal", () => {
       const error = G.parse(Binary.uint16, "a\u0100")
       assert.ok(Result.isFailure(error))
       assert.deepEqual(error.failure.expected, ["a byte"])
-      assert.equal(error.failure.pos, 1)
+      assert.equal(error.failure.pos, 2)
       assert.match(printFail(G.regex(/./, "char"), "€").message, /only bytes to be printed/)
       assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
     }),
@@ -203,13 +203,13 @@ describe("bytes / lengthPrefixed / literal", () => {
   it.effect("shows bytes as hex in print errors, at any depth and for a Buffer", () =>
     Effect.sync(() => {
       const either = G.choice(Binary.bytes(1), G.struct({ body: Binary.bytes(1) }))
-      assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, "expected 1 bytes, got <07 ab>")
+      assert.equal(printFail(Binary.bytes(1), Uint8Array.of(7, 0xab)).message, 'expected 1 character, got "\\u0007«"')
       assert.equal(
         printFail(either, { body: Uint8Array.of(7, 0xab) }).message,
         [
           'no choice branch accepts {"body":<07 ab>}:',
           '  expected bytes, got {"body":<07 ab>}',
-          "  .body: expected 1 bytes, got <07 ab>",
+          '  .body: expected 1 character, got "\\u0007«"',
         ].join("\n"),
       )
       assert.match(printFail(either, Buffer.from([7, 0xab])).message, /accepts <07 ab>:/)
@@ -221,7 +221,7 @@ describe("bytes / lengthPrefixed / literal", () => {
 
   it.effect("shows a bigint inside a value in print errors", () =>
     Effect.sync(() => {
-      const either = G.choice(Binary.uint8, G.struct({ id: Binary.uint64, tags: G.repeat(Binary.int64, 1) }))
+      const either = G.choice(Binary.uint8, G.struct({ id: Binary.uint64, tags: Binary.int64.pipe(G.repeat(1)) }))
       assert.match(
         printFail(either, { id: -1n, tags: [5n] }).message,
         /no choice branch accepts \{"id":-1n,"tags":\[5n\]\}:/,
@@ -239,8 +239,8 @@ describe("bytes / lengthPrefixed / literal", () => {
 
 describe("codec", () => {
   const Frame = Schema.Struct({
-    version: Binary.Bit,
-    kind: Binary.Uint(7),
+    version: Binary.bitSchema,
+    kind: Binary.uintSchema(7),
     names: Schema.Array(Schema.String),
   })
   const frame = G.merge(
@@ -266,7 +266,7 @@ describe("codec", () => {
       const error = yield* Effect.flip(Schema.decodeEffect(FrameFromBytes)(wire.slice(0, 6)))
       assert.match(
         SchemaIssue.makeFormatterDefault()(error.issue),
-        /byte 6: expected 2 bytes but only 1 remain, found end of input/,
+        /byte 6: expected 2 more characters, found end of input/,
       )
     }),
   )

@@ -6,11 +6,9 @@ import {
   isCount,
   type Node,
   nodeOf,
-  nonByte,
   type Pattern,
   resolve,
   type ScopeId,
-  toBytes,
   type Value,
 } from "./core.ts"
 import { caseFor, copyFields, evaluate, type Frame, frame, Unbound, unifyPattern, validateOwnKeys } from "./env.ts"
@@ -101,44 +99,37 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
     case "Regex": {
       if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
       const match = new RegExp(node.source, `${node.flags}y`).exec(value)
-      if (match === null || match[0].length !== value.length) {
-        return invalid(node.name, value, `${JSON.stringify(value)} does not match /${node.source}/`)
-      }
+      if (match === null || match[0].length !== value.length) return invalid(`/${node.source}/`, value)
       return Result.succeed(value)
     }
     case "Take": {
       const count = printCount(evaluate(node.count, env), "take count")
       if (Result.isFailure(count)) return Result.fail(count.failure)
       if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      if (node.unit === "char") {
-        return value.length === count.success
-          ? Result.succeed(value)
-          : invalid(`${count.success} UTF-16 code units`, value)
-      }
-      if (nonByte.test(value)) return invalid("a string of bytes", value)
-      // Report bytes rather than the internal binary string.
-      return value.length === count.success ? Result.succeed(value) : invalid(`${count.success} bytes`, toBytes(value))
+      return value.length === count.success
+        ? Result.succeed(value)
+        : invalid(`${count.success} character${count.success === 1 ? "" : "s"}`, value)
     }
     case "Gen": {
-      const local = frame(node.scope, node.slotCount, env)
+      const local = frame(node.scope, node.steps.length, env)
       const unified = unifyPattern(node.result, value, local)
       if (Result.isFailure(unified)) return Result.fail(unified.failure)
 
       let text = ""
-      for (const [index, step] of node.steps.entries()) {
-        let result: Printed
-        if (step._tag === "Silent") {
-          result = printGrammar(step.grammar, undefined, local, state)
-        } else if (local.values[step.slot] === Unbound) {
-          result = fail({ _tag: "MissingBinding", binding: describeStep(step, index) })
-        } else {
-          result = printGrammar(step.grammar, local.values[step.slot], local, state)
-          const path = bindingPath(node.result, node.scope, step.slot)
-          if (Result.isFailure(result) && path !== undefined) {
-            result = path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
+      for (const [slot, step] of node.steps.entries()) {
+        const path = bindingPath(node.result, node.scope, slot)
+        let result = printGrammar(step, path === undefined ? undefined : local.values[slot], local, state)
+        if (Result.isFailure(result)) {
+          if (path === undefined) {
+            return invalid(
+              describeStep(step, slot),
+              undefined,
+              "parsed but not returned, so there is no value to print it from; return it, or discard it with skip",
+            )
           }
+          result = path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
+          return result
         }
-        if (Result.isFailure(result)) return result
         text += result.success
       }
       return Result.succeed(text)
@@ -236,14 +227,12 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
       return printItems(node.inner, value, separator.success, env, state)
     }
     case "Transform": {
-      const name = node.name ?? describe(node.inner)
       try {
-        if (node.is?.(value) === false) return invalid(name, value)
         const encoded = node.encode(value)
-        if (Result.isFailure(encoded)) return invalid(name, value, encoded.failure.message)
+        if (Result.isFailure(encoded)) return invalid(encoded.failure, value)
         return printGrammar(node.inner, encoded.success, env, state)
       } catch (error) {
-        return invalid(name, value, exceptionMessage(error))
+        return invalid(describe(node.inner), value, exceptionMessage(error))
       }
     }
     case "Skip":

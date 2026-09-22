@@ -82,8 +82,11 @@ describe("printChecked is the whole-grammar round-trip guarantee", () => {
   )
 })
 
-describe("choiceOn prints by reading the tag", () => {
-  const g = G.choiceOn("kind", { plain, hashed })
+describe("dispatch prints by reading the tag", () => {
+  const g = G.dispatch("kind", [
+    ["plain", plain],
+    ["hashed", hashed],
+  ] as const)
 
   it.effect("prints the branch the tag names", () =>
     Effect.sync(() => {
@@ -93,22 +96,22 @@ describe("choiceOn prints by reading the tag", () => {
     }),
   )
 
-  it.effect("parses in key order", () =>
+  it.effect("parses in entry order", () =>
     Effect.sync(() => {
       assert.deepEqual(parseOk(g, "#abc"), { kind: "hashed", value: "abc" })
       assert.deepEqual(parseOk(g, "abc"), { kind: "plain", value: "abc" })
     }),
   )
 
-  it.effect("accepts ordered [key, grammar] entries", () =>
+  it.effect("tries entries in the listed order", () =>
     Effect.sync(() => {
-      const entries = G.choiceOnEntries("kind", [
-        ["plain", plain],
+      const reversed = G.dispatch("kind", [
         ["hashed", hashed],
+        ["plain", plain],
       ] as const)
-      assert.equal(printOk(entries, wrong), "#x")
-      assert.deepEqual(parseOk(entries, "#abc"), { kind: "hashed", value: "abc" })
-      assert.deepEqual(parseOk(entries, "abc"), { kind: "plain", value: "abc" })
+      assert.equal(printOk(reversed, wrong), "#x")
+      assert.deepEqual(parseOk(reversed, "#abc"), { kind: "hashed", value: "abc" })
+      assert.deepEqual(parseOk(reversed, "abc"), { kind: "plain", value: "abc" })
     }),
   )
 
@@ -131,20 +134,36 @@ describe("choiceOn prints by reading the tag", () => {
     }),
   )
 
-  it.effect("refuses array-index object keys without rejecting other numeric-looking keys", () =>
+  it.effect("accepts integer and numeric-looking keys", () =>
     Effect.sync(() => {
-      // SAFETY: the array-index key is rejected at runtime before types matter.
-      assert.throws(() => G.choiceOn("kind", { 1: plain } as never), /looks like an integer/)
-      const numeric = G.literal("x").pipe(G.as({ kind: "01" as const, value: "x" as const }))
-      assert.doesNotThrow(() => G.choiceOn("kind", { "01": numeric }))
-      const negative = G.literal("x").pipe(G.as({ kind: "-1" as const, value: "x" as const }))
-      assert.doesNotThrow(() => G.choiceOn("kind", { "-1": negative }))
+      const one = G.literal("x").pipe(G.as({ kind: 1 as const, value: "x" as const }))
+      const numeric = G.literal("y").pipe(G.as({ kind: "01" as const, value: "y" as const }))
+      const negative = G.literal("z").pipe(G.as({ kind: "-1" as const, value: "z" as const }))
+      const keyed = G.dispatch("kind", [
+        [1, one],
+        ["01", numeric],
+        ["-1", negative],
+      ] as const)
+      assertRoundTrip(keyed, { kind: 1, value: "x" })
+      assertRoundTrip(keyed, { kind: "01", value: "y" })
+      assertRoundTrip(keyed, { kind: "-1", value: "z" })
+      assert.throws(
+        () =>
+          G.dispatch("kind", [
+            [1, one],
+            [1, one],
+          ] as const),
+        /dispatch: duplicate key 1/,
+      )
     }),
   )
 
   it.effect("does not detect an ambiguous grammar on its own", () =>
     Effect.sync(() => {
-      const atom = G.choiceOn("kind", { number, symbol })
+      const atom = G.dispatch("kind", [
+        ["number", number],
+        ["symbol", symbol],
+      ] as const)
       assert.equal(printOk(atom, { kind: "symbol", value: "42" }), "42")
       assert.deepEqual(parseOk(atom, "42"), { kind: "number", value: 42 })
       // Tag dispatch still needs a whole-grammar round-trip check.
@@ -155,7 +174,10 @@ describe("choiceOn prints by reading the tag", () => {
 })
 
 describe("taggedChoice dispatches on its tag", () => {
-  const g = G.taggedChoice("_tag", { word, num: G.integer })
+  const g = G.taggedChoice("_tag", [
+    ["word", word],
+    ["num", G.integer],
+  ] as const)
 
   it.effect("round-trips and renders", () =>
     Effect.sync(() => {
@@ -165,10 +187,18 @@ describe("taggedChoice dispatches on its tag", () => {
     }),
   )
 
-  it.effect("rejects reordered keys and malformed print values", () =>
+  it.effect("rejects duplicate keys, the reserved tag, and malformed print values", () =>
     Effect.sync(() => {
-      // SAFETY: integer key deliberately exercises runtime validation.
-      assert.throws(() => G.taggedChoice("_tag", { 1: G.integer } as never), /array index/)
+      assert.throws(
+        () =>
+          G.taggedChoice("_tag", [
+            [1, G.integer],
+            [1, word],
+          ] as const),
+        /taggedChoice: duplicate key 1/,
+      )
+      // SAFETY: the reserved tag name is rejected at runtime before types matter.
+      assert.throws(() => G.taggedChoice("value" as never, [["a", word]] as const), /reserved/)
       // SAFETY: malformed value deliberately exercises runtime validation.
       const malformed = G.print(g, { _tag: "word" } as never)
       assert.ok(Result.isFailure(malformed))

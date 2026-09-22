@@ -1,29 +1,19 @@
-export {
-  auditFidelity,
-  type FidelityEntry,
-  GrammarValidationError,
-  prepare,
-  type Prepared,
-  validate,
-} from "./analysis.ts"
+export { auditFidelity, type FidelityEntry, validate } from "./analysis.ts"
 export {
   as,
   between,
   checkedChoice,
   choice,
-  choiceOn,
-  choiceOnEntries,
+  dispatch,
   empty,
   filter,
   gen,
-  type GenGrammar,
   get,
   iso,
   label,
   literal,
   many,
   match,
-  matchValue,
   merge,
   optional,
   partialIso,
@@ -48,7 +38,7 @@ export {
   trivia,
   tuple,
 } from "./combinators.ts"
-export type { Fidelity, Grammar, GrammarIssue, Ref, Silent, Type } from "./core.ts"
+export type { Fidelity, Grammar, GrammarIssue, Ref, Type } from "./core.ts"
 export {
   countPrefixed,
   decodeTo,

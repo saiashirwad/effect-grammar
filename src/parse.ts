@@ -1,6 +1,6 @@
 import { Predicate, Result } from "effect"
 
-import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, nonByte, resolve, type Value } from "./core.ts"
+import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, copyFields, evaluate, type Frame, frame, materialize, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./render.ts"
@@ -11,6 +11,8 @@ interface State {
   // The furthest position any branch reached, and what was expected there.
   furthest: number
   expected: Set<string>
+  // How many parses consumed input, so a label can tell whether its inner grammar got anywhere.
+  progress: number
   // Suspensions being expanded, by input position, to reject left recursion.
   readonly activeAt: Map<Node, Set<number>>
 }
@@ -32,7 +34,13 @@ const parseCount = (state: State, count: Value, what: string): Result.Result<num
 }
 
 const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined): Result.Result<Value, void> => {
-  const node = nodeOf(grammar)
+  const start = state.pos
+  const result = parseNode(nodeOf(grammar), state, env)
+  if (Result.isSuccess(result) && state.pos > start) state.progress++
+  return result
+}
+
+const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Result<Value, void> => {
   switch (node._tag) {
     case "Literal": {
       if (state.input.startsWith(node.value, state.pos)) {
@@ -44,40 +52,32 @@ const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined)
       let current = state.pos
       while (current < end && state.input[current] === node.value[current - state.pos]) current++
       state.pos = current
-      return failAt(state, node.name ?? JSON.stringify(node.value))
+      return failAt(state, JSON.stringify(node.value))
     }
     case "Regex": {
       const expression = new RegExp(node.source, `${node.flags}y`)
       expression.lastIndex = state.pos
       const match = expression.exec(state.input)
-      if (match === null || match.index !== state.pos) return failAt(state, node.name)
+      if (match === null || match.index !== state.pos) return failAt(state, `/${node.source}/`)
       state.pos += match[0].length
       return Result.succeed(match[0])
     }
     case "Take": {
       const count = evaluate(node.count, env)
       if (count === Unbound) return failAt(state, "a bound take count")
-      if (!isCount(count)) return failAt(state, `<${node.unit}>{${preview(count)}}`)
-      const available = state.input.length - state.pos
-      if (available < count) {
-        if (node.unit === "char") return failAt(state, `${count} chars`)
-        const expected = `${count} bytes but only ${available} remain`
-        return failAt(state, node.name === undefined ? expected : `${node.name}: ${expected}`, state.input.length)
-      }
+      if (!isCount(count)) return failAt(state, `take{${preview(count)}}`)
+      if (state.input.length - state.pos < count)
+        return failAt(state, `${count} more character${count === 1 ? "" : "s"}`, state.input.length)
       const value = state.input.slice(state.pos, state.pos + count)
-      if (node.unit === "byte") {
-        const index = value.search(nonByte)
-        if (index !== -1) return failAt(state, "a byte", state.pos + index)
-      }
       state.pos += count
       return Result.succeed(value)
     }
     case "Gen": {
-      const local = frame(node.scope, node.slotCount, env)
-      for (const step of node.steps) {
-        const result = parseGrammar(step.grammar, state, local)
+      const local = frame(node.scope, node.steps.length, env)
+      for (const [slot, step] of node.steps.entries()) {
+        const result = parseGrammar(step, state, local)
         if (Result.isFailure(result)) return result
-        if (step._tag === "Bind") local.values[step.slot] = result.success
+        local.values[slot] = result.success
       }
       const value = materialize(node.result, local)
       return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
@@ -150,21 +150,16 @@ const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined)
       const result = parseGrammar(node.inner, state, env)
       if (Result.isFailure(result)) return result
       const consumed = state.pos
-      const name = node.name ?? describe(node.inner)
       try {
         const decoded = node.decode(result.success)
         if (Result.isFailure(decoded)) {
           state.pos = start
-          return failAt(state, decoded.failure.message, consumed)
-        }
-        if (node.is?.(decoded.success) === false) {
-          state.pos = start
-          return failAt(state, name, consumed)
+          return failAt(state, decoded.failure, consumed)
         }
         return Result.succeed(decoded.success)
       } catch (error) {
         state.pos = start
-        return failAt(state, `${name}: ${exceptionMessage(error)}`, consumed)
+        return failAt(state, `${describe(node.inner)}: ${exceptionMessage(error)}`, consumed)
       }
     }
     case "Skip": {
@@ -172,12 +167,14 @@ const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined)
       return Result.isFailure(result) ? result : Result.void
     }
     case "Label": {
-      // When the inner grammar fails where it started, report the label instead of its expectations.
+      // When no part of the inner grammar consumed input, report the label in place of its expectations.
       const start = state.pos
-      const siblings = state.furthest === start ? [...state.expected] : []
+      const { furthest, progress } = state
+      const siblings = furthest === start ? [...state.expected] : []
       const result = parseGrammar(node.inner, state, env)
-      if (Result.isFailure(result) && state.furthest === start) {
-        state.expected = new Set([...siblings, node.name])
+      if (Result.isFailure(result) && state.progress === progress) {
+        if (state.furthest === start) state.expected = new Set([...siblings, node.name])
+        else if (state.furthest > furthest) state.expected = new Set([node.name])
       }
       return result
     }
@@ -208,7 +205,7 @@ export const parseWithEnv = (
   text: string,
   env: Frame | undefined,
 ): Result.Result<Value, ParseError> => {
-  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set(), activeAt: new Map() }
+  const state: State = { input: text, pos: 0, furthest: 0, expected: new Set(), progress: 0, activeAt: new Map() }
   const result = parseGrammar(grammar, state, env)
   if (Result.isSuccess(result)) {
     if (state.pos === text.length) return Result.succeed(result.success)

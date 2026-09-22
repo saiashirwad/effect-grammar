@@ -55,20 +55,20 @@ describe("regex", () => {
   it.effect("prints a matching string and rejects a non-matching one", () =>
     Effect.sync(() => {
       assert.equal(printOk(word, "xyz"), "xyz")
-      assert.match(printFail(word, "x1").message, /does not match/)
+      assert.equal(printFail(word, "x1").message, 'expected /[a-z]+/, got "x1"')
     }),
   )
 
   it.effect("ignores g and y flags", () =>
     Effect.sync(() => {
       const sticky = G.regex(/\d/gy, "digit")
-      assert.deepEqual(parseOk(G.many(sticky), "123"), ["1", "2", "3"])
+      assert.deepEqual(parseOk(sticky.pipe(G.many()), "123"), ["1", "2", "3"])
     }),
   )
 
   it.effect("rejects a Unicode match that starts before the cursor", () =>
     Effect.sync(() => {
-      const error = parseFail(G.prefix("\ud83d", G.regex(/./u, "point")), "😀x")
+      const error = parseFail(G.regex(/./u, "point").pipe(G.prefix("\ud83d")), "😀x")
       assert.equal(error.pos, 1)
       assert.deepEqual(error.expected, ["point"])
     }),
@@ -85,7 +85,7 @@ describe("gen", () => {
   const endpoint = G.gen(function* () {
     yield* G.literal("https://")
     const host = yield* G.regex(/[^:/]+/, "host")
-    const port = yield* G.optional(G.prefix(":", G.integer))
+    const port = yield* G.optional(G.integer.pipe(G.prefix(":")))
     return { host, port }
   })
 
@@ -167,7 +167,7 @@ describe("gen", () => {
 
   it.effect("is silent when nothing is bound and nothing is returned", () =>
     Effect.sync(() => {
-      const s: Grammar.Silent = G.gen(function* () {
+      const s: Grammar.Grammar<void> = G.gen(function* () {
         yield* G.literal("a")
         yield* G.optional(G.literal("b"))
       })
@@ -182,18 +182,22 @@ describe("gen", () => {
     }),
   )
 
-  it.effect("rejects a binding that is not returned, at construction", () =>
+  it.effect("reports a binding that is not returned, and fails to print it", () =>
     Effect.sync(() => {
-      assert.throws(
-        () =>
-          G.gen(function* () {
-            const a = yield* G.integer
-            yield* G.literal(",")
-            yield* G.integer
-            return { a }
-          }),
-        /step 3 \(<integer>\) is parsed but not returned/,
+      const g = G.gen(function* () {
+        const a = yield* G.integer
+        yield* G.literal(",")
+        yield* G.regex(/\d+/, "digits")
+        return { a }
+      })
+      assert.deepEqual(parseOk(g, "1,2"), { a: 1 })
+      assert.deepEqual(
+        G.validate(g).map((issue) => issue.message),
+        [
+          "gen: step 3 (digits) is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip",
+        ],
       )
+      assert.match(printFail(g, { a: 1 }).message, /step 3 \(digits\): parsed but not returned/)
     }),
   )
 
@@ -287,7 +291,10 @@ describe("match", () => {
   const kindOf = G.choice(G.literal("n:").pipe(G.as("num")), G.literal("w:").pipe(G.as("word")))
   const tagged = G.gen(function* () {
     const kind = yield* kindOf
-    const value = yield* G.match(kind, { num: G.integer, word })
+    const value = yield* G.match(kind, [
+      ["num", G.integer],
+      ["word", word],
+    ] as const)
     return { kind, value }
   })
 
@@ -311,10 +318,10 @@ describe("match", () => {
       const frame = G.gen(function* () {
         const h = yield* header
         yield* G.literal(":")
-        const body = yield* G.match(h.kind, {
-          text: G.take(h.size),
-          bin: G.repeat(G.regex(/[01]/, "bit"), h.size),
-        })
+        const body = yield* G.match(h.kind, [
+          ["text", G.take(h.size)],
+          ["bin", G.regex(/[01]/, "bit").pipe(G.repeat(h.size))],
+        ] as const)
         return { h, body }
       })
       assert.deepEqual(parseOk(frame, "t3:abc"), { h: { kind: "text", size: 3 }, body: "abc" })
@@ -322,7 +329,7 @@ describe("match", () => {
       assert.equal(printOk(frame, { h: { kind: "text", size: 2 }, body: "xy" }), "t2:xy")
       assert.equal(
         G.render(frame),
-        'h:(kind:("t" | "b") size:<integer>) ":" body:match(h.kind){"text" => <char>{h.size} | "bin" => (<bit>){h.size}}',
+        'h:(kind:("t" | "b") size:<integer>) ":" body:match(h.kind){"text" => <take>{h.size} | "bin" => (<bit>){h.size}}',
       )
     }),
   )
@@ -333,7 +340,7 @@ describe("match", () => {
         // SAFETY: parsed text can hold any word; the type only records the cases we branch on.
         const kind = (yield* word) as Grammar.Ref<"num">
         yield* G.literal(":")
-        const value = yield* G.match(kind, { num: G.integer })
+        const value = yield* G.match(kind, [["num", G.integer]] as const)
         return { kind, value }
       })
       assert.deepEqual(parseFail(g, "str:1").expected, ['a match case for "str"'])
@@ -355,8 +362,9 @@ describe("take / repeat", () => {
       assert.deepEqual(parseOk(netstring, "5:hello,"), { length: 5, payload: "hello" })
       assert.deepEqual(parseOk(netstring, "0:,"), { length: 0, payload: "" })
       const e = parseFail(netstring, "5:hi,")
-      assert.equal(e.pos, 2)
-      assert.deepEqual(e.expected, ["5 chars"])
+      assert.equal(e.pos, 5)
+      assert.deepEqual(e.expected, ["5 more characters"])
+      assert.equal(e.message, "line 1, column 6: expected 5 more characters, found end of input")
     }),
   )
 
@@ -372,7 +380,7 @@ describe("take / repeat", () => {
 
   it.effect("rejects a count that is not a non-negative integer", () =>
     Effect.sync(() => {
-      assert.deepEqual(parseFail(netstring, "-1:,").expected, ["<char>{-1}"])
+      assert.deepEqual(parseFail(netstring, "-1:,").expected, ["take{-1}"])
     }),
   )
 
@@ -392,27 +400,27 @@ describe("take / repeat", () => {
 
   it.effect("repeat accepts a constant count", () =>
     Effect.sync(() => {
-      const pair = G.repeat(G.regex(/[a-z]/, "letter"), 2)
+      const pair = G.regex(/[a-z]/, "letter").pipe(G.repeat(2))
       assert.deepEqual(parseOk(pair, "ab"), ["a", "b"])
       assert.deepEqual(parseFail(pair, "a").expected, ["letter"])
       assert.equal(printOk(pair, ["x", "y"]), "xy")
       assert.match(printFail(pair, ["x"]).message, /2/)
       assert.equal(G.render(pair), "(<letter>){2}")
-      assert.throws(() => G.repeat(G.integer, -1), /repeat: count must be a non-negative safe integer/)
-      assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 0))).length, 1)
-      assert.deepEqual(G.validate(G.many(G.repeat(G.integer, 1))), [])
+      assert.throws(() => G.integer.pipe(G.repeat(-1)), /repeat: count must be a non-negative safe integer/)
+      assert.deepEqual(G.validate(G.integer.pipe(G.repeat(0), G.many())).length, 1)
+      assert.deepEqual(G.validate(G.integer.pipe(G.repeat(1), G.many())), [])
     }),
   )
 })
 
 describe("wrap / prefix / suffix", () => {
-  const g = G.between("[", G.integer, "]")
+  const g = G.integer.pipe(G.between("[", "]"))
 
   it.effect("keeps only the inner value", () =>
     Effect.sync(() => {
       assert.equal(parseOk(g, "[5]"), 5)
-      assert.equal(parseOk(G.prefix("#", G.integer), "#5"), 5)
-      assert.equal(parseOk(G.suffix(G.integer, ";"), "5;"), 5)
+      assert.equal(parseOk(G.integer.pipe(G.prefix("#")), "#5"), 5)
+      assert.equal(parseOk(G.integer.pipe(G.suffix(";")), "5;"), 5)
     }),
   )
 
@@ -433,7 +441,7 @@ describe("wrap / prefix / suffix", () => {
 
   it.effect("is silent when the inner is silent", () =>
     Effect.sync(() => {
-      const s = G.between("<", G.literal("x"), ">")
+      const s = G.literal("x").pipe(G.between("<", ">"))
       const outer = G.gen(function* () {
         yield* s
         const n = yield* G.integer
@@ -529,7 +537,7 @@ describe("optional", () => {
 })
 
 describe("many", () => {
-  const g = G.many(G.regex(/[a-z]/, "letter"))
+  const g = G.regex(/[a-z]/, "letter").pipe(G.many())
 
   it.effect("parses zero or more", () =>
     Effect.sync(() => {
@@ -548,32 +556,32 @@ describe("many", () => {
 
   it.effect("honours min and max", () =>
     Effect.sync(() => {
-      assert.deepEqual(parseFail(G.many(G.regex(/[a-z]/, "letter"), { min: 2 }), "a").expected, ["letter"])
-      assert.deepEqual(parseOk(G.many(G.regex(/[a-z]/, "letter"), { max: 2 }), "ab"), ["a", "b"])
-      assert.equal(parseFail(G.many(G.regex(/[a-z]/, "letter"), { max: 2 }), "abc").pos, 2)
+      assert.deepEqual(parseFail(G.regex(/[a-z]/, "letter").pipe(G.many({ min: 2 })), "a").expected, ["letter"])
+      assert.deepEqual(parseOk(G.regex(/[a-z]/, "letter").pipe(G.many({ max: 2 })), "ab"), ["a", "b"])
+      assert.equal(parseFail(G.regex(/[a-z]/, "letter").pipe(G.many({ max: 2 })), "abc").pos, 2)
     }),
   )
 
   it.effect("rejects invalid bounds", () =>
     Effect.sync(() => {
       for (const min of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-        assert.throws(() => G.many(G.integer, { min }), RangeError)
+        assert.throws(() => G.integer.pipe(G.many({ min })), RangeError)
       }
-      assert.throws(() => G.many(G.integer, { min: 3, max: 2 }), RangeError)
+      assert.throws(() => G.integer.pipe(G.many({ min: 3, max: 2 })), RangeError)
     }),
   )
 
   it.effect("prints by concatenation and checks bounds", () =>
     Effect.sync(() => {
       assert.equal(printOk(g, ["x", "y"]), "xy")
-      assert.match(printFail(G.many(G.integer, { min: 1 }), []).message, /at least 1/)
-      assert.match(printFail(G.many(G.integer, { max: 1 }), [1, 2]).message, /0..1/)
+      assert.match(printFail(G.integer.pipe(G.many({ min: 1 })), []).message, /at least 1/)
+      assert.match(printFail(G.integer.pipe(G.many({ max: 1 })), [1, 2]).message, /0..1/)
     }),
   )
 
   it.effect("rejects a zero-width element when parsing", () =>
     Effect.sync(() => {
-      const e = parseFail(G.many(G.regex(/x*/, "xs")), "abc")
+      const e = parseFail(G.regex(/x*/, "xs").pipe(G.many()), "abc")
       assert.deepEqual(e.expected, ["a repetition element that consumes input"])
     }),
   )
@@ -592,7 +600,7 @@ describe("many", () => {
 })
 
 describe("sepBy", () => {
-  const g = G.sepBy(G.integer, ",")
+  const g = G.integer.pipe(G.sepBy(","))
 
   it.effect("parses empty, one, and many", () =>
     Effect.sync(() => {
@@ -612,7 +620,7 @@ describe("sepBy", () => {
 
   it.effect("honours min", () =>
     Effect.sync(() => {
-      assert.deepEqual(parseFail(G.sepBy(G.integer, ",", { min: 1 }), "").expected, ["integer"])
+      assert.deepEqual(parseFail(G.integer.pipe(G.sepBy(",", { min: 1 })), "").expected, ["integer"])
     }),
   )
 
@@ -643,12 +651,8 @@ describe("transform / decodeTo", () => {
   it.effect("`is` guards both parse and print", () =>
     Effect.sync(() => {
       const even = G.integer.pipe(
-        G.transform({
-          decode: (n) => n,
-          encode: (n) => n,
-          is: (n: number) => n % 2 === 0,
-          name: "even",
-        }),
+        G.iso({ decode: (n) => n, encode: (n) => n }),
+        G.filter((n: number) => n % 2 === 0, "even"),
       )
       assert.deepEqual(parseFail(even, "3").expected, ["even"])
       assert.match(printFail(even, 3).message, /even/)
@@ -679,25 +683,18 @@ describe("transform / decodeTo", () => {
   it.effect("decodeTo rejects on parse when the schema does", () =>
     Effect.sync(() => {
       const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
-      const g = G.integer.pipe(G.decodeTo(Small)({ decode: (n) => n, encode: (n) => n, name: "digit" }))
+      const g = G.integer.pipe(G.decodeTo(Small, "digit")({ decode: (n) => n, encode: (n) => n }))
       assert.deepEqual(parseFail(g, "10").expected, ["digit"])
     }),
   )
 
-  it.effect("decodeTo takes an `is` override in place of the schema guard", () =>
+  it.effect("decodeTo names the schema guard by default", () =>
     Effect.sync(() => {
       const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
-      const g = G.integer.pipe(
-        G.decodeTo(Small)({
-          decode: (n) => n,
-          encode: (n) => n,
-          is: (n) => n % 2 === 0,
-          name: "even",
-        }),
-      )
-      assert.equal(parseOk(g, "10"), 10)
-      assert.deepEqual(parseFail(g, "3").expected, ["even"])
-      assert.match(printFail(g, 3).message, /even/)
+      const g = G.integer.pipe(G.decodeTo(Small)({ decode: (n) => n, encode: (n) => n }))
+      assert.equal(parseOk(g, "9"), 9)
+      assert.deepEqual(parseFail(g, "10").expected, ["a value matching the schema"])
+      assert.match(printFail(g, 10).message, /a value matching the schema/)
     }),
   )
 
@@ -784,7 +781,7 @@ describe("as / flag / skip", () => {
 })
 
 describe("lexeme / symbol / trivia", () => {
-  const g = G.between(G.symbol("["), G.sepBy(G.lexeme(G.integer), G.symbol(",")), G.symbol("]"))
+  const g = G.lexeme(G.integer).pipe(G.sepBy(G.symbol(",")), G.between(G.symbol("["), G.symbol("]")))
 
   it.effect("skips trailing whitespace after tokens", () =>
     Effect.sync(() => {
@@ -801,7 +798,7 @@ describe("lexeme / symbol / trivia", () => {
 
   it.effect("trivia is silent, optional, and hidden from render", () =>
     Effect.sync(() => {
-      const spaced = G.between(G.trivia, G.integer, G.trivia)
+      const spaced = G.integer.pipe(G.between(G.trivia, G.trivia))
       assert.equal(parseOk(spaced, "  4 "), 4)
       assert.equal(printOk(spaced, 4), "4")
       assert.equal(G.render(spaced), "<integer>")
@@ -850,7 +847,9 @@ describe("suspend", () => {
     () =>
       G.choice(
         G.integer,
-        G.between("[", G.sepBy(nested, ","), "]").pipe(
+        nested.pipe(
+          G.sepBy(","),
+          G.between("[", "]"),
           G.transform({
             decode: (a): Nested => a,
             encode: (a): Array<Nested> => {
@@ -859,7 +858,6 @@ describe("suspend", () => {
               }
               return a
             },
-            is: Array.isArray,
           }),
         ),
       ),
@@ -941,7 +939,7 @@ describe("render", () => {
       const g = G.gen(function* () {
         yield* G.literal("a")
         const n = yield* G.integer
-        const xs = yield* G.many(G.regex(/x/, "x"), { min: 1 })
+        const xs = yield* G.regex(/x/, "x").pipe(G.many({ min: 1 }))
         const o = yield* G.optional(G.literal("!").pipe(G.as(true)))
         return { n, xs, o }
       })
@@ -1015,7 +1013,7 @@ describe("codec", () => {
     Effect.sync(() => {
       const r = Schema.encodeUnknownResult(Pair)({ name: "A", n: 1 })
       assert.ok(Result.isFailure(r))
-      if (Result.isFailure(r)) assert.match(r.failure.message, /does not match/)
+      if (Result.isFailure(r)) assert.match(r.failure.message, /expected \/\[a-z\]\+\/, got "A"/)
     }),
   )
 

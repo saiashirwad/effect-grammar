@@ -75,7 +75,7 @@ const QuerySchema = Schema.Union([
 
 const ws = Grammar.regex(/\s+/, "whitespace").pipe(Grammar.skip(" "))
 const token = (expected: string) => Grammar.regex(/[^\s():"']+/, expected)
-const doubleQuoted = Grammar.between('"', Grammar.regex(/[^"]*/, "string content"), '"')
+const doubleQuoted = Grammar.regex(/[^"]*/, "string content").pipe(Grammar.between('"', '"'))
 
 const compareValue = Grammar.gen(function* () {
   const op = yield* Grammar.literals(">=", "<=", ">", "<")
@@ -133,11 +133,12 @@ const qualifier = Grammar.gen(function* () {
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 
-const group = Grammar.between("(", Grammar.between(Grammar.trivia, query, Grammar.trivia), ")").pipe(
+const group = query.pipe(
+  Grammar.between(Grammar.trivia, Grammar.trivia),
+  Grammar.between("(", ")"),
   Grammar.decodeTo(GroupSchema)({
     decode: (inner) => ({ kind: "group", inner }),
     encode: (g) => g.inner,
-    is: (v) => v.kind === "group",
   }),
 )
 
@@ -168,22 +169,23 @@ const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
           }
           return value
         },
-        is: (value) => value.kind !== "and" && value.kind !== "or",
       }),
+      Grammar.filter((value: Query): boolean => value.kind !== "and" && value.kind !== "or", "an atomic query"),
     ),
   "not",
 )
 
-const notBranch = Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws), notExpr).pipe(
+const notBranch = notExpr.pipe(
+  Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws)),
   Grammar.decodeTo(NotSchema)({
     decode: (inner) => ({ kind: "not", inner }),
     encode: (n) => n.inner,
-    is: (v) => v.kind === "not",
   }),
 )
 
-const nary = (kind: "and" | "or", sep: Grammar.Silent, part: Grammar.Grammar<Query>) =>
-  Grammar.sepBy(part, sep, { min: 1 }).pipe(
+const nary = (kind: "and" | "or", sep: Grammar.Grammar<void>, part: Grammar.Grammar<Query>) =>
+  part.pipe(
+    Grammar.sepBy(sep, { min: 1 }),
     Grammar.transform({
       decode: (parts): Query => (parts.length === 1 && parts[0] !== undefined ? parts[0] : { kind, parts }),
       encode: (q) => (q.kind === kind ? q.parts : [q]),
@@ -196,7 +198,7 @@ const andExpr = nary("and", andSep, notExpr)
 const orSep = Grammar.seq(ws, Grammar.literal("OR"), ws)
 const orExpr = nary("or", orSep, andExpr)
 
-const whole = Grammar.between(Grammar.trivia, query, Grammar.trivia)
+const whole = query.pipe(Grammar.between(Grammar.trivia, Grammar.trivia))
 
 const pattern = (re: RegExp, identifier: string, message: string) =>
   Schema.String.check(Schema.isPattern(re, { identifier, message }))

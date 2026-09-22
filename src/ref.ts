@@ -1,6 +1,7 @@
 import { Predicate, type Types } from "effect"
 
 import {
+  type AnyGrammar,
   type Expr,
   isGrammar,
   type Pattern,
@@ -8,7 +9,6 @@ import {
   type RefBase,
   RefTypeId,
   type ScopeId,
-  type Step,
   type Value,
 } from "./core.ts"
 import { describeStep } from "./render.ts"
@@ -157,24 +157,18 @@ export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet())
   }
 }
 
-// Printing reads each bound value from the pattern, so every binding must appear there exactly once.
-export const assertEachBindingReturnedOnce = (scope: ScopeId, steps: ReadonlyArray<Step>, result: Pattern): void => {
-  const binds = new Map<number, () => string>()
-  steps.forEach((step, index) => {
-    if (step._tag === "Bind") binds.set(step.slot, () => describeStep(step, index))
-  })
-
+// Printing reads a slot from wherever the pattern mentions it, so a ref may appear at most once.
+export const assertRefsReturnedOnce = (scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, result: Pattern): void => {
   const returned = new Set<number>()
   const collect = (pattern: Pattern): void => {
     switch (pattern._tag) {
       case "Ref": {
-        if (pattern.scope !== scope || !binds.has(pattern.slot)) {
+        if (pattern.scope !== scope) {
           throw new Error("gen: the return holds a ref bound by another gen; return it from the gen that bound it")
         }
         if (returned.has(pattern.slot)) {
-          const where = binds.get(pattern.slot)
           throw new Error(
-            `gen: ${where?.() ?? "a binding"} is returned twice, so printing could not tell which copy to read`,
+            `gen: ${describeStep(steps[pattern.slot]!, pattern.slot)} is returned twice, so printing could not tell which copy to read`,
           )
         }
         returned.add(pattern.slot)
@@ -190,12 +184,4 @@ export const assertEachBindingReturnedOnce = (scope: ScopeId, steps: ReadonlyArr
     }
   }
   collect(result)
-
-  for (const [slot, where] of binds) {
-    if (!returned.has(slot)) {
-      throw new Error(
-        `gen: ${where()} is parsed but not returned, so printing has nothing to print it from; return it, or discard it with skip`,
-      )
-    }
-  }
 }

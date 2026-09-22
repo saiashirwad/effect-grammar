@@ -26,16 +26,15 @@ export const jsonString = Grammar.lexeme(
   Grammar.regex(/"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/, "string"),
 ).pipe(
   Grammar.transformOrFail({
-    decode: (text) => {
+    decode: (text): Result.Result<string, string> => {
       try {
         const value: unknown = JSON.parse(text)
-        return Predicate.isString(value) ? Result.succeed(value) : Result.fail({ message: "expected a JSON string" })
+        return Predicate.isString(value) ? Result.succeed(value) : Result.fail("a JSON string")
       } catch (error) {
-        return Result.fail({ message: error instanceof Error ? error.message : String(error) })
+        return Result.fail(error instanceof Error ? error.message : String(error))
       }
     },
     encode: (value) => Result.succeed(JSON.stringify(value)),
-    name: "string",
   }),
 )
 
@@ -44,10 +43,9 @@ export const jsonValue: Grammar.Grammar<JsonValue> = Grammar.suspend(
   "value",
 )
 
-const jsonArray = Grammar.between(
-  Grammar.symbol("["),
-  Grammar.sepBy(jsonValue, Grammar.symbol(",")),
-  Grammar.symbol("]"),
+const jsonArray = jsonValue.pipe(
+  Grammar.sepBy(Grammar.symbol(",")),
+  Grammar.between(Grammar.symbol("["), Grammar.symbol("]")),
 )
 
 const member = Grammar.gen(function* () {
@@ -57,15 +55,13 @@ const member = Grammar.gen(function* () {
   return { key, value }
 })
 
-const jsonObject = Grammar.between(
-  Grammar.symbol("{"),
-  Grammar.sepBy(member, Grammar.symbol(",")),
-  Grammar.symbol("}"),
-).pipe(
+const jsonObject = member.pipe(
+  Grammar.sepBy(Grammar.symbol(",")),
+  Grammar.between(Grammar.symbol("{"), Grammar.symbol("}")),
   Grammar.transform({
-    decode: (members) => Object.fromEntries(members.map(({ key, value }) => [key, value])),
+    decode: (members): { readonly [key: string]: JsonValue } =>
+      Object.fromEntries(members.map(({ key, value }) => [key, value])),
     encode: (object) => Object.entries(object).map(([key, value]) => ({ key, value })),
-    is: Schema.is(Schema.Record(Schema.String, Schema.Unknown)),
-    name: "object",
   }),
+  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.Unknown)), "object"),
 )

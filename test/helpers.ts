@@ -43,7 +43,8 @@ export const plain = word.pipe(
     encode: (v) => v.value,
   }),
 )
-export const hashed = Grammar.prefix("#", word).pipe(
+export const hashed = word.pipe(
+  Grammar.prefix("#"),
   Grammar.transform({
     decode: (value) => ({ kind: "hashed" as const, value }),
     encode: (v) => v.value,

@@ -28,17 +28,17 @@ const header = Grammar.gen(function* () {
 const frame = Grammar.gen(function* () {
   const parsedHeader = yield* header
   yield* Grammar.literal(":")
-  const body = yield* Grammar.match(parsedHeader.kind, {
-    text: Grammar.take(parsedHeader.size),
-    bits: Grammar.repeat(Grammar.regex(/[01]/, "bit"), parsedHeader.size),
-  })
+  const body = yield* Grammar.match(parsedHeader.kind, [
+    ["text", Grammar.take(parsedHeader.size)],
+    ["bits", Grammar.regex(/[01]/, "bit").pipe(Grammar.repeat(parsedHeader.size))],
+  ] as const)
   return { header: parsedHeader, body }
 })
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.optional(Grammar.prefix(":", Grammar.integer))
+  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
   return { host, port }
 })
 
@@ -51,15 +51,14 @@ const param = Grammar.gen(function* () {
 
 const query = Grammar.gen(function* () {
   yield* Grammar.literal("?")
-  const params = yield* Grammar.sepBy(param, Grammar.literal("&"))
+  const params = yield* param.pipe(Grammar.sepBy("&"))
   return params
 }).pipe(
   Grammar.transform({
     decode: (entries) => Object.fromEntries(entries.map(({ key, value }) => [key, value])),
     encode: (record) => Object.entries(record).map(([key, value]) => ({ key, value })),
-    is: Schema.is(Schema.Record(Schema.String, Schema.String)),
-    name: "record",
   }),
+  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.String)), "record"),
 )
 
 const program = Effect.gen(function* () {

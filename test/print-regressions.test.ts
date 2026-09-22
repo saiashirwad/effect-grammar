@@ -22,11 +22,11 @@ describe("printer sequencing and exception boundaries", () => {
         )
       const open = tracked("open").pipe(G.skip("bad"))
       const close = tracked("close").pipe(G.skip("ok"))
-      printFail(G.between(open, tracked("inner"), close), "ok")
+      printFail(tracked("inner").pipe(G.between(open, close)), "ok")
       assert.deepEqual(calls, ["open"])
 
       calls.length = 0
-      printFail(G.between("(", tracked("inner"), close), "bad")
+      printFail(tracked("inner").pipe(G.between("(", close)), "bad")
       assert.deepEqual(calls, ["inner"])
 
       calls.length = 0
@@ -54,9 +54,9 @@ describe("printer sequencing and exception boundaries", () => {
           },
         }),
       )
-      printFail(G.sepBy(item, item.pipe(G.skip("bad separator"))), ["ok"])
+      printFail(item.pipe(G.sepBy(item.pipe(G.skip("bad separator")))), ["ok"])
       assert.deepEqual(calls, ["bad separator"])
-      for (const grammar of [G.many(item), G.repeat(item, 3)]) {
+      for (const grammar of [item.pipe(G.many()), item.pipe(G.repeat(3))]) {
         calls.length = 0
         printFail(grammar, ["ok", "bad", "ok"])
         assert.deepEqual(calls, ["ok", "bad"])
@@ -252,7 +252,7 @@ describe("printer sequencing and exception boundaries", () => {
           throw thrown
         },
       }
-      const grammar = G.choiceOn("kind", { x: G.literal("x").pipe(G.as({ kind: "x" as const })) })
+      const grammar = G.dispatch("kind", [["x", G.literal("x").pipe(G.as({ kind: "x" as const }))]] as const)
       assert.throws(
         () => G.print(grammar, value),
         (error) => error === thrown,

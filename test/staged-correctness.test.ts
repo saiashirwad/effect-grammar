@@ -53,7 +53,7 @@ describe("staged correctness", () => {
       const grammar = Grammar.regex(/a/m, "a")
 
       assert.equal(printOk(grammar, "a"), "a")
-      assert.match(printFail(grammar, "a\nb").message, /does not match/)
+      assert.match(printFail(grammar, "a\nb").message, /expected \/a\/, got "a\\nb"/)
     }),
   )
 
@@ -90,7 +90,7 @@ describe("staged correctness", () => {
       })
 
       const error = parseFail(grammar, `${Number.MAX_SAFE_INTEGER}:`)
-      assert.deepEqual(error.expected, [`${Number.MAX_SAFE_INTEGER} chars`])
+      assert.deepEqual(error.expected, [`${Number.MAX_SAFE_INTEGER} more characters`])
     }),
   )
 
@@ -139,7 +139,7 @@ describe("staged correctness", () => {
       )
       const grammar = Grammar.gen(function* () {
         const kind = yield* selector
-        const value = yield* Grammar.matchValue(kind, [
+        const value = yield* Grammar.match(kind, [
           [1, Grammar.literal("one").pipe(Grammar.as(10))],
           ["1", Grammar.literal("string-one").pipe(Grammar.as(20))],
         ] as const)
@@ -167,8 +167,8 @@ describe("staged correctness", () => {
       )
       const fallible = Grammar.regex(/x/, "x").pipe(
         Grammar.transformOrFail<string, string>({
-          decode: () => Result.fail({ message: "decode rejected" }),
-          encode: () => Result.fail({ message: "encode rejected" }),
+          decode: () => Result.fail("decode rejected"),
+          encode: () => Result.fail("encode rejected"),
         }),
       )
 
@@ -185,9 +185,7 @@ describe("staged correctness", () => {
       const headerGrammar = Grammar.literal("h").pipe(Grammar.as({ then: "number" as const }))
       const grammar = Grammar.gen(function* () {
         const header = yield* headerGrammar
-        const value = yield* Grammar.match(Grammar.get(header, "then"), {
-          number: Grammar.integer,
-        })
+        const value = yield* Grammar.match(Grammar.get(header, "then"), [["number", Grammar.integer]] as const)
         return { header, value }
       })
 

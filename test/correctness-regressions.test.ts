@@ -10,8 +10,8 @@ describe("correctness regressions", () => {
   it.effect("rejects invalid repetition bounds at construction", () =>
     Effect.sync(() => {
       for (const n of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
-        assert.throws(() => Grammar.many(Grammar.literal("x"), { min: n }), RangeError)
-        assert.throws(() => Grammar.sepBy(Grammar.literal("x"), ",", { min: n }), RangeError)
+        assert.throws(() => Grammar.literal("x").pipe(Grammar.many({ min: n })), RangeError)
+        assert.throws(() => Grammar.literal("x").pipe(Grammar.sepBy(",", { min: n })), RangeError)
       }
     }),
   )
@@ -36,9 +36,8 @@ describe("correctness regressions", () => {
         Grammar.transform({
           decode: (n) => n,
           encode: (n) => n,
-          is: (u) => Number.isSafeInteger(u) && u < 10,
-          name: "small",
         }),
+        Grammar.filter((u: number) => Number.isSafeInteger(u) && u < 10, "small"),
       )
       const g = Grammar.choice(small, Grammar.regex(/\d+/, "digits"))
       assert.equal(parseOk(g, "123"), "123")
@@ -48,7 +47,7 @@ describe("correctness regressions", () => {
 
   it.effect("strict end-of-input reports alongside the deeper expectation", () =>
     Effect.sync(() => {
-      const e = parseFail(Grammar.sepBy(Grammar.integer, ","), "1,2 ")
+      const e = parseFail(Grammar.integer.pipe(Grammar.sepBy(",")), "1,2 ")
       assert.equal(e.pos, 3)
       assert.deepEqual(e.expected, ['","', "end of input"])
     }),
@@ -109,7 +108,7 @@ describe("correctness regressions", () => {
   it.effect("rejects value as the taggedChoice tag", () =>
     Effect.sync(() => {
       // @ts-expect-error "value" is reserved for the branch payload
-      assert.throws(() => Grammar.taggedChoice("value", { number: Grammar.integer }), /reserved/)
+      assert.throws(() => Grammar.taggedChoice("value", [["number", Grammar.integer]] as const), /reserved/)
     }),
   )
 

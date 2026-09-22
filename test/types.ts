@@ -3,10 +3,10 @@ import * as G from "../src/index.ts"
 const kindOf = G.literals("a", "b")
 
 // @ts-expect-error taggedChoice cannot use "value" as its tag
-G.taggedChoice("value", { number: G.integer })
+G.taggedChoice("value", [["number", G.integer]] as const)
 // Dynamic tags rely on the runtime reserved-name check.
 const dynamicTag: string = "kind"
-G.taggedChoice(dynamicTag, { number: G.integer })
+G.taggedChoice(dynamicTag, [["number", G.integer]] as const)
 
 // A ref has no value while the grammar is built, so JavaScript cannot branch on it.
 G.gen(function* () {
@@ -19,14 +19,14 @@ G.gen(function* () {
 G.gen(function* () {
   const kind = yield* kindOf
   // @ts-expect-error missing case "b"
-  const value = yield* G.match(kind, { a: G.integer })
+  const value = yield* G.match(kind, [["a", G.integer]] as const)
   return { kind, value }
 })
 
 G.gen(function* () {
   const n = yield* G.optional(G.integer)
   // @ts-expect-error number | undefined is not a key
-  const value = yield* G.match(n, { 1: G.integer })
+  const value = yield* G.match(n, [[1, G.integer]] as const)
   return { n, value }
 })
 
@@ -41,7 +41,7 @@ G.gen(function* () {
 const g = G.gen(function* () {
   yield* G.literal("(")
   const n = yield* G.integer
-  const tags = yield* G.many(G.regex(/[a-z]+/, "tag"))
+  const tags = yield* G.regex(/[a-z]+/, "tag").pipe(G.many())
   yield* G.literal(")")
   return { n, tags }
 })
@@ -78,7 +78,10 @@ const okOpt: G.Type<typeof opt> = { port: undefined }
 
 const matched = G.gen(function* () {
   const kind = yield* kindOf
-  const value = yield* G.match(kind, { a: G.integer, b: G.regex(/x/, "x") })
+  const value = yield* G.match(kind, [
+    ["a", G.integer],
+    ["b", G.regex(/x/, "x")],
+  ] as const)
   return { kind, value }
 })
 const okMatched: G.Type<typeof matched> = { kind: "a", value: 1 }
@@ -92,13 +95,16 @@ const header = G.gen(function* () {
 })
 G.gen(function* () {
   const h = yield* header
-  const body = yield* G.match(h.kind, { a: G.take(h.size), b: G.repeat(G.integer, h.size) })
+  const body = yield* G.match(h.kind, [
+    ["a", G.take(h.size)],
+    ["b", G.integer.pipe(G.repeat(h.size))],
+  ] as const)
   // @ts-expect-error no such property
   void h.nope
   return { h, body }
 })
 
-const s: G.Silent = G.gen(function* () {
+const s: G.Grammar<void> = G.gen(function* () {
   yield* G.literal("a")
 })
 
@@ -108,11 +114,9 @@ G.seq(G.literal("a"), G.integer)
 // @ts-expect-error integer is not silent
 G.integer.pipe(G.as(1))
 
-const s2: G.Silent = G.seq(G.literal("a"), G.optional(G.between("<", G.symbol("b"), ">")))
+const s2: G.Grammar<void> = G.seq(G.literal("a"), G.optional(G.symbol("b").pipe(G.between("<", ">"))))
 
-// A choice of silent grammars has no canonical print.
-// @ts-expect-error
-const notSilent: G.Silent = G.choice(G.literal("a"), G.literal("b"))
+const voidChoice: G.Grammar<void> = G.choice(G.literal("a"), G.literal("b"))
 
 const wordGrammar = G.regex(/[a-z]+/, "word")
 // @ts-expect-error Grammar is invariant because printing consumes its value
@@ -124,15 +128,15 @@ void wordGrammar.node
 const reservedHeader = G.literal("h").pipe(G.as({ then: "a" as const }))
 G.gen(function* () {
   const value = yield* reservedHeader
-  const body = yield* G.match(G.get(value, "then"), { a: G.integer })
+  const body = yield* G.match(G.get(value, "then"), [["a", G.integer]] as const)
   return { value, body }
 })
 
 const mixedKind = G.choice(G.literal("n").pipe(G.as(1)), G.literal("s").pipe(G.as("1")))
 G.gen(function* () {
   const kind = yield* mixedKind
-  // @ts-expect-error matchValue must cover every selector literal
-  const value = yield* G.matchValue(kind, [[1, G.integer]] as const)
+  // @ts-expect-error match must cover every selector literal
+  const value = yield* G.match(kind, [[1, G.integer]] as const)
   return { kind, value }
 })
 
@@ -149,7 +153,7 @@ void [
   okMatchedB,
   s,
   s2,
-  notSilent,
+  voidChoice,
   widenedGrammar,
 ]
 
@@ -160,29 +164,36 @@ const untagged = G.regex(/b/, "b").pipe(G.transform({ decode: (v) => ({ v }), en
 const misTagged = G.regex(/c/, "c").pipe(
   G.transform({ decode: (v) => ({ kind: "other" as const, v }), encode: (x) => x.v }),
 )
-G.choiceOn("kind", { plain: plainTagged })
-// @ts-expect-error case "b" has no kind field
-G.choiceOn("kind", { plain: plainTagged, b: untagged })
-// @ts-expect-error case "c" has kind "other", not "c"
-G.choiceOn("kind", { plain: plainTagged, c: misTagged })
-const onGrammar = G.choiceOn("kind", { plain: plainTagged })
+G.dispatch("kind", [["plain", plainTagged]] as const)
+G.dispatch("kind", [
+  ["plain", plainTagged],
+  // @ts-expect-error case "b" has no kind field
+  ["b", untagged],
+] as const)
+G.dispatch("kind", [
+  ["plain", plainTagged],
+  // @ts-expect-error case "c" has kind "other", not "c"
+  ["c", misTagged],
+] as const)
+const onGrammar = G.dispatch("kind", [["plain", plainTagged]] as const)
 const onValue: G.Type<typeof onGrammar> = {
   kind: "plain",
   v: "a",
 }
-const onEntries = G.choiceOnEntries("kind", [["plain", plainTagged]] as const)
-const onEntriesValue: G.Type<typeof onEntries> = { kind: "plain", v: "a" }
-void onEntriesValue
+// @ts-expect-error the value must carry the case's tag
+const onBad: G.Type<typeof onGrammar> = { kind: "other", v: "a" }
+void onBad
 void onValue
 
 type Variant = { readonly kind: "a"; readonly n: 0 } | { readonly kind: "b"; readonly n: number }
-const variant = G.filter(
-  G.struct({
-    kind: G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b"))),
-    n: G.integer,
-  }),
-  (value): value is Variant => value.kind === "b" || value.n === 0,
-  "variant",
+const variant = G.struct({
+  kind: G.choice(G.literal("a").pipe(G.as("a")), G.literal("b").pipe(G.as("b"))),
+  n: G.integer,
+}).pipe(
+  G.filter(
+    (value: { readonly kind: "a" | "b"; readonly n: number }): value is Variant => value.kind === "b" || value.n === 0,
+    "variant",
+  ),
 )
 const merged = G.merge(variant, G.struct({ id: G.integer }))
 const mergedValue: G.Type<typeof merged> = { kind: "b", n: 42, id: 7 }

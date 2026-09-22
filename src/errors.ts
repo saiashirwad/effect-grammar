@@ -2,19 +2,25 @@ import { Predicate, Schema, SchemaIssue } from "effect"
 
 import type { Value } from "./core.ts"
 
-export const describeExpected = (expected: ReadonlyArray<string>): string =>
+const describeExpected = (expected: ReadonlyArray<string>): string =>
   expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
 
+// `line` and `column` are absent when the input was bytes; `pos` is then a byte offset.
 export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   pos: Schema.Finite,
-  line: Schema.Finite,
-  column: Schema.Finite,
+  line: Schema.UndefinedOr(Schema.Finite),
+  column: Schema.UndefinedOr(Schema.Finite),
   expected: Schema.Array(Schema.String),
   found: Schema.UndefinedOr(Schema.String),
 }) {
   override get message(): string {
+    const expected = describeExpected(this.expected)
+    if (this.line === undefined) {
+      const found = this.found === undefined ? "end of input" : `0x${hex(Uint8Array.of(this.found.charCodeAt(0)))}`
+      return `byte ${this.pos}: expected ${expected}, found ${found}`
+    }
     const found = this.found === undefined ? "end of input" : JSON.stringify(this.found)
-    return `line ${this.line}, column ${this.column}: expected ${describeExpected(this.expected)}, found ${found}`
+    return `line ${this.line}, column ${this.column}: expected ${expected}, found ${found}`
   }
 }
 

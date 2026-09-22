@@ -70,37 +70,36 @@ const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
 // Printing dispatches on `kind`; parsing tries branches in order. No guards needed.
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () =>
-    Grammar.choiceOn("kind", {
-      quote: quoteExpr,
-      list,
-      number: numberAtom,
-      string: stringAtom,
-      boolean: booleanAtom,
-      symbol: symbolAtom,
-    }),
+    Grammar.dispatch("kind", [
+      ["quote", quoteExpr],
+      ["list", list],
+      ["number", numberAtom],
+      ["string", stringAtom],
+      ["boolean", booleanAtom],
+      ["symbol", symbolAtom],
+    ] as const),
   "expr",
 )
 
 // `trivia` prints nothing; `spaces` keeps "(+ 1 2)" from printing as "(+12)".
-const list = Grammar.between(
-  Grammar.seq(Grammar.literal("("), Grammar.trivia),
-  Grammar.sepBy(expr, Grammar.spaces),
-  Grammar.seq(Grammar.trivia, Grammar.literal(")")),
-).pipe(
+const list = expr.pipe(
+  Grammar.sepBy(Grammar.spaces),
+  Grammar.between(Grammar.seq(Grammar.literal("("), Grammar.trivia), Grammar.seq(Grammar.trivia, Grammar.literal(")"))),
   Grammar.transform({
     decode: (elements): List => ({ kind: "list", elements }),
     encode: (l) => l.elements,
   }),
 )
 
-const quoteExpr: Grammar.Grammar<Quote> = Grammar.prefix("'", expr).pipe(
+const quoteExpr: Grammar.Grammar<Quote> = expr.pipe(
+  Grammar.prefix("'"),
   Grammar.transform({
     decode: (inner): Quote => ({ kind: "quote", inner }),
     encode: (q) => q.inner,
   }),
 )
 
-const document = Grammar.between(Grammar.trivia, expr, Grammar.trivia)
+const document = expr.pipe(Grammar.between(Grammar.trivia, Grammar.trivia))
 
 interface FormSpec {
   readonly min: number

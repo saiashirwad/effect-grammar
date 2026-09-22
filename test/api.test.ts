@@ -22,7 +22,7 @@ describe("product and conditional APIs", () => {
 
   it.effect("does not replace an explicitly parsed null with the default", () =>
     Effect.sync(() => {
-      const nullable = Grammar.choice(Grammar.as(Grammar.literal("null"), null), Grammar.integer)
+      const nullable = Grammar.choice(Grammar.literal("null").pipe(Grammar.as(null)), Grammar.integer)
       const grammar = Grammar.optional(nullable).pipe(Grammar.defaulted<number | null>(0))
 
       assert.equal(parseOk(grammar, "null"), null)
@@ -67,10 +67,10 @@ describe("product and conditional APIs", () => {
 
   it.effect("represents branch choice with a semantic tag", () =>
     Effect.sync(() => {
-      const grammar = Grammar.taggedChoice("kind", {
-        number: Grammar.integer,
-        word,
-      })
+      const grammar = Grammar.taggedChoice("kind", [
+        ["number", Grammar.integer],
+        ["word", word],
+      ] as const)
 
       assert.deepEqual(parseOk(grammar, "12"), { kind: "number", value: 12 })
       assert.deepEqual(parseOk(grammar, "name"), { kind: "word", value: "name" })
@@ -83,8 +83,8 @@ describe("product and conditional APIs", () => {
 describe("trivia APIs", () => {
   it.effect("separates exact and canonical spaces", () =>
     Effect.sync(() => {
-      const exact = Grammar.between(Grammar.space, Grammar.integer, Grammar.space)
-      const canonical = Grammar.between(Grammar.spaces, Grammar.integer, Grammar.spaces)
+      const exact = Grammar.integer.pipe(Grammar.between(Grammar.space, Grammar.space))
+      const canonical = Grammar.integer.pipe(Grammar.between(Grammar.spaces, Grammar.spaces))
 
       assert.equal(parseOk(exact, " 1 "), 1)
       assert.equal(printOk(exact, 2), " 2 ")

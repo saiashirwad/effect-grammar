@@ -17,42 +17,44 @@ const header = G.merge(
 )
 
 const label = B.uint8.pipe(
-  G.filter((length) => length >= 1 && length <= 63, "label length"),
+  G.filter((length: number) => length >= 1 && length <= 63, "label length"),
   B.lengthPrefixed,
   B.ascii,
 )
 
 const question = G.struct({
-  qname: G.many(label).pipe(G.suffix(B.literal(0))),
+  qname: label.pipe(G.many(), G.suffix(B.literal(0))),
   qtype: B.uint16,
   qclass: B.uint16,
 })
 
 const query = G.gen(function* () {
   const head = yield* header
-  const questions = yield* G.repeat(question, head.qdcount)
+  const questions = yield* question.pipe(G.repeat(head.qdcount))
   return { header: head, questions }
 })
 
 const DnsHeader = Schema.Struct({
-  id: B.Uint16,
-  qr: B.Bit,
-  opcode: B.Uint(4),
-  aa: B.Bit,
-  tc: B.Bit,
-  rd: B.Bit,
-  ra: B.Bit,
-  z: B.Uint(3),
-  rcode: B.Uint(4),
-  qdcount: B.Uint16,
-  ancount: B.Uint16,
-  nscount: B.Uint16,
-  arcount: B.Uint16,
+  id: B.uintSchema(16),
+  qr: B.bitSchema,
+  opcode: B.uintSchema(4),
+  aa: B.bitSchema,
+  tc: B.bitSchema,
+  rd: B.bitSchema,
+  ra: B.bitSchema,
+  z: B.uintSchema(3),
+  rcode: B.uintSchema(4),
+  qdcount: B.uintSchema(16),
+  ancount: B.uintSchema(16),
+  nscount: B.uintSchema(16),
+  arcount: B.uintSchema(16),
 })
 
 const DnsQuery = Schema.Struct({
   header: DnsHeader,
-  questions: Schema.Array(Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.Uint16, qclass: B.Uint16 })),
+  questions: Schema.Array(
+    Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.uintSchema(16), qclass: B.uintSchema(16) }),
+  ),
 })
 
 export const HeaderFromUint8Array = B.codec(header, DnsHeader, { identifier: "DnsHeader" })
