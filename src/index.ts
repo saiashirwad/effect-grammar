@@ -34,7 +34,7 @@ export {
   trivia,
   tuple,
 } from "./combinators.ts"
-export type { Grammar, Ref, Type } from "./core.ts"
+export type { Domain, DomainOf, Grammar, NeutralGrammar, Ref, Type } from "./core.ts"
 export {
   countPrefixed,
   defaulted,

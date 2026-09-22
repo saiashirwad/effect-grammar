@@ -6,19 +6,19 @@ import { Effect, Result, Schema, SchemaIssue } from "effect"
 import * as Binary from "../src/binary.ts"
 import * as G from "../src/index.ts"
 
-const parseOk = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): A =>
+const parseOk = <A>(grammar: Binary.Grammar<A>, ...input: ReadonlyArray<number>): A =>
   Result.getOrThrow(Binary.parse(grammar, Uint8Array.from(input)))
 
-const parseFail = <A>(grammar: G.Grammar<A>, ...input: ReadonlyArray<number>): G.ParseError => {
+const parseFail = <A>(grammar: Binary.Grammar<A>, ...input: ReadonlyArray<number>): G.ParseError => {
   const result = Binary.parse(grammar, Uint8Array.from(input))
   if (Result.isSuccess(result)) assert.fail("expected parse failure")
   return result.failure
 }
 
-const printOk = <A>(grammar: G.Grammar<A>, value: A): ReadonlyArray<number> =>
+const printOk = <A>(grammar: Binary.Grammar<A>, value: A): ReadonlyArray<number> =>
   Array.from(Result.getOrThrow(Binary.print(grammar, value)))
 
-const printFail = <A>(grammar: G.Grammar<A>, value: A): G.PrintError => {
+const printFail = <A>(grammar: Binary.Grammar<A>, value: A): G.PrintError => {
   const result = Binary.print(grammar, value)
   if (Result.isSuccess(result)) assert.fail("expected print failure")
   return result.failure
@@ -192,14 +192,10 @@ describe("bytes / lengthPrefixed / literal", () => {
     }),
   )
 
-  it.effect("rejects characters that are not bytes on input and output", () =>
+  it.effect("rejects literal values outside the byte range", () =>
     Effect.sync(() => {
-      const error = G.parse(Binary.uint16, "a\u0100")
-      assert.ok(Result.isFailure(error))
-      assert.deepEqual(error.failure.expected, ["a byte"])
-      assert.equal(error.failure.pos, 2)
-      assert.match(printFail(G.regex(/./, "char"), "€").message, /only bytes to be printed/)
       assert.throws(() => Binary.literal(256), /expected bytes, got 256/)
+      assert.throws(() => Binary.literal(-1), /expected bytes, got -1/)
     }),
   )
 

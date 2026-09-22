@@ -1,6 +1,6 @@
 import { Effect, flow, type Result, Schema, SchemaIssue, SchemaTransformation } from "effect"
 
-import type { Grammar } from "../core.ts"
+import type { Domain, Grammar } from "../core.ts"
 import { formatIssue, type ParseError, type PrintError, type PrintIssue } from "../errors.ts"
 import { render } from "../render.ts"
 
@@ -14,12 +14,12 @@ const toSchemaIssue = (issue: PrintIssue): SchemaIssue.Issue =>
     : new SchemaIssue.InvalidValue({ message: formatIssue(issue) })
 
 export const codecWith =
-  <Input extends Schema.Top>(
+  <Input extends Schema.Top, D extends Domain>(
     source: Input,
-    parse: <A>(grammar: Grammar<A>, input: Input["Type"]) => Result.Result<A, ParseError>,
-    print: <A>(grammar: Grammar<A>, value: A) => Result.Result<Input["Type"], PrintError>,
+    parse: <A>(grammar: Grammar<A, D>, input: Input["Type"]) => Result.Result<A, ParseError>,
+    print: <A>(grammar: Grammar<A, D>, value: A) => Result.Result<Input["Type"], PrintError>,
   ) =>
-  <S extends Schema.Top, A extends S["Encoded"]>(grammar: Grammar<A>, target: S, options?: CodecOptions) =>
+  <S extends Schema.Top, A extends S["Encoded"]>(grammar: Grammar<A, D>, target: S, options?: CodecOptions) =>
     source.pipe(
       Schema.decodeTo(
         target,

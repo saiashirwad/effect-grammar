@@ -3,11 +3,14 @@ import { Predicate, Result } from "effect"
 import {
   type AnyGrammar,
   type Denote,
+  type Domain,
+  type DomainOf,
   type Expr,
   type Grammar,
   isCount,
   isGrammar,
   make,
+  nodeOf,
   type MatchKey,
   type Ref,
   type ScopeId,
@@ -22,13 +25,17 @@ export { get } from "./ref.ts"
 
 export const literal = (value: string): Grammar<void> => make({ _tag: "Literal", value })
 
-export const empty = literal("")
+export const empty = make<void, never>({ _tag: "Literal", value: "" })
 
-const toGrammar = (value: Grammar<void> | string): Grammar<void> => (Predicate.isString(value) ? literal(value) : value)
+type Delimiter = Grammar<void, Domain> | string
+type DelimiterDomain<T> = T extends string ? "text" : DomainOf<T>
+
+export const toGrammar = <T extends Delimiter>(value: T): Grammar<void, DelimiterDomain<T>> =>
+  make(Predicate.isString(value) ? { _tag: "Literal", value } : nodeOf(value))
 
 export const label =
   (name: string) =>
-  <A>(inner: Grammar<A>): Grammar<A> =>
+  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A, D> =>
     make({ _tag: "Label", inner, name })
 
 export const regex = (expression: RegExp, name?: string): Grammar<string> => {
@@ -40,7 +47,7 @@ export const regex = (expression: RegExp, name?: string): Grammar<string> => {
   return name === undefined ? grammar : label(name)(grammar)
 }
 
-const countExpr = (count: Ref<number> | number, where: string): Expr => {
+export const countExpr = (count: Ref<number> | number, where: string): Expr => {
   if (!Predicate.isNumber(count)) return assertInScope(count, where)
   if (!isCount(count)) throw new RangeError(`${where}: count must be a non-negative safe integer`)
   return { _tag: "Const", value: count }
@@ -49,7 +56,7 @@ const countExpr = (count: Ref<number> | number, where: string): Expr => {
 export const take = (count: Ref<number> | number): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "take") })
 
-const makeGen = <A>(scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, tree: Pattern): Grammar<A> =>
+const makeGen = <A, D extends Domain>(scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, tree: Pattern): Grammar<A, D> =>
   make({
     _tag: "Gen",
     scope,
@@ -57,7 +64,7 @@ const makeGen = <A>(scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, tree: Patt
     result: returnPattern(tree, scope, (slot) => describeStep(steps[slot]!, slot)),
   })
 
-export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<Denote<R>> => {
+export const gen = <Y extends AnyGrammar, R>(run: () => Generator<Y, R, unknown>): Grammar<Denote<R>, DomainOf<Y>> => {
   const iterator = run()
   const steps: Array<AnyGrammar> = []
   const scope: Scope = { id: { _tag: "ScopeId" }, open: true }
@@ -76,10 +83,9 @@ export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<De
   }
 }
 
-export const seq = (...parts: ReadonlyArray<Grammar<void>>): Grammar<void> =>
-  gen(function* () {
-    for (const part of parts) yield* part
-  })
+export const seq = <const Parts extends ReadonlyArray<Grammar<void, Domain>>>(
+  ...parts: Parts
+): Grammar<void, DomainOf<Parts[number]>> => makeGen({ _tag: "ScopeId" }, parts, { _tag: "Const", value: undefined })
 
 type StructValue<Fields extends Readonly<Record<string, AnyGrammar>>> = {
   readonly [K in keyof Fields]: Type<Fields[K]>
@@ -87,7 +93,7 @@ type StructValue<Fields extends Readonly<Record<string, AnyGrammar>>> = {
 
 export const struct = <const Fields extends Readonly<Record<string, AnyGrammar>>>(
   fields: Fields,
-): Grammar<StructValue<Fields>> => {
+): Grammar<StructValue<Fields>, DomainOf<Fields[keyof Fields]>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
   const entries = Object.entries(fields)
   return makeGen(
@@ -103,19 +109,19 @@ type TupleValue<Elements extends ReadonlyArray<AnyGrammar>> = {
 
 export const tuple = <const Elements extends ReadonlyArray<AnyGrammar>>(
   ...elements: Elements
-): Grammar<TupleValue<Elements>> => {
+): Grammar<TupleValue<Elements>, DomainOf<Elements[number]>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
   return makeGen(scope, elements, { _tag: "Array", items: elements.map((_, slot) => ({ _tag: "Ref", scope, slot })) })
 }
 
 export const as =
   <const V>(value: V) =>
-  (inner: Grammar<void>): Grammar<V> =>
+  <D extends Domain>(inner: Grammar<void, D>): Grammar<V, D> =>
     makeGen({ _tag: "ScopeId" }, [inner], { _tag: "Const", value })
 
 export const between =
-  (open: Grammar<void> | string, close: Grammar<void> | string) =>
-  <A>(inner: Grammar<A>): Grammar<A> => {
+  <Open extends Delimiter, Close extends Delimiter>(open: Open, close: Close) =>
+  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A, D | DelimiterDomain<Open> | DelimiterDomain<Close>> => {
     const scope: ScopeId = { _tag: "ScopeId" }
     return makeGen(scope, [skip<void>(undefined)(toGrammar(open)), inner, skip<void>(undefined)(toGrammar(close))], {
       _tag: "Ref",
@@ -124,9 +130,9 @@ export const between =
     })
   }
 
-export const prefix = (open: Grammar<void> | string) => between(open, empty)
+export const prefix = <Open extends Delimiter>(open: Open) => between(open, empty)
 
-export const suffix = (close: Grammar<void> | string) => between(empty, close)
+export const suffix = <Close extends Delimiter>(close: Close) => between(empty, close)
 
 const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void => {
   const seen = new Set<MatchKey>()
@@ -145,7 +151,8 @@ export interface ChoiceOptions {
 export const choice = <const Grammars extends Options>(
   options: Grammars,
   policy?: ChoiceOptions,
-): Grammar<Type<Grammars[number]>> => make({ _tag: "Choice", options, print: policy?.print ?? "first" })
+): Grammar<Type<Grammars[number]>, DomainOf<Grammars[number]>> =>
+  make({ _tag: "Choice", options, print: policy?.print ?? "first" })
 
 type Entries = ReadonlyArray<readonly [MatchKey, AnyGrammar]>
 
@@ -167,24 +174,25 @@ type TaggedEntries<Tag extends string, E extends Entries> = {
   readonly [I in keyof E]: E[I] extends readonly [infer K extends MatchKey, unknown]
     ? Type<E[I][1]> extends Readonly<Record<Tag, K>>
       ? E[I]
-      : readonly [K, Grammar<Readonly<Record<Tag, K>>>]
+      : readonly [K, Grammar<Readonly<Record<Tag, K>>, Domain>]
     : never
 }
 
 export const dispatch = <const Tag extends string, const E extends Entries>(
   tag: Tag,
   entries: E & TaggedEntries<Tag, E>,
-): Grammar<EntryOutput<E>> => make({ _tag: "Dispatch", tag, cases: cases(entries, "dispatch") })
+): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> => make({ _tag: "Dispatch", tag, cases: cases(entries, "dispatch") })
 
 type CompleteEntries<K extends MatchKey, E extends Entries> = Exclude<K, E[number][0]> extends never ? E : never
 
 export const match = <K extends MatchKey, const E extends ReadonlyArray<readonly [K, AnyGrammar]>>(
   scrutinee: Ref<K>,
   entries: CompleteEntries<K, E>,
-): Grammar<EntryOutput<E>> =>
+): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> =>
   make({ _tag: "Match", scrutinee: assertInScope(scrutinee, "match"), cases: cases(entries, "match") })
 
-export const optional = <A>(inner: Grammar<A>): Grammar<A | undefined> => make({ _tag: "Optional", inner })
+export const optional = <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A | undefined, D> =>
+  make({ _tag: "Optional", inner })
 
 export interface RepeatOptions {
   readonly min?: number
@@ -192,8 +200,8 @@ export interface RepeatOptions {
 }
 
 const repeatNode =
-  (where: string, sep: Grammar<void>, options: RepeatOptions | undefined) =>
-  <A>(inner: Grammar<A>): Grammar<ReadonlyArray<A>> => {
+  <S extends Domain>(where: string, sep: Grammar<void, S>, options: RepeatOptions | undefined) =>
+  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<ReadonlyArray<A>, D | S> => {
     const min = options?.min ?? 0
     const max = options?.max
     if (!isCount(min)) throw new RangeError(`${where}: min must be a non-negative safe integer`)
@@ -211,12 +219,12 @@ const repeatNode =
 
 export const many = (options?: RepeatOptions) => repeatNode("many", empty, options)
 
-export const sepBy = (separator: Grammar<void> | string, options?: RepeatOptions) =>
+export const sepBy = <S extends Delimiter>(separator: S, options?: RepeatOptions) =>
   repeatNode("sepBy", toGrammar(separator), options)
 
 export const repeat =
   (count: Ref<number> | number) =>
-  <A>(inner: Grammar<A>): Grammar<ReadonlyArray<A>> => {
+  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<ReadonlyArray<A>, D> => {
     const expr = countExpr(count, "repeat")
     return make({ _tag: "Repeat", inner, sep: empty, min: expr, max: expr })
   }
@@ -231,12 +239,14 @@ export interface TransformOrFailOptions<A, B> {
   readonly encode: (b: B) => Result.Result<A, string>
 }
 
-export const transformNode = <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B> =>
-  make({ _tag: "Transform", inner, ...options })
+export const transformNode = <A, B, D extends Domain>(
+  inner: Grammar<A, D>,
+  options: TransformOrFailOptions<A, B>,
+): Grammar<B, D> => make({ _tag: "Transform", inner, ...options })
 
 export const transform =
   <A, B>(options: TransformOptions<A, B>) =>
-  (inner: Grammar<A>): Grammar<B> =>
+  <D extends Domain>(inner: Grammar<A, D>): Grammar<B, D> =>
     transformNode(inner, {
       decode: (value) => Result.succeed(options.decode(value)),
       encode: (value) => Result.succeed(options.encode(value)),
@@ -244,19 +254,19 @@ export const transform =
 
 export const transformOrFail =
   <A, B>(options: TransformOrFailOptions<A, B>) =>
-  (inner: Grammar<A>): Grammar<B> =>
+  <D extends Domain>(inner: Grammar<A, D>): Grammar<B, D> =>
     transformNode(inner, options)
 
 export function filter<A, B extends A>(
   refinement: (value: A) => value is B,
   name: string,
-): <I extends A>(inner: Grammar<I>) => Grammar<I & B>
+): <I extends A, D extends Domain>(inner: Grammar<I, D>) => Grammar<I & B, D>
 export function filter<A>(
   predicate: (value: A) => boolean,
   name: string,
-): <I extends A>(inner: Grammar<I>) => Grammar<I>
+): <I extends A, D extends Domain>(inner: Grammar<I, D>) => Grammar<I, D>
 export function filter<A>(predicate: (value: A) => boolean, name: string) {
-  return <I extends A>(inner: Grammar<I>): Grammar<I> => {
+  return <I extends A, D extends Domain>(inner: Grammar<I, D>): Grammar<I, D> => {
     const check = (value: I) => (predicate(value) ? Result.succeed(value) : Result.fail(name))
     return transformNode(inner, { decode: check, encode: check })
   }
@@ -264,10 +274,11 @@ export function filter<A>(predicate: (value: A) => boolean, name: string) {
 
 export const skip =
   <A>(printAs: A) =>
-  (inner: Grammar<A>): Grammar<void> =>
+  <D extends Domain>(inner: Grammar<A, D>): Grammar<void, D> =>
     make({ _tag: "Skip", inner, printAs, hidden: false })
 
-export const suspend = <A>(thunk: () => Grammar<A>, name?: string): Grammar<A> => make({ _tag: "Suspend", thunk, name })
+export const suspend = <A, D extends Domain = "text">(thunk: () => Grammar<A, D>, name?: string): Grammar<A, D> =>
+  make({ _tag: "Suspend", thunk, name })
 
 const hiddenWhitespace = (expression: RegExp, name: string, printAs: string): Grammar<void> =>
   make({ _tag: "Skip", inner: regex(expression, name), printAs, hidden: true })

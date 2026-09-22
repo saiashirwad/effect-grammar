@@ -43,7 +43,9 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 ```
 
 `G.literal` matches fixed text. `G.gen` defines the fields to parse and print.
-Import `codec` and its `CodecOptions` type from `effect-grammar/Schema`.
+Import `codec` and its `CodecOptions` type from `effect-grammar/Schema`. For an
+explicit text entry point, import `effect-grammar/Text`. It provides the root
+helpers and text runners, plus `codec` and `CodecOptions`.
 
 Encoding checks that the output parses back to an equal value using
 `Equal.equals`. It does not preserve the original text's spelling.
@@ -125,6 +127,17 @@ tuple. Property refs from `get` cannot appear in return patterns. To flatten or
 rename fields, apply `transform` to the grammar. Its callbacks receive ordinary
 values and must describe both the decode and encode directions.
 
+`match(selector, entries)` chooses a branch from a ref and checks that the cases
+cover the selector's type. Its result type is the union of the branch results.
+TypeScript does not correlate that result with the selector in a returned
+object. For example, `{ kind, value }` has independent union fields, not a
+discriminated union. Use `taggedChoice` or `dispatch` for a discriminated
+result. Printing still checks the selected branch at runtime.
+
+Text `take` and `lengthPrefixed` count UTF-16 code units, as JavaScript string
+`.length` does. For example, `"😀"` has length 2. Binary byte counts use bytes.
+`repeat` and `countPrefixed` count items in either domain.
+
 ## Structural diagnostics
 
 `G.diagnose(grammar)` returns structural issues. Each issue has a stable `_tag`,
@@ -174,7 +187,11 @@ to runtime progress checks. An empty issue list does not guarantee successful
 parsing or printing for every value.
 
 `G.describe(grammar)` returns a shallow name without resolving suspensions.
-`G.render(grammar)` returns full grammar notation and can resolve suspensions.
+`G.render(grammar)` returns descriptive grammar notation and can resolve
+suspensions. The notation is not a complete specification of the accepted
+language or print behavior. It does not express every filter, transform,
+dependent constraint, or round-trip check. Use the runners to validate actual
+inputs and values.
 
 ## Binary
 
@@ -201,8 +218,58 @@ Result.getOrThrow(Binary.print(header, { version: 1, length: 3 }))
 `Binary.bytes(count)` reads and writes a `Uint8Array`. The count can be a number
 or a length ref. `Binary.lengthPrefixed(length)` derives the prefix from the
 byte length. Use `Binary.ascii` or `Binary.utf8` to convert a byte grammar to
-text. `Binary.codec(grammar, target, options)` creates a Schema codec with
+string values. These helpers retain byte input and output.
+`Binary.codec(grammar, target, options)` creates a Schema codec with
 `Uint8Array` input and output. `Binary.hex(bytes)` formats bytes for display.
+
+## Grammar domains
+
+`Grammar<A, D = "text">` tracks the value type `A` and the input/output domain
+`D`. Text runners and `Schema.codec` require `"text"`. Binary runners and
+`Binary.codec` require `"bytes"`. `Binary.Grammar<A>` is shorthand for
+`Grammar<A, "bytes">`, including recursive annotations.
+
+Shared combinators preserve domains through products, branches, repetitions,
+transforms, and every `gen` yield. A mixed composition has domain
+`"text" | "bytes"`. You can construct and inspect it, but neither domain's
+runners or codecs accept it. A string delimiter or separator imposes the text
+domain, even when the string is empty. Use `Binary.literal(...)` for byte
+syntax.
+
+`NeutralGrammar<A>` means `Grammar<A, never>`. Neutral grammars consume and emit
+no domain-specific input, so they compose with either domain. `empty`,
+`tuple()`, `struct({})`, `seq()`, and a `gen` with no yields are neutral.
+Applying `as`, `transform`, or another shared wrapper preserves that neutrality.
+Use `empty` for an absent delimiter, rather than `literal("")`.
+
+```ts
+const framed = Binary.uint8.pipe(G.between(Binary.literal(0xaa), G.empty))
+Binary.parse(framed, Uint8Array.of(0xaa, 1))
+
+const mixed = G.tuple(G.integer, Binary.uint8)
+// G.parse(mixed, "1") and Binary.parse(mixed, bytes) are type errors.
+```
+
+Domain separation is a TypeScript boundary. Both domains use the same internal
+string interpreter. Raw byte strings and domain-polymorphic runners are private
+to the package.
+
+## Grammar law helpers
+
+`effect-grammar/testing` provides `assertPrintParse`,
+`assertParsePrintCanonical`, `checkPrintParse`, and `checkCanonicalization` for
+text grammars. `Testing.Binary` provides the same functions for byte grammars.
+Canonicalization checks that printing preserves the parsed value and that a
+second canonicalization produces the same output. Byte output comparisons use
+byte contents, and byte input diagnostics use hex.
+
+```ts
+import * as Testing from "effect-grammar/testing"
+
+Testing.Binary.assertPrintParse(Binary.varuint, 1)
+Testing.Binary.assertParsePrintCanonical(Binary.varuint, Uint8Array.of(0x81, 0))
+// Uint8Array [1]
+```
 
 ## Examples
 

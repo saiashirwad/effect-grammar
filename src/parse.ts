@@ -1,6 +1,6 @@
 import { Result } from "effect"
 
-import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
+import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./internal/describe.ts"
@@ -201,6 +201,8 @@ export const parseWithEnv = (
   )
 }
 
-export const parse = <A>(grammar: Grammar<A>, input: string): Result.Result<A, ParseError> =>
+export const parseDomain = <A, D extends Domain>(grammar: Grammar<A, D>, input: string): Result.Result<A, ParseError> =>
   // SAFETY: interpreting Grammar<A> preserves its output type across every node.
   parseWithEnv(grammar, input, undefined) as Result.Result<A, ParseError>
+
+export const parse: <A>(grammar: Grammar<A, "text">, input: string) => Result.Result<A, ParseError> = parseDomain

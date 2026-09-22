@@ -1,6 +1,8 @@
 import { Console, Effect, Result } from "effect"
 
-import * as Grammar from "../src/index.ts"
+import * as Grammar from "../src/text.ts"
+
+// This text format counts UTF-16 code units. Byte-oriented netstrings need Binary.
 
 const netstring = Grammar.gen(function* () {
   const length = yield* Grammar.integer

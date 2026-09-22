@@ -1,22 +1,15 @@
 import { Predicate, Result, Schema } from "effect"
 
-import {
-  filter,
-  label,
-  literal as text,
-  regex,
-  take,
-  transform,
-  transformNode,
-  transformOrFail,
-} from "./combinators.ts"
-import { type Grammar, isCount, type Ref, type Value } from "./core.ts"
-import { prefixedBy } from "./derived.ts"
+import { filter, label, countExpr, transform, transformNode, transformOrFail } from "./combinators.ts"
+import { type Grammar as CoreGrammar, isCount, make, type Ref, type Value } from "./core.ts"
 import { ParseError, PrintError } from "./errors.ts"
 import { hex, nonByte, toBytes, toText } from "./internal/bytes.ts"
+import { prefixedBy } from "./internal/prefixed.ts"
 import { codecWith } from "./internal/schema.ts"
-import { parse as parseText } from "./parse.ts"
-import { print as printText, printUnchecked as printUncheckedText } from "./print.ts"
+import { parseDomain } from "./parse.ts"
+import { printDomain, printUncheckedDomain } from "./print.ts"
+
+export type Grammar<A> = CoreGrammar<A, "bytes">
 
 export { hex } from "./internal/bytes.ts"
 
@@ -46,7 +39,8 @@ export const int64Schema = Schema.BigInt.check(
 
 const isBinary = (value: string): boolean => !nonByte.test(value)
 
-const takeByteString = (count: Ref<number> | number): Grammar<string> => take(count).pipe(filter(isBinary, "a byte"))
+const takeByteString = (count: Ref<number> | number): Grammar<string> =>
+  make<string, "bytes">({ _tag: "Take", count: countExpr(count, "bytes") }).pipe(filter(isBinary, "a byte"))
 
 const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
   inner.pipe(transform({ decode: toBytes, encode: toText }), filter(Predicate.isUint8Array, "bytes"))
@@ -61,7 +55,7 @@ export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
     throw new RangeError(`literal: expected bytes, got ${values.join(", ")}`)
   }
   const name = values.map((value) => `0x${hex(Uint8Array.of(value))}`).join(" ")
-  return text(toText(Uint8Array.from(values))).pipe(label(name))
+  return make<void, "bytes">({ _tag: "Literal", value: toText(Uint8Array.from(values)) }).pipe(label(name))
 }
 
 export const ascii = (inner: Grammar<Uint8Array>): Grammar<string> =>
@@ -168,7 +162,8 @@ export const float64 = float(8, "float64")
 export const float32le = float(4, "float32le", true)
 export const float64le = float(8, "float64le", true)
 
-const leb128 = (name: string): Grammar<string> => regex(/[\x80-\xff]*[\0-\x7f]/, name)
+const leb128 = (name: string): Grammar<string> =>
+  make<string, "bytes">({ _tag: "Regex", source: /[\x80-\xff]*[\0-\x7f]/.source, flags: "" }).pipe(label(name))
 
 const fromLeb128 = (binary: string): number => {
   let value = 0
@@ -262,7 +257,7 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
   Result.mapError(
-    parseText(grammar, toText(input)),
+    parseDomain(grammar, toText(input)),
     ({ pos, expected, found }) => new ParseError({ pos, line: undefined, column: undefined, expected, found }),
   )
 
@@ -279,9 +274,9 @@ const toByteResult = (
   )
 
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
-  toByteResult(value, printText(grammar, value))
+  toByteResult(value, printDomain(grammar, value))
 
 export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
-  toByteResult(value, printUncheckedText(grammar, value))
+  toByteResult(value, printUncheckedDomain(grammar, value))
 
 export const codec = codecWith(Schema.Uint8Array, parse, print)

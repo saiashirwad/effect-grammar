@@ -83,6 +83,7 @@ describe("packaged exports", () => {
         const script = [
           "const root = await import('effect-grammar')",
           "const binary = await import('effect-grammar/Binary')",
+          "const textFacade = await import('effect-grammar/Text')",
           "const adapter = await import('effect-grammar/Schema')",
           "const testing = await import('effect-grammar/testing')",
           "const { Schema } = await import('effect')",
@@ -92,6 +93,8 @@ describe("packaged exports", () => {
           "  throw new Error('root exports differ: ' + JSON.stringify({ expected, actual }))",
           "}",
           "if (typeof binary.bits !== 'function') throw new Error('missing Binary.bits')",
+          "if (textFacade.parse !== root.parse || textFacade.codec !== adapter.codec) throw new Error('Text facade')",
+          "if (typeof testing.Binary.assertParsePrintCanonical !== 'function') throw new Error('byte law helpers')",
           "if ('codec' in root || 'decodeTo' in root) throw new Error('obsolete root export')",
           "if ('takeBytes' in binary || 'takeByteString' in binary) throw new Error('raw byte-string export')",
           "const text = adapter.codec(root.integer, Schema.Number)",
@@ -123,7 +126,7 @@ describe("packaged exports", () => {
           'const options: CodecOptions = { identifier: "Number" }',
           "const text = codec(G.integer, target, options)",
           "const binary = Binary.codec(Binary.uint8, target, options)",
-          "const bytes: G.Grammar<Uint8Array> = Binary.bytes(2)",
+          "const bytes: G.Grammar<Uint8Array, 'bytes'> = Binary.bytes(2)",
           "type Same<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false",
           "const types: [Same<typeof text.Type, string>, Same<typeof text.Encoded, string>,",
           "  Same<typeof binary.Encoded, Uint8Array>, Same<typeof text.DecodingServices, Decode>,",
@@ -144,6 +147,13 @@ describe("packaged exports", () => {
           "void [bytes, types, Testing.assertPrintParse]",
         ].join("\n")
         yield* fs.writeFileString(path.join(consumer, "index.mts"), types)
+        const domainTypes = (yield* fs.readFileString(path.join(root, "test/domain-types.ts")))
+          .replaceAll("../src/index.ts", "effect-grammar")
+          .replaceAll("../src/binary.ts", "effect-grammar/Binary")
+          .replaceAll("../src/text.ts", "effect-grammar/Text")
+          .replaceAll("../src/schema.ts", "effect-grammar/Schema")
+          .replaceAll("../src/testing.ts", "effect-grammar/testing")
+        yield* fs.writeFileString(path.join(consumer, "domains.mts"), domainTypes)
         yield* run(
           "node",
           [
@@ -156,6 +166,7 @@ describe("packaged exports", () => {
             "--module",
             "nodenext",
             "index.mts",
+            "domains.mts",
           ],
           consumer,
         )

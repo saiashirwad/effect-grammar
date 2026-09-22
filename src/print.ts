@@ -1,6 +1,6 @@
 import { Equal, Predicate, Result } from "effect"
 
-import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
+import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
 import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
 import { describe, describeStep } from "./internal/describe.ts"
@@ -197,14 +197,21 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
   }
 }
 
-export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
+export const printUncheckedDomain = <A, D extends Domain>(
+  grammar: Grammar<A, D>,
+  value: A,
+): Result.Result<string, PrintError> =>
   Result.mapError(
     printGrammar(grammar, value, undefined, { activeFor: new Map() }),
     (issue) => new PrintError({ issue }),
   )
 
-export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<string, PrintError> =>
-  Result.flatMap(printUnchecked(grammar, value), (printed) => {
+export const printDomain = <A, D extends Domain>(grammar: Grammar<A, D>, value: A): Result.Result<string, PrintError> =>
+  Result.flatMap(printUncheckedDomain(grammar, value), (printed) => {
     const issue = roundTripIssue(grammar, value, printed, undefined)
     return issue === undefined ? Result.succeed(printed) : Result.fail(new PrintError({ issue }))
   })
+
+export const print: <A>(grammar: Grammar<A, "text">, value: A) => Result.Result<string, PrintError> = printDomain
+export const printUnchecked: <A>(grammar: Grammar<A, "text">, value: A) => Result.Result<string, PrintError> =
+  printUncheckedDomain

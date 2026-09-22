@@ -5,19 +5,28 @@ import type { ReturnPattern } from "./pattern.ts"
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
 const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
+const DomainTypeId: unique symbol = Symbol("effect-grammar/Domain")
+
+export type Domain = "text" | "bytes"
 
 export type Value = {} | null | undefined
 
 export interface AnyGrammar extends Pipeable.Pipeable {
   readonly [NodeTypeId]: Node
+  readonly [DomainTypeId]: Domain
 }
 
-export interface Grammar<in out A> extends AnyGrammar {
+export interface Grammar<in out A, out D extends Domain = "text"> extends AnyGrammar {
   readonly [GrammarTypeId]: Types.Invariant<A>
-  [Symbol.iterator](): Iterator<Grammar<A>, Yielded<A>, Yielded<A>>
+  readonly [DomainTypeId]: D
+  [Symbol.iterator](): Iterator<Grammar<A, D>, Yielded<A>, Yielded<A>>
 }
 
-export type Type<G> = G extends Grammar<infer A> ? A : never
+export type Type<G> = G extends Grammar<infer A, Domain> ? A : never
+export type DomainOf<G> = G extends AnyGrammar ? G[typeof DomainTypeId] : never
+
+/** A grammar that consumes and emits no domain-specific input. */
+export type NeutralGrammar<A> = Grammar<A, never>
 
 export type Yielded<A> = [A] extends [void] ? void : Ref<A>
 
@@ -35,8 +44,9 @@ export type Denote<T> =
         ? { -readonly [K in keyof T]: Denote<T[K]> }
         : T
 
-class GrammarImpl<A> implements Grammar<A> {
+class GrammarImpl<A, D extends Domain> implements Grammar<A, D> {
   declare readonly [GrammarTypeId]: Types.Invariant<A>
+  declare readonly [DomainTypeId]: D
   readonly [NodeTypeId]: Node
 
   constructor(node: Node) {
@@ -48,13 +58,13 @@ class GrammarImpl<A> implements Grammar<A> {
   }
 
   [Symbol.iterator]() {
-    return new Utils.SingleShotGen<Grammar<A>, Yielded<A>>(this)
+    return new Utils.SingleShotGen<Grammar<A, D>, Yielded<A>>(this)
   }
 }
 
 Object.defineProperty(GrammarImpl.prototype, GrammarTypeId, { value: GrammarTypeId })
 
-export const make = <A>(node: Node): Grammar<A> => new GrammarImpl<A>(node)
+export const make = <A, D extends Domain = "text">(node: Node): Grammar<A, D> => new GrammarImpl<A, D>(node)
 
 export const nodeOf = (grammar: AnyGrammar): Node => grammar[NodeTypeId]
 
@@ -102,7 +112,7 @@ export type Node =
   | {
       readonly _tag: "Repeat"
       readonly inner: AnyGrammar
-      readonly sep: Grammar<void>
+      readonly sep: Grammar<void, Domain>
       readonly min: Expr
       readonly max: Expr | undefined
     }
