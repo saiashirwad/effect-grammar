@@ -214,7 +214,7 @@ describe("gen", () => {
     }),
   )
 
-  it.effect("returns fields of a ref only when every field is accounted for", () =>
+  it.effect("reshapes whole refs with a transform and rejects property returns", () =>
     Effect.sync(() => {
       const pair = G.gen(function* () {
         const a = yield* G.integer
@@ -223,17 +223,22 @@ describe("gen", () => {
       })
       const renamed = G.gen(function* () {
         const p = yield* pair
-        return { first: p.a, second: p.b }
-      })
+        return p
+      }).pipe(
+        G.transform({
+          decode: ({ a, b }) => ({ first: a, second: b }),
+          encode: ({ first, second }) => ({ a: first, b: second }),
+        }),
+      )
       assert.deepEqual(parseOk(renamed, "1,2"), { first: 1, second: 2 })
       assert.equal(printOk(renamed, { first: 3, second: 4 }), "3,4")
       assert.throws(
         () =>
           G.gen(function* () {
             const p = yield* pair
-            return p.a
+            return G.get(p, "a")
           }),
-        /"b" is missing/,
+        /property ref; return the whole bound ref/,
       )
     }),
   )
@@ -326,9 +331,9 @@ describe("match", () => {
       const frame = G.gen(function* () {
         const h = yield* header
         yield* G.literal(":")
-        const body = yield* G.match(h.kind, [
-          ["text", G.take(h.size)],
-          ["bin", G.regex(/[01]/, "bit").pipe(G.repeat(h.size))],
+        const body = yield* G.match(G.get(h, "kind"), [
+          ["text", G.take(G.get(h, "size"))],
+          ["bin", G.regex(/[01]/, "bit").pipe(G.repeat(G.get(h, "size")))],
         ] as const)
         return { h, body }
       })

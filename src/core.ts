@@ -1,8 +1,10 @@
 import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
+import type { ReturnPattern } from "./pattern.ts"
+
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
-export const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
+const RefTypeId: unique symbol = Symbol("effect-grammar/Ref")
 
 export type Value = {} | null | undefined
 
@@ -19,25 +21,14 @@ export type Type<G> = G extends Grammar<infer A> ? A : never
 
 export type Yielded<A> = [A] extends [void] ? void : Ref<A>
 
-export interface RefBase<out A> {
-  readonly [RefTypeId]: Types.Covariant<A>
+export abstract class Ref<out A> {
+  // A protected brand is omitted by object-spread inference, so a copy is not a Ref.
+  declare protected readonly [RefTypeId]: Types.Covariant<A>
 }
 
-type RefProps<A> = [A] extends [ReadonlyArray<unknown>]
-  ? { readonly length: Ref<number> }
-  : [A] extends [object]
-    ? { readonly [K in keyof A & string]-?: Ref<A[K]> }
-    : {}
-
-export type Ref<A> = RefBase<A> & RefProps<A>
-
-type StringKeys<T> = Extract<keyof T, string>
-
 export type Denote<T> =
-  T extends RefBase<infer A>
-    ? Exclude<StringKeys<T>, StringKeys<A>> extends never
-      ? A
-      : Types.Simplify<A & { -readonly [K in Exclude<StringKeys<T>, StringKeys<A>>]: Denote<T[K]> }>
+  T extends Ref<infer A>
+    ? A
     : T extends ReadonlyArray<unknown>
       ? { -readonly [K in keyof T]: Denote<T[K]> }
       : T extends object
@@ -87,13 +78,6 @@ export type Expr =
 export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
-export type Pattern =
-  | RefExpr
-  | { readonly _tag: "Prop"; readonly object: RefExpr; readonly key: string }
-  | { readonly _tag: "Const"; readonly value: Value }
-  | { readonly _tag: "Object"; readonly fields: ReadonlyArray<readonly [string, Pattern]> }
-  | { readonly _tag: "Array"; readonly items: ReadonlyArray<Pattern> }
-
 export type MatchKey = string | number | boolean
 
 export interface Case {
@@ -113,7 +97,7 @@ export type Node =
       readonly _tag: "Gen"
       readonly scope: ScopeId
       readonly steps: ReadonlyArray<AnyGrammar>
-      readonly result: Pattern
+      readonly result: ReturnPattern
     }
   | { readonly _tag: "Wrap"; readonly open: Grammar<void>; readonly inner: AnyGrammar; readonly close: Grammar<void> }
   | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly checked: boolean }
@@ -132,7 +116,6 @@ export type Node =
       readonly inner: AnyGrammar
       readonly decode: (a: any) => Result.Result<Value, string>
       readonly encode: (b: any) => Result.Result<Value, string>
-      readonly keys?: ReadonlyArray<string> | undefined
     }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
   | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }

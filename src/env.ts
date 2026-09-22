@@ -1,7 +1,6 @@
-import { Equal, Predicate, Result } from "effect"
+import { Predicate } from "effect"
 
-import type { Case, Expr, Pattern, RefExpr, ScopeId, Value } from "./core.ts"
-import { exceptionMessage, type PrintIssue } from "./errors.ts"
+import type { Case, Expr, RefExpr, ScopeId, Value } from "./core.ts"
 
 export const Unbound = Symbol("effect-grammar/Unbound")
 
@@ -29,136 +28,11 @@ export const evaluate = (expr: Expr, env: Frame | undefined): Value => {
   if (expr._tag === "Const") return expr.value
 
   const object = evaluate(expr.object, env)
-  if (object === Unbound || !Predicate.isObject(object)) return Unbound
-  return Object.hasOwn(object, expr.key) ? object[expr.key] : Unbound
+  if (object === Unbound || !Predicate.isObjectOrArray(object)) return Unbound
+  // SAFETY: objects and arrays support property-key access; only own fields are evaluated.
+  const fields = object as Readonly<Record<PropertyKey, Value>>
+  return Object.hasOwn(fields, expr.key) ? fields[expr.key] : Unbound
 }
 
 export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
   cases.find((matchCase) => Object.is(matchCase.key, value))
-
-const setOwn = (object: Record<string, Value>, key: string, value: Value): void => {
-  Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true })
-}
-
-export const materialize = (pattern: Pattern, env: Frame): Value => {
-  switch (pattern._tag) {
-    case "Ref":
-      return lookup(env, pattern)
-    case "Prop":
-      return evaluate(pattern, env)
-    case "Const":
-      return pattern.value
-    case "Object": {
-      const object: Record<string, Value> = {}
-      for (const [key, field] of pattern.fields) {
-        const value = materialize(field, env)
-        if (value === Unbound) return Unbound
-        setOwn(object, key, value)
-      }
-      return object
-    }
-    case "Array": {
-      const items: Array<Value> = []
-      for (const item of pattern.items) {
-        const value = materialize(item, env)
-        if (value === Unbound) return Unbound
-        items.push(value)
-      }
-      return items
-    }
-  }
-}
-
-export const validateOwnKeys = (
-  value: Readonly<Record<string, Value>>,
-  fields: ReadonlyArray<string>,
-): Result.Result<Array<string | symbol>, PrintIssue> => {
-  let keys: Array<string | symbol>
-  try {
-    keys = Reflect.ownKeys(value)
-    for (const key of keys) Object.getOwnPropertyDescriptor(value, key)
-  } catch (error) {
-    return Result.fail({
-      _tag: "InvalidValue",
-      expected: `an inspectable object with exactly the fields ${fields.join(", ")}`,
-      actual: value,
-      detail: `could not inspect own fields: ${exceptionMessage(error)}`,
-    })
-  }
-  return keys.every((key) => Predicate.isString(key) && fields.includes(key))
-    ? Result.succeed(keys)
-    : Result.fail({
-        _tag: "InvalidValue",
-        expected: `exactly the fields ${fields.join(", ")}`,
-        actual: value,
-        detail: "unexpected own field",
-      })
-}
-
-export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result.Result<void, PrintIssue> => {
-  switch (pattern._tag) {
-    case "Ref":
-      env.values[pattern.slot] = value
-      return Result.void
-    case "Prop": {
-      const object = env.values[pattern.object.slot]
-      const target: Record<string, Value> = Predicate.isObject(object) ? object : {}
-      setOwn(target, pattern.key, value)
-      env.values[pattern.object.slot] = target
-      return Result.void
-    }
-    case "Const":
-      return Equal.equals(value, pattern.value)
-        ? Result.void
-        : Result.fail({ _tag: "ConstantMismatch", expected: pattern.value, actual: value })
-    case "Object": {
-      if (!Predicate.isObject(value)) {
-        return Result.fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
-      }
-      const keys = validateOwnKeys(
-        value,
-        pattern.fields.map(([key]) => key),
-      )
-      if (Result.isFailure(keys)) return Result.fail(keys.failure)
-      for (const [key, field] of pattern.fields) {
-        if (!keys.success.includes(key)) {
-          return Result.fail({ _tag: "AtPath", path: key, issue: { _tag: "MissingField", field: key } })
-        }
-        let fieldValue: Value
-        try {
-          fieldValue = value[key]
-        } catch (error) {
-          return Result.fail({
-            _tag: "AtPath",
-            path: key,
-            issue: {
-              _tag: "InvalidValue",
-              expected: "a readable field",
-              actual: value,
-              detail: exceptionMessage(error),
-            },
-          })
-        }
-        const result = unifyPattern(field, fieldValue, env)
-        if (Result.isFailure(result)) return Result.fail({ _tag: "AtPath", path: key, issue: result.failure })
-      }
-      return Result.void
-    }
-    case "Array": {
-      if (!Array.isArray(value)) return Result.fail({ _tag: "TypeMismatch", expected: "an array", actual: value })
-      if (value.length !== pattern.items.length) {
-        return Result.fail({
-          _tag: "InvalidValue",
-          expected: `${pattern.items.length} items`,
-          actual: value.length,
-          detail: `expected ${pattern.items.length} items, got ${value.length}`,
-        })
-      }
-      for (const [index, item] of pattern.items.entries()) {
-        const result = unifyPattern(item, value[index], env)
-        if (Result.isFailure(result)) return Result.fail({ _tag: "AtPath", path: index, issue: result.failure })
-      }
-      return Result.void
-    }
-  }
-}

@@ -43,9 +43,9 @@ const table = {
   Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12", render: "<num>" }),
   Gen: row({
     grammar: G.gen(function* () {
-      const a = yield* G.struct({ n: G.integer })
-      const b = yield* G.struct({ w: word })
-      return { ...a, ...b }
+      const n = yield* G.integer
+      const w = yield* word
+      return { n, w }
     }),
     text: "5ab",
     value: { n: 5, w: "ab" },

@@ -57,35 +57,56 @@ describe("lengthPrefixed / countPrefixed", () => {
   )
 })
 
-describe("spreading a ref", () => {
+describe("whole-ref composition", () => {
   const point = G.gen(function* () {
-    const a = yield* G.struct({ x: G.integer })
-    const b = yield* G.struct({ y: G.integer.pipe(G.prefix(",")) })
-    return { ...a, ...b }
+    const x = yield* G.integer
+    const y = yield* G.integer.pipe(G.prefix(","))
+    return { x, y }
   })
 
-  it.effect("flattens the fields of each spread ref, and sees through filter", () =>
+  it.effect("flattens whole values with an explicit transform", () =>
     Effect.sync(() => {
       const named = G.gen(function* () {
         const p = yield* point.pipe(
           G.filter((value: G.Type<typeof point>) => value.x >= 0, "a point right of the origin"),
         )
         const name = yield* word.pipe(G.prefix(";"))
-        return { ...p, name }
-      })
+        return { p, name }
+      }).pipe(
+        G.transform({
+          decode: ({ p, name }) => ({ ...p, name }),
+          encode: ({ name, ...p }) => ({ p, name }),
+        }),
+      )
       assert.deepEqual(parseOk(named, "1,2;p"), { x: 1, y: 2, name: "p" })
       assertRoundTrip(named, { x: 3, y: -4, name: "q" })
     }),
   )
 
-  it.effect("returns single fields under new names", () =>
+  it.effect("composes whole refs through wrappers without shape discovery", () =>
     Effect.sync(() => {
-      const renamed = G.gen(function* () {
-        const p = yield* point
-        return { first: p.x, second: p.y }
-      })
-      assert.deepEqual(parseOk(renamed, "1,2"), { first: 1, second: 2 })
-      assertRoundTrip(renamed, { first: 3, second: 4 })
+      const wrappers = [
+        point,
+        point.pipe(G.label("point")),
+        point.pipe(G.filter((p: G.Type<typeof point>) => p.x >= 0, "positive x")),
+        point.pipe(G.transform({ decode: (p) => p, encode: (p) => p })),
+        G.choice(point, point),
+        G.suspend(() => point),
+      ]
+      for (const wrapped of wrappers) {
+        const composed = G.gen(function* () {
+          const p = yield* wrapped.pipe(G.between("(", ")"))
+          return { nested: [p] as const }
+        })
+        assert.deepEqual(G.validate(composed), [])
+        assert.deepEqual(parseOk(composed, "(1,2)"), { nested: [{ x: 1, y: 2 }] })
+        const value: G.Type<typeof composed> = { nested: [{ x: 3, y: 4 }] }
+        assertRoundTrip(composed, value)
+        const invalid: G.Type<typeof composed> = { nested: [{ x: 1.5, y: 2 }] }
+        const message = printFail(composed, invalid).message
+        assert.match(message, /^\.nested\[0\]/)
+        assert.match(message, /\.x: expected integer/)
+      }
     }),
   )
 
@@ -100,32 +121,41 @@ describe("spreading a ref", () => {
     }),
   )
 
-  it.effect("rejects partial spreads, double returns, and refs without known fields", () =>
+  it.effect("rejects spreads, duplicate whole refs, and property returns", () =>
     Effect.sync(() => {
       assert.throws(
         () =>
           G.gen(function* () {
             const p = yield* point
-            return { x: p.x }
+            return { x: G.get(p, "x"), y: G.get(p, "y") }
           }),
-        /"y" is missing/,
+        /property ref/,
       )
       assert.throws(
         () =>
           G.gen(function* () {
             const p = yield* point
-            return { p, ...p }
+            return { p, again: p }
           }),
         /returned twice/,
+      )
+      assert.throws(
+        () =>
+          G.gen(function* () {
+            const p = yield* point
+            // oxlint-disable-next-line typescript/no-misused-spread -- Deliberately exercise runtime rejection.
+            return { ...p }
+          }),
+        /cannot be spread or enumerated/,
       )
       const wrapped = word.pipe(G.transform({ decode: (w) => ({ w }), encode: ({ w }) => w }))
       assert.throws(
         () =>
           G.gen(function* () {
             const w = yield* wrapped
-            return { first: w.w }
+            return { first: G.get(w, "w") }
           }),
-        /no known fields/,
+        /property ref/,
       )
     }),
   )

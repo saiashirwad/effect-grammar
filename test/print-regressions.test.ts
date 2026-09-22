@@ -64,7 +64,7 @@ describe("printer sequencing and exception boundaries", () => {
     }),
   )
 
-  it.effect("probes descriptors before reading fields in generators and spreads", () =>
+  it.effect("probes descriptors before reading fields in generators and structs", () =>
     Effect.sync(() => {
       const grammars: ReadonlyArray<G.Grammar<{ first: number; second: number }>> = [
         G.gen(function* () {
@@ -72,11 +72,7 @@ describe("printer sequencing and exception boundaries", () => {
           const second = yield* G.integer
           return { first, second }
         }),
-        G.gen(function* () {
-          const a = yield* G.struct({ first: G.integer })
-          const b = yield* G.struct({ second: G.integer })
-          return { ...a, ...b }
-        }),
+        G.struct({ first: G.integer, second: G.integer }),
       ]
       for (const grammar of grammars) {
         const calls: Array<string> = []
@@ -113,11 +109,7 @@ describe("printer sequencing and exception boundaries", () => {
           const second = yield* G.integer
           return { first, second }
         }),
-        G.gen(function* () {
-          const a = yield* G.struct({ first: G.integer })
-          const b = yield* G.struct({ second: G.integer })
-          return { ...a, ...b }
-        }),
+        G.struct({ first: G.integer, second: G.integer }),
       ]
       for (const grammar of grammars) {
         const calls: Array<string> = []

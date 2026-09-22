@@ -91,12 +91,23 @@ const header = G.gen(function* () {
 })
 G.gen(function* () {
   const h = yield* header
-  const body = yield* G.match(h.kind, [
-    ["a", G.take(h.size)],
-    ["b", G.integer.pipe(G.repeat(h.size))],
+  const body = yield* G.match(G.get(h, "kind"), [
+    ["a", G.take(G.get(h, "size"))],
+    ["b", G.integer.pipe(G.repeat(G.get(h, "size")))],
   ] as const)
+  // @ts-expect-error refs are opaque, even for known properties
+  void h.kind
   // @ts-expect-error no such property
   void h.nope
+  // @ts-expect-error get checks the actual value's keys
+  G.get(h, "nope")
+  // oxlint-disable-next-line typescript/no-misused-spread -- Verify that spreading loses the opaque ref type.
+  const spread = { ...h }
+  // @ts-expect-error spreading a ref does not expose its value's fields
+  void spread.size
+  // @ts-expect-error spreading a ref does not preserve its opaque identity
+  const copied: G.Ref<G.Type<typeof header>> = spread
+  void copied
   return { h, body }
 })
 
@@ -194,8 +205,13 @@ const variant = G.struct({
 const merged = G.gen(function* () {
   const v = yield* variant
   const id = yield* G.integer
-  return { ...v, id }
-})
+  return { v, id }
+}).pipe(
+  G.transform({
+    decode: ({ v, id }) => ({ ...v, id }),
+    encode: ({ id, ...v }) => ({ v, id }),
+  }),
+)
 const mergedValue: G.Type<typeof merged> = { kind: "b", n: 42, id: 7 }
 // @ts-expect-error kind "a" requires n to be 0
 const mergedBad: G.Type<typeof merged> = { kind: "a", n: 42, id: 7 }

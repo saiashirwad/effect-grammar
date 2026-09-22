@@ -7,7 +7,6 @@ import {
   type GrammarIssue,
   type Node,
   nodeOf,
-  type Pattern,
   resolve,
   type ScopeId,
 } from "./core.ts"
@@ -107,25 +106,6 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>): EmptyMatch => {
   }
 }
 
-const mentionedSlots = (pattern: Pattern, slots: Set<number> = new Set()): Set<number> => {
-  switch (pattern._tag) {
-    case "Ref":
-      slots.add(pattern.slot)
-      break
-    case "Prop":
-      slots.add(pattern.object.slot)
-      break
-    case "Const":
-      break
-    case "Object":
-      for (const [, field] of pattern.fields) mentionedSlots(field, slots)
-      break
-    case "Array":
-      for (const item of pattern.items) mentionedSlots(item, slots)
-  }
-  return slots
-}
-
 type ScopePath = ReadonlyArray<ScopeId>
 
 const exprScope = (expr: Expr): ScopeId | undefined =>
@@ -161,7 +141,7 @@ const walk = (grammar: AnyGrammar, active: ScopePath, state: Walk): void => {
   }
 
   if (node._tag === "Gen") {
-    const returned = mentionedSlots(node.result)
+    const returned = node.result.bindings
     for (const [slot, step] of node.steps.entries()) {
       // SAFETY: the step is printed with no value, exactly as the printer would.
       // Probe whether an unbound step can print; round-trip checking belongs to the whole grammar.

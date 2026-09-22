@@ -237,30 +237,26 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
     fits: Schema.is(uintSchema(size)),
   }))
 
-  return transformNode(
-    word(width / 8, name),
-    {
-      // SAFETY: slots holds every key of the layout, each within its declared width.
-      decode: (value) =>
-        Result.succeed(
-          Object.fromEntries(
-            slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
-          ) as Bits<Layout>,
-        ),
-      encode: (value: Bits<Layout>) => {
-        const extra = Reflect.ownKeys(value).find((key) => !Object.hasOwn(layout, key))
-        if (extra !== undefined) return Result.fail(`no field named ${String(extra)}`)
-        let packed = 0n
-        for (const { key, size, shift, fits } of slots) {
-          const field = value[key]
-          if (!fits(field)) return Result.fail(`an integer from 0 to ${2 ** size - 1} for ${key}`)
-          packed |= BigInt(field) << shift
-        }
-        return Result.succeed(packed)
-      },
+  return transformNode(word(width / 8, name), {
+    // SAFETY: slots holds every key of the layout, each within its declared width.
+    decode: (value) =>
+      Result.succeed(
+        Object.fromEntries(
+          slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
+        ) as Bits<Layout>,
+      ),
+    encode: (value: Bits<Layout>) => {
+      const extra = Reflect.ownKeys(value).find((key) => !Object.hasOwn(layout, key))
+      if (extra !== undefined) return Result.fail(`no field named ${String(extra)}`)
+      let packed = 0n
+      for (const { key, size, shift, fits } of slots) {
+        const field = value[key]
+        if (!fits(field)) return Result.fail(`an integer from 0 to ${2 ** size - 1} for ${key}`)
+        packed |= BigInt(field) << shift
+      }
+      return Result.succeed(packed)
     },
-    Object.keys(layout),
-  )
+  })
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>

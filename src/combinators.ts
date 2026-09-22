@@ -15,7 +15,9 @@ import {
   type Value,
 } from "./core.ts"
 import { preview } from "./errors.ts"
-import { assertInScope, assertRefsReturnedOnce, keysOf, refFor, type Scope, toPattern } from "./ref.ts"
+import { type Pattern, returnPattern, toPattern } from "./pattern.ts"
+import { assertInScope, refFor, type Scope } from "./ref.ts"
+import { describeStep } from "./render.ts"
 
 export { get } from "./ref.ts"
 
@@ -48,6 +50,14 @@ const countExpr = (count: Ref<number> | number, where: string): Expr => {
 export const take = (count: Ref<number> | number): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "take") })
 
+const makeGen = <A>(scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, tree: Pattern): Grammar<A> =>
+  make({
+    _tag: "Gen",
+    scope,
+    steps,
+    result: returnPattern(tree, scope, (slot) => describeStep(steps[slot]!, slot)),
+  })
+
 export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<Denote<R>> => {
   const iterator = run()
   const steps: Array<AnyGrammar> = []
@@ -59,11 +69,9 @@ export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<De
       const grammar = result.value
       if (!isGrammar(grammar)) throw new TypeError("gen: only a grammar can be yielded")
       const slot = steps.push(grammar) - 1
-      result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope, keysOf(grammar)))
+      result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope))
     }
-    const pattern = toPattern(result.value)
-    assertRefsReturnedOnce(scope.id, steps, pattern)
-    return make({ _tag: "Gen", scope: scope.id, steps, result: pattern })
+    return makeGen(scope.id, steps, toPattern(result.value))
   } finally {
     scope.open = false
   }
@@ -83,12 +91,11 @@ export const struct = <const Fields extends Readonly<Record<string, AnyGrammar>>
 ): Grammar<StructValue<Fields>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
   const entries = Object.entries(fields)
-  return make({
-    _tag: "Gen",
+  return makeGen(
     scope,
-    steps: entries.map(([, grammar]) => grammar),
-    result: { _tag: "Object", fields: entries.map(([key], slot) => [key, { _tag: "Ref", scope, slot }]) },
-  })
+    entries.map(([, grammar]) => grammar),
+    { _tag: "Object", fields: entries.map(([key], slot) => [key, { _tag: "Ref", scope, slot }]) },
+  )
 }
 
 type TupleValue<Elements extends ReadonlyArray<AnyGrammar>> = {
@@ -99,18 +106,13 @@ export const tuple = <const Elements extends ReadonlyArray<AnyGrammar>>(
   ...elements: Elements
 ): Grammar<TupleValue<Elements>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
-  return make({
-    _tag: "Gen",
-    scope,
-    steps: elements,
-    result: { _tag: "Array", items: elements.map((_, slot) => ({ _tag: "Ref", scope, slot })) },
-  })
+  return makeGen(scope, elements, { _tag: "Array", items: elements.map((_, slot) => ({ _tag: "Ref", scope, slot })) })
 }
 
 export const as =
   <const V>(value: V) =>
   (inner: Grammar<void>): Grammar<V> =>
-    make({ _tag: "Gen", scope: { _tag: "ScopeId" }, steps: [inner], result: { _tag: "Const", value } })
+    makeGen({ _tag: "ScopeId" }, [inner], { _tag: "Const", value })
 
 export const between =
   (open: Grammar<void> | string, close: Grammar<void> | string) =>
@@ -252,11 +254,8 @@ export interface TransformOrFailOptions<A, B> {
   readonly encode: (b: B) => Result.Result<A, string>
 }
 
-export const transformNode = <A, B>(
-  inner: Grammar<A>,
-  options: TransformOrFailOptions<A, B>,
-  keys?: ReadonlyArray<string>,
-): Grammar<B> => make({ _tag: "Transform", inner, ...options, keys })
+export const transformNode = <A, B>(inner: Grammar<A>, options: TransformOrFailOptions<A, B>): Grammar<B> =>
+  make({ _tag: "Transform", inner, ...options })
 
 export const transform =
   <A, B>(options: TransformOptions<A, B>) =>
@@ -282,7 +281,7 @@ export function filter<A>(
 export function filter<A>(predicate: (value: A) => boolean, name: string) {
   return <I extends A>(inner: Grammar<I>): Grammar<I> => {
     const check = (value: I) => (predicate(value) ? Result.succeed(value) : Result.fail(name))
-    return transformNode(inner, { decode: check, encode: check }, keysOf(inner))
+    return transformNode(inner, { decode: check, encode: check })
   }
 }
 

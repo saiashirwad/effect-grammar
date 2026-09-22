@@ -1,8 +1,9 @@
 import { Result } from "effect"
 
 import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, materialize, Unbound } from "./env.ts"
+import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
+import { materialize } from "./pattern.ts"
 import { describe } from "./render.ts"
 
 interface State {
@@ -75,7 +76,7 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
         if (Result.isFailure(result)) return result
         local.values[slot] = result.success
       }
-      const value = materialize(node.result, local)
+      const value = materialize(node.result.tree, local)
       return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
     }
     case "Wrap": {

@@ -3,15 +3,29 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as B from "../src/binary.ts"
 import * as G from "../src/index.ts"
 
-const header = G.gen(function* () {
+const headerFields = G.gen(function* () {
   const id = yield* B.uint16
   const flags = yield* B.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 })
   const qdcount = yield* B.uint16
   const ancount = yield* B.uint16
   const nscount = yield* B.uint16
   const arcount = yield* B.uint16
-  return { id, ...flags, qdcount, ancount, nscount, arcount }
+  return { id, flags, qdcount, ancount, nscount, arcount }
 })
+
+const header = headerFields.pipe(
+  G.transform({
+    decode: ({ id, flags, ...counts }) => ({ id, ...flags, ...counts }),
+    encode: ({ id, qdcount, ancount, nscount, arcount, ...flags }) => ({
+      id,
+      flags,
+      qdcount,
+      ancount,
+      nscount,
+      arcount,
+    }),
+  }),
+)
 
 const label = B.uint8.pipe(
   G.filter((length: number) => length >= 1 && length <= 63, "label length"),
@@ -27,7 +41,7 @@ const question = G.struct({
 
 const query = G.gen(function* () {
   const head = yield* header
-  const questions = yield* question.pipe(G.repeat(head.qdcount))
+  const questions = yield* question.pipe(G.repeat(G.get(head, "qdcount")))
   return { header: head, questions }
 })
 

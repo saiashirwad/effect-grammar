@@ -92,6 +92,29 @@ checks the final output of the whole grammar.
 Printing a `gen` object requires exactly its declared fields. Repeated items
 must consume input. Empty matches fail rather than loop.
 
+## Refs and dependent fields
+
+Inside `gen`, `yield*` binds an opaque `Ref<A>`. Use `get(ref, key)` to select a
+field for `take`, `repeat`, or `match`:
+
+```ts
+const message = G.gen(function* () {
+  const header = yield* G.struct({ size: G.integer.pipe(G.suffix(":")) })
+  const body = yield* G.take(G.get(header, "size"))
+  return { header, body }
+})
+// "3:abc" parses to { header: { size: 3 }, body: "abc" }
+```
+
+Nested fields use nested calls, such as `G.get(G.get(ref, "header"), "size")`.
+Direct property access such as `ref.size` is a type error. Ref coercion and
+enumeration, including object spread, throw during grammar construction.
+
+Return each bound value as a whole ref, either directly or inside an object or
+tuple. Property refs from `get` cannot appear in return patterns. To flatten or
+rename fields, apply `transform` to the grammar. Its callbacks receive ordinary
+values and must describe both the decode and encode directions.
+
 ## Binary
 
 Use `effect-grammar/Binary` to parse and print bytes with the same grammar

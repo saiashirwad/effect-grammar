@@ -28,9 +28,9 @@ const header = Grammar.gen(function* () {
 const frame = Grammar.gen(function* () {
   const parsedHeader = yield* header
   yield* Grammar.literal(":")
-  const body = yield* Grammar.match(parsedHeader.kind, [
-    ["text", Grammar.take(parsedHeader.size)],
-    ["bits", Grammar.regex(/[01]/, "bit").pipe(Grammar.repeat(parsedHeader.size))],
+  const body = yield* Grammar.match(Grammar.get(parsedHeader, "kind"), [
+    ["text", Grammar.take(Grammar.get(parsedHeader, "size"))],
+    ["bits", Grammar.regex(/[01]/, "bit").pipe(Grammar.repeat(Grammar.get(parsedHeader, "size")))],
   ] as const)
   return { header: parsedHeader, body }
 })

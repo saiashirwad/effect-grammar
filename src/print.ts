@@ -1,19 +1,10 @@
 import { Equal, Predicate, Result } from "effect"
 
-import {
-  type AnyGrammar,
-  type Grammar,
-  isCount,
-  type Node,
-  nodeOf,
-  type Pattern,
-  resolve,
-  type ScopeId,
-  type Value,
-} from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, Unbound, unifyPattern } from "./env.ts"
+import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
+import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
 import { parseWithEnv } from "./parse.ts"
+import { unifyPattern } from "./pattern.ts"
 import { describe, describeStep } from "./render.ts"
 
 interface State {
@@ -39,33 +30,6 @@ const roundTripIssue = (
   const back = parseWithEnv(grammar, printed, env)
   if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed, error: back.failure.message }
   return Equal.equals(back.success, value) ? undefined : { _tag: "RoundTrip", value, printed, parsed: back.success }
-}
-
-const bindingPath = (
-  pattern: Pattern,
-  scope: ScopeId,
-  slot: number,
-  path: ReadonlyArray<string | number> = [],
-): ReadonlyArray<string | number> | undefined => {
-  switch (pattern._tag) {
-    case "Ref":
-      return pattern.scope === scope && pattern.slot === slot ? path : undefined
-    case "Prop":
-    case "Const":
-      return undefined
-    case "Object":
-      for (const [key, field] of pattern.fields) {
-        const found = bindingPath(field, scope, slot, [...path, key])
-        if (found !== undefined) return found
-      }
-      return undefined
-    case "Array":
-      for (const [index, item] of pattern.items.entries()) {
-        const found = bindingPath(item, scope, slot, [...path, index])
-        if (found !== undefined) return found
-      }
-      return undefined
-  }
 }
 
 const printCount = (count: Value, what: string): Result.Result<number, PrintIssue> => {
@@ -111,7 +75,7 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
     }
     case "Gen": {
       const local = frame(node.scope, node.steps.length, env)
-      const unified = unifyPattern(node.result, value, local)
+      const unified = unifyPattern(node.result.tree, value, local)
       if (Result.isFailure(unified)) return Result.fail(unified.failure)
 
       let text = ""
@@ -126,7 +90,7 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
               "parsed but not returned, so there is no value to print it from; return it, or discard it with skip",
             )
           }
-          const path = bindingPath(node.result, node.scope, slot) ?? []
+          const path = node.result.bindings.get(slot) ?? []
           return path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
         }
         text += result.success

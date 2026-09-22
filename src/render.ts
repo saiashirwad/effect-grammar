@@ -1,15 +1,6 @@
 import { Predicate } from "effect"
 
-import {
-  type AnyGrammar,
-  type Expr,
-  nodeOf,
-  type Node,
-  type Pattern,
-  resolve,
-  type ScopeId,
-  type Value,
-} from "./core.ts"
+import { type AnyGrammar, type Expr, nodeOf, type Node, resolve, type ScopeId, type Value } from "./core.ts"
 import { preview } from "./errors.ts"
 
 const ChoicePrecedence = 1
@@ -39,26 +30,6 @@ const sequence = (fragments: ReadonlyArray<Fragment>): Fragment => ({
     .map((fragment) => parenthesize(fragment, SequencePrecedence))
     .join(" "),
 })
-
-const nameBindings = (pattern: Pattern, path: string | undefined, scope: ScopeId, names: Map<number, string>): void => {
-  switch (pattern._tag) {
-    case "Ref":
-      if (pattern.scope === scope && path !== undefined) names.set(pattern.slot, path)
-      return
-    case "Prop":
-    case "Const":
-      return
-    case "Object":
-      for (const [key, field] of pattern.fields) {
-        nameBindings(field, path === undefined ? key : `${path}.${key}`, scope, names)
-      }
-      return
-    case "Array":
-      pattern.items.forEach((item, index) => {
-        nameBindings(item, path === undefined ? String(index) : `${path}.${index}`, scope, names)
-      })
-  }
-}
 
 const showExpr = (expr: Expr, context: Context): string => {
   if (expr._tag === "Ref") return context.names.get(expr.scope)?.get(expr.slot) ?? `$${expr.slot}`
@@ -94,7 +65,9 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
     case "Gen": {
       let names = context.names.get(node.scope)
       if (names === undefined) context.names.set(node.scope, (names = new Map()))
-      nameBindings(node.result, undefined, node.scope, names)
+      for (const [slot, path] of node.result.bindings) {
+        if (path.length > 0) names.set(slot, path.join("."))
+      }
       return sequence(
         node.steps.map((step, slot) => {
           const inner = notation(step, context)
