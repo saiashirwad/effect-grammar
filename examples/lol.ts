@@ -1,6 +1,7 @@
 import { Console, Effect, Result, Schema } from "effect"
 
 import * as G from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
@@ -42,7 +43,7 @@ const frame = G.gen(function* () {
   return { h, body }
 })
 
-const Frame = G.codec(
+const Frame = GrammarSchema.codec(
   frame,
   Schema.Struct({
     h: Schema.Struct({

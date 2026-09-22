@@ -1,4 +1,4 @@
-import { Equal, Predicate, Result, Schema } from "effect"
+import { Equal, Predicate, Result } from "effect"
 
 import {
   as,
@@ -14,7 +14,6 @@ import {
   take,
   transform,
   transformOrFail,
-  type TransformOptions,
   trivia,
 } from "./combinators.ts"
 import type { AnyGrammar, Grammar, MatchKey, Ref, Type, Value } from "./core.ts"
@@ -65,12 +64,6 @@ export const literals = <const Values extends readonly [string, ...Array<string>
 
 export const flag = (value: Grammar<void> | string): Grammar<boolean> =>
   choice([as(true)(Predicate.isString(value) ? literal(value) : value), as(false)(empty)])
-
-export const decodeTo =
-  <T>(schema: Schema.Codec<T, unknown, unknown, unknown>, name = "a value matching the schema") =>
-  <A>(options: TransformOptions<A, T>) =>
-  (inner: Grammar<A>): Grammar<T> =>
-    inner.pipe(transform(options), filter(Schema.is(schema), name))
 
 export const defaulted =
   <A>(value: A) =>

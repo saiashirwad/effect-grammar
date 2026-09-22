@@ -37,7 +37,6 @@ export {
 export type { Grammar, Ref, Type } from "./core.ts"
 export {
   countPrefixed,
-  decodeTo,
   defaulted,
   flag,
   integer,
@@ -52,4 +51,3 @@ export { describe } from "./internal/describe.ts"
 export { parse } from "./parse.ts"
 export { print, printUnchecked } from "./print.ts"
 export { render } from "./render.ts"
-export { type CodecOptions, codec } from "./schema.ts"

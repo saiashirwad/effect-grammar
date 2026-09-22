@@ -1,6 +1,7 @@
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const NumberAtom = Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite })
 const StringAtom = Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String })
@@ -166,7 +167,7 @@ const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
 
 const catalogIssues = Schema.makeFilter((e: Expr) => Array.from(Iterable.filterMap(walkLists(e), arityIssue)))
 
-const ValidScheme = Grammar.codec(document, ExprSchema, { identifier: "Scheme" }).check(catalogIssues)
+const ValidScheme = GrammarSchema.codec(document, ExprSchema, { identifier: "Scheme" }).check(catalogIssues)
 
 const decode = Schema.decodeEffect(ValidScheme)
 const encode = Schema.encodeEffect(ValidScheme)

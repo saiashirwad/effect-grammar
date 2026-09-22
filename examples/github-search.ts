@@ -1,6 +1,7 @@
 import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const WordValueSchema = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
 const QuotedValueSchema = Schema.Struct({ kind: Schema.Literal("quoted"), value: Schema.String })
@@ -81,10 +82,11 @@ const compareValue = Grammar.gen(function* () {
   const value = yield* token("compare value")
   return { op, value }
 }).pipe(
-  Grammar.decodeTo(CompareValueSchema)({
-    decode: ({ op, value }) => ({ kind: "compare", op, value }),
+  Grammar.transform({
+    decode: ({ op, value }): typeof CompareValueSchema.Type => ({ kind: "compare", op, value }),
     encode: ({ op, value }) => ({ op, value }),
   }),
+  Grammar.filter(Schema.is(CompareValueSchema), "a comparison value"),
 )
 
 const rangeBound = (name: string) => Grammar.optional(Grammar.regex(/(?:(?!\.\.)[^\s():"'])+/, name))
@@ -95,24 +97,27 @@ const rangeValue = Grammar.gen(function* () {
   const to = yield* rangeBound("range end")
   return { from, to }
 }).pipe(
-  Grammar.decodeTo(RangeValueSchema)({
-    decode: ({ from, to }) => ({ kind: "range", from, to }),
+  Grammar.transform({
+    decode: ({ from, to }): typeof RangeValueSchema.Type => ({ kind: "range", from, to }),
     encode: ({ from, to }) => ({ from, to }),
   }),
+  Grammar.filter(Schema.is(RangeValueSchema), "a range value"),
 )
 
 const wordValue = token("qualifier value").pipe(
-  Grammar.decodeTo(WordValueSchema)({
-    decode: (value) => ({ kind: "word", value }),
+  Grammar.transform({
+    decode: (value): typeof WordValueSchema.Type => ({ kind: "word", value }),
     encode: (v) => v.value,
   }),
+  Grammar.filter(Schema.is(WordValueSchema), "a word value"),
 )
 
 const quotedValue = doubleQuoted.pipe(
-  Grammar.decodeTo(QuotedValueSchema)({
-    decode: (value) => ({ kind: "quoted", value }),
+  Grammar.transform({
+    decode: (value): typeof QuotedValueSchema.Type => ({ kind: "quoted", value }),
     encode: (v) => v.value,
   }),
+  Grammar.filter(Schema.is(QuotedValueSchema), "a quoted value"),
 )
 
 const qualifierValue = Grammar.choice([quotedValue, compareValue, rangeValue, wordValue])
@@ -124,10 +129,11 @@ const qualifier = Grammar.gen(function* () {
   const value = yield* qualifierValue
   return { negate, key, value }
 }).pipe(
-  Grammar.decodeTo(QualifierSchema)({
-    decode: ({ negate, key, value }) => ({ kind: "qualifier", negate, key, value }),
+  Grammar.transform({
+    decode: ({ negate, key, value }): typeof QualifierSchema.Type => ({ kind: "qualifier", negate, key, value }),
     encode: ({ negate, key, value }) => ({ negate, key, value }),
   }),
+  Grammar.filter(Schema.is(QualifierSchema), "a qualifier"),
 )
 
 const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
@@ -135,24 +141,27 @@ const query: Grammar.Grammar<Query> = Grammar.suspend(() => orExpr, "query")
 const group = query.pipe(
   Grammar.between(Grammar.trivia, Grammar.trivia),
   Grammar.between("(", ")"),
-  Grammar.decodeTo(GroupSchema)({
-    decode: (inner) => ({ kind: "group", inner }),
+  Grammar.transform({
+    decode: (inner): typeof GroupSchema.Type => ({ kind: "group", inner }),
     encode: (g) => g.inner,
   }),
+  Grammar.filter(Schema.is(GroupSchema), "a group"),
 )
 
 const termWord = Grammar.regex(/(?!(?:AND|OR|NOT)(?:$|\s|[()]))[^\s():"']+/, "search term").pipe(
-  Grammar.decodeTo(TermWordSchema)({
-    decode: (value) => ({ kind: "term", quoted: false, value }),
+  Grammar.transform({
+    decode: (value): typeof TermWordSchema.Type => ({ kind: "term", quoted: false, value }),
     encode: (t) => t.value,
   }),
+  Grammar.filter(Schema.is(TermWordSchema), "a word term"),
 )
 
 const termQuoted = doubleQuoted.pipe(
-  Grammar.decodeTo(TermQuotedSchema)({
-    decode: (value) => ({ kind: "term", quoted: true, value }),
+  Grammar.transform({
+    decode: (value): typeof TermQuotedSchema.Type => ({ kind: "term", quoted: true, value }),
     encode: (t) => t.value,
   }),
+  Grammar.filter(Schema.is(TermQuotedSchema), "a quoted term"),
 )
 
 const atom = Grammar.choice([qualifier, group, termQuoted, termWord])
@@ -176,10 +185,11 @@ const notExpr: Grammar.Grammar<Query> = Grammar.suspend(
 
 const notBranch = notExpr.pipe(
   Grammar.prefix(Grammar.seq(Grammar.literal("NOT"), ws)),
-  Grammar.decodeTo(NotSchema)({
-    decode: (inner) => ({ kind: "not", inner }),
+  Grammar.transform({
+    decode: (inner): typeof NotSchema.Type => ({ kind: "not", inner }),
     encode: (n) => n.inner,
   }),
+  Grammar.filter(Schema.is(NotSchema), "a negation"),
 )
 
 const nary = (kind: "and" | "or", sep: Grammar.Grammar<void>, part: Grammar.Grammar<Query>) =>
@@ -334,7 +344,7 @@ const qualifierIssues = (node: Qualifier): ReadonlyArray<Schema.FilterIssue> => 
 const catalogIssues = (q: Query): ReadonlyArray<Schema.FilterIssue> =>
   Array.from(Iterable.flatMap(walkQualifiers(q), qualifierIssues))
 
-const ValidGithubQuery = Grammar.codec(whole, QuerySchema, { identifier: "GithubQuery" }).check(
+const ValidGithubQuery = GrammarSchema.codec(whole, QuerySchema, { identifier: "GithubQuery" }).check(
   Schema.makeFilter(catalogIssues),
 )
 

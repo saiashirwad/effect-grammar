@@ -18,7 +18,8 @@ const jsonBool = Grammar.choice([
 ])
 
 const jsonNumber = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number")).pipe(
-  Grammar.decodeTo(Schema.Finite)({ decode: Number, encode: String }),
+  Grammar.transform({ decode: Number, encode: String }),
+  Grammar.filter(Schema.is(Schema.Finite), "a finite number"),
 )
 
 export const jsonString = Grammar.lexeme(

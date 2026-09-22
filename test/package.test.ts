@@ -43,20 +43,25 @@ class Packed extends Context.Service<
 
 describe("packaged exports", () => {
   layer(Packed.layer.pipe(Layer.provideMerge(NodeServices.layer)), { timeout: "2 minutes" })((it) => {
-    it.effect("ships exactly one dist module per source module", () =>
+    it.effect("ships JavaScript and declarations for every source module, including internals", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const { root, workspace, tarball } = yield* Packed
-        const shipped = (yield* run("tar", ["-tzf", tarball], workspace))
-          .split("\n")
-          .flatMap((entry) => (/^package\/dist\/[^/]+\.js$/.test(entry) ? [path.basename(entry, ".js")] : []))
-          .sort()
-        const sources = (yield* fs.readDirectory(path.join(root, "src")))
+        const entries = (yield* run("tar", ["-tzf", tarball], workspace)).split("\n")
+        const sources = (yield* fs.readDirectory(path.join(root, "src"), { recursive: true }))
           .filter((name) => name.endsWith(".ts"))
-          .map((name) => path.basename(name, ".ts"))
+          .map((name) => name.slice(0, -3))
           .sort()
-        assert.deepStrictEqual(shipped, sources)
+        assert.ok(sources.includes("internal/bytes"))
+        assert.ok(sources.includes("internal/schema"))
+        for (const extension of [".js", ".d.ts"]) {
+          const shipped = entries
+            .filter((entry) => entry.startsWith("package/dist/") && entry.endsWith(extension))
+            .map((entry) => entry.slice("package/dist/".length, -extension.length))
+            .sort()
+          assert.deepStrictEqual(shipped, sources)
+        }
       }),
     )
 
@@ -78,23 +83,82 @@ describe("packaged exports", () => {
         const script = [
           "const root = await import('effect-grammar')",
           "const binary = await import('effect-grammar/Binary')",
+          "const adapter = await import('effect-grammar/Schema')",
           "const testing = await import('effect-grammar/testing')",
+          "const { Schema } = await import('effect')",
           `const expected = ${expected}`,
           "const actual = Object.keys(root).sort()",
           "if (JSON.stringify(actual) !== JSON.stringify(expected)) {",
           "  throw new Error('root exports differ: ' + JSON.stringify({ expected, actual }))",
           "}",
           "if (typeof binary.bits !== 'function') throw new Error('missing Binary.bits')",
-          "if (typeof root.codec !== 'function') throw new Error('missing codec')",
+          "if ('codec' in root || 'decodeTo' in root) throw new Error('obsolete root export')",
+          "if ('takeBytes' in binary || 'takeByteString' in binary) throw new Error('raw byte-string export')",
+          "const text = adapter.codec(root.integer, Schema.Number)",
+          "if (Schema.decodeSync(text)('42') !== 42 || Schema.encodeSync(text)(42) !== '42') throw new Error('text codec')",
+          "const bytes = binary.codec(binary.bytes(2), Schema.Uint8Array)",
+          "const value = Schema.decodeSync(bytes)(Uint8Array.of(0, 255))",
+          "if (binary.hex(Schema.encodeSync(bytes)(value)) !== '00 ff') throw new Error('binary codec')",
           "if (typeof testing.assertPrintParse !== 'function') throw new Error('missing testing.assertPrintParse')",
-          "let hidden = false",
-          "try { await import('effect-grammar/ast') } catch { hidden = true }",
-          "if (!hidden) throw new Error('undeclared subpath ./ast is importable')",
+          "for (const subpath of ['ast', 'internal/bytes', 'internal/schema', 'dist/internal/schema.js']) {",
+          "  let hidden = false",
+          "  try { await import('effect-grammar/' + subpath) } catch (error) { hidden = error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED' }",
+          "  if (!hidden) throw new Error('undeclared subpath is importable: ' + subpath)",
+          "}",
           "console.log('ok')",
         ].join("\n")
 
         const output = yield* run("node", ["--input-type=module", "-e", script], consumer)
         assert.match(output, /^ok$/m)
+
+        const types = [
+          'import { Effect, Schema } from "effect"',
+          'import * as G from "effect-grammar"',
+          'import * as Binary from "effect-grammar/Binary"',
+          'import { codec, type CodecOptions } from "effect-grammar/Schema"',
+          'import * as Testing from "effect-grammar/testing"',
+          "type Decode = { readonly decode: unique symbol }",
+          "type Encode = { readonly encode: unique symbol }",
+          "declare const target: Schema.Codec<string, number, Decode, Encode>",
+          'const options: CodecOptions = { identifier: "Number" }',
+          "const text = codec(G.integer, target, options)",
+          "const binary = Binary.codec(Binary.uint8, target, options)",
+          "const bytes: G.Grammar<Uint8Array> = Binary.bytes(2)",
+          "type Same<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false",
+          "const types: [Same<typeof text.Type, string>, Same<typeof text.Encoded, string>,",
+          "  Same<typeof binary.Encoded, Uint8Array>, Same<typeof text.DecodingServices, Decode>,",
+          "  Same<typeof text.EncodingServices, Encode>, Same<typeof binary.DecodingServices, Decode>,",
+          "  Same<typeof binary.EncodingServices, Encode>] = [true, true, true, true, true, true, true]",
+          "// @ts-expect-error Schema decoding requires the target decoding service",
+          'Effect.runSync(Schema.decodeEffect(text)("1"))',
+          "// @ts-expect-error Schema encoding requires the target encoding service",
+          'Effect.runSync(Schema.encodeEffect(binary)("1"))',
+          "// @ts-expect-error codec is only exported from the Schema adapter",
+          "G.codec",
+          "// @ts-expect-error CodecOptions is only exported from the Schema adapter",
+          "type RemovedOptions = G.CodecOptions",
+          "// @ts-expect-error decodeTo was removed",
+          "G.decodeTo",
+          "// @ts-expect-error raw byte strings are private",
+          "Binary.takeBytes",
+          "void [bytes, types, Testing.assertPrintParse]",
+        ].join("\n")
+        yield* fs.writeFileString(path.join(consumer, "index.mts"), types)
+        yield* run(
+          "node",
+          [
+            path.join(root, "node_modules/typescript/bin/tsc"),
+            "--ignoreConfig",
+            "--noEmit",
+            "--strict",
+            "--target",
+            "esnext",
+            "--module",
+            "nodenext",
+            "index.mts",
+          ],
+          consumer,
+        )
       }),
     )
   })

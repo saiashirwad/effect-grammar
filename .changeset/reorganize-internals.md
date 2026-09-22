@@ -27,7 +27,8 @@ Simplify the API around fewer concepts.
   ref.
 - Transforms no longer take `is` or `name`. Use `filter(predicate, name)` for
   guards and `label(name)` to name a grammar. `transformOrFail` fails with a
-  string. `decodeTo(schema, name?)` applies the schema guard.
+  string. `decodeTo` is removed. Use `transform(...)` followed by
+  `filter(Schema.is(schema), name)` for a schema guard.
 - Transformations use `transform` or `transformOrFail`; `iso`, `partialIso`,
   `Fidelity`, and `auditFidelity` are removed.
 - `print` now checks that its output parses back to an equal value. The previous
@@ -35,7 +36,8 @@ Simplify the API around fewer concepts.
   to text and Binary. The `"roundTrip"` choice policy searches for a branch that
   round-trips even under `printUnchecked`.
 - `regex(re, name)` is `regex(re).pipe(label(name))`; `take` has no byte unit.
-  `Binary.takeBytes` replaces `takeBytes`.
+  Use `Binary.bytes(count)` for a `Uint8Array`. Raw byte-string readers are
+  private.
 - One `ParseError`: `Binary.parse` returns it with `line` and `column` undefined
   and `pos` as a byte offset.
 - `Binary.Bit`, `Uint`, `Int`, `Uint8`…`Int64` are `bitSchema`, `uintSchema(n)`,
@@ -47,7 +49,8 @@ Simplify the API around fewer concepts.
   predicate callbacks. Suspended thunk failures become issues.
 - `describe` now gives a shallow name without expanding children or resolving
   suspensions. Use `render` for full grammar notation.
-- The `effect-grammar/Schema` subpath is removed; `codec` is on the root.
+- Import `codec` and `CodecOptions` from `effect-grammar/Schema`, not the root.
+  `Binary.codec` uses the same Schema integration with byte input and output.
 - The printer's recursion guard now catches a suspended grammar re-entered with
   the same value at any depth, so a recursive branch that cannot make progress
   falls through to the next branch instead of overflowing the stack.

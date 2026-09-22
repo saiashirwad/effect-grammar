@@ -17,6 +17,7 @@ Parse and print endpoints in the form `https://host:port`:
 ```ts
 import { Schema } from "effect"
 import * as G from "effect-grammar"
+import * as GrammarSchema from "effect-grammar/Schema"
 
 const endpoint = G.gen(function* () {
   yield* G.literal("https://")
@@ -26,7 +27,7 @@ const endpoint = G.gen(function* () {
   return { host, port }
 })
 
-const Endpoint = G.codec(
+const Endpoint = GrammarSchema.codec(
   endpoint,
   Schema.Struct({
     host: Schema.NonEmptyString,
@@ -42,6 +43,7 @@ Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 ```
 
 `G.literal` matches fixed text. `G.gen` defines the fields to parse and print.
+Import `codec` and its `CodecOptions` type from `effect-grammar/Schema`.
 
 Encoding checks that the output parses back to an equal value using
 `Equal.equals`. It does not preserve the original text's spelling.
@@ -83,6 +85,11 @@ Use `transform` for value-returning decode/encode callbacks and
 `transformOrFail` for callbacks returning `Result` with a string error. Neither
 claims an inverse law; `print` checks the round trip for each value. Callback
 exceptions become parse or print failures with grammar context.
+
+To validate a transformed value with a Schema guard, use
+`inner.pipe(G.transform({ decode, encode }), G.filter(Schema.is(schema), name))`.
+The guard checks the value in both directions. It does not run Schema
+transformations.
 
 `choice([first, second])` takes a nonempty readonly tuple of branches. By
 default, it prints with the first branch that accepts the value. Use
@@ -190,6 +197,12 @@ Result.getOrThrow(Binary.parse(header, Uint8Array.of(0x01, 0x00, 0x03)))
 Result.getOrThrow(Binary.print(header, { version: 1, length: 3 }))
 // Uint8Array [1, 0, 3]
 ```
+
+`Binary.bytes(count)` reads and writes a `Uint8Array`. The count can be a number
+or a length ref. `Binary.lengthPrefixed(length)` derives the prefix from the
+byte length. Use `Binary.ascii` or `Binary.utf8` to convert a byte grammar to
+text. `Binary.codec(grammar, target, options)` creates a Schema codec with
+`Uint8Array` input and output. `Binary.hex(bytes)` formats bytes for display.
 
 ## Examples
 

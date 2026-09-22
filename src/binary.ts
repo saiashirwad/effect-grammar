@@ -1,4 +1,4 @@
-import { Effect, flow, Predicate, Result, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import { Predicate, Result, Schema } from "effect"
 
 import {
   filter,
@@ -10,15 +10,15 @@ import {
   transformNode,
   transformOrFail,
 } from "./combinators.ts"
-import { type Grammar, isCount, nonByte, type Ref, toBytes, toText, type Value } from "./core.ts"
+import { type Grammar, isCount, type Ref, type Value } from "./core.ts"
 import { prefixedBy } from "./derived.ts"
-import { hex, ParseError, PrintError, toSchemaIssue } from "./errors.ts"
+import { ParseError, PrintError } from "./errors.ts"
+import { hex, nonByte, toBytes, toText } from "./internal/bytes.ts"
+import { codecWith } from "./internal/schema.ts"
 import { parse as parseText } from "./parse.ts"
 import { print as printText, printUnchecked as printUncheckedText } from "./print.ts"
-import { render } from "./render.ts"
-import type { CodecOptions } from "./schema.ts"
 
-export { hex } from "./errors.ts"
+export { hex } from "./internal/bytes.ts"
 
 const isWidth = (size: number): boolean => Number.isInteger(size) && size >= 1 && size <= 53
 
@@ -46,14 +46,15 @@ export const int64Schema = Schema.BigInt.check(
 
 const isBinary = (value: string): boolean => !nonByte.test(value)
 
-export const takeBytes = (count: Ref<number> | number): Grammar<string> => take(count).pipe(filter(isBinary, "a byte"))
+const takeByteString = (count: Ref<number> | number): Grammar<string> => take(count).pipe(filter(isBinary, "a byte"))
 
 const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
   inner.pipe(transform({ decode: toBytes, encode: toText }), filter(Predicate.isUint8Array, "bytes"))
 
-export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => asBytes(takeBytes(count))
+export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => asBytes(takeByteString(count))
 
-export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> => asBytes(prefixedBy(length, takeBytes))
+export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> =>
+  asBytes(prefixedBy(length, takeByteString))
 
 export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
   if (values.some((value) => !Schema.is(uintSchema(8))(value))) {
@@ -87,7 +88,7 @@ export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
   )
 
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
-  takeBytes(size).pipe(
+  takeByteString(size).pipe(
     label(name),
     transform({
       decode: (binary) => {
@@ -144,7 +145,7 @@ export const int64le = int64Of("int64le", true)
 const scratch = new DataView(new ArrayBuffer(8))
 
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
-  takeBytes(size).pipe(
+  takeByteString(size).pipe(
     label(name),
     transform({
       decode: (binary) => {
@@ -283,27 +284,4 @@ export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Arra
 export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
   toByteResult(value, printUncheckedText(grammar, value))
 
-export const codec = <S extends Schema.Top, A extends S["Encoded"]>(
-  grammar: Grammar<A>,
-  target: S,
-  options?: CodecOptions,
-) =>
-  Schema.Uint8Array.pipe(
-    Schema.decodeTo(
-      target,
-      SchemaTransformation.transformOrFail<S["Encoded"], Uint8Array>({
-        decode: flow(
-          (input) => parse(grammar, input),
-          Effect.fromResult,
-          Effect.mapError(({ message }) => new SchemaIssue.InvalidValue({ message })),
-        ),
-        encode: flow(
-          // SAFETY: the target schema encodes to A.
-          (value) => print(grammar, value as A),
-          Effect.fromResult,
-          Effect.mapError(({ issue }) => toSchemaIssue(issue)),
-        ),
-      }),
-    ),
-    Schema.annotate({ identifier: options?.identifier, description: render(grammar) }),
-  )
+export const codec = codecWith(Schema.Uint8Array, parse, print)

@@ -122,16 +122,6 @@ export type Node =
       resolving?: true | undefined
     }
 
-export const nonByte = /[^\0-\xff]/
-
-export const toBytes = (binary: string): Uint8Array => Uint8Array.from(binary, (char) => char.charCodeAt(0))
-
-export const toText = (bytes: Uint8Array): string => {
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return binary
-}
-
 export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): AnyGrammar => {
   if (node.resolved !== undefined) return node.resolved
   const where = `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}`

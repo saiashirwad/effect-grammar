@@ -1,6 +1,7 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const pair = Grammar.gen(function* () {
   const key = yield* Grammar.regex(/[^=&]+/, "param key")
@@ -13,13 +14,14 @@ const queryParams = pair.pipe(
   Grammar.sepBy("&"),
   Grammar.prefix("?"),
   Grammar.optional,
-  Grammar.decodeTo(Schema.Record(Schema.String, Schema.String))({
-    decode: (pairs) => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
+  Grammar.transform({
+    decode: (pairs): Record<string, string> => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
     encode: (record) => {
       const entries = Object.entries(record)
       return entries.length === 0 ? undefined : entries.map(([key, value]) => ({ key, value }))
     },
   }),
+  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.String)), "query parameters"),
 )
 
 const dsn = Grammar.gen(function* () {
@@ -43,7 +45,7 @@ const ConnectionInfo = Schema.Struct({
   database: Schema.NonEmptyString,
   params: Schema.Record(Schema.String, Schema.String),
 })
-const Dsn = Grammar.codec(dsn, ConnectionInfo, { identifier: "Dsn" })
+const Dsn = GrammarSchema.codec(dsn, ConnectionInfo, { identifier: "Dsn" })
 
 const decode = Schema.decodeEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)

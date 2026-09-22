@@ -1,6 +1,7 @@
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const Natural = Schema.Natural
 const ClosedRange = Schema.Struct({
@@ -90,7 +91,7 @@ const suffix = Grammar.gen(function* () {
   return { kind, length }
 })
 
-export const ByteRangeCodec = Grammar.codec(
+export const ByteRangeCodec = GrammarSchema.codec(
   Grammar.dispatch("kind", [
     ["closed", closed],
     ["open", open],

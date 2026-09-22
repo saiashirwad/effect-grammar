@@ -1,6 +1,7 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const Octet = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
 const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
@@ -14,7 +15,7 @@ const ip = Grammar.regex(/\d{1,3}/, "octet").pipe(
   }),
 )
 
-const Ip = Grammar.codec(ip, IpAddress, { identifier: "IpAddress" })
+const Ip = GrammarSchema.codec(ip, IpAddress, { identifier: "IpAddress" })
 
 const decode = Schema.decodeEffect(Ip)
 const encode = Schema.encodeEffect(Ip)

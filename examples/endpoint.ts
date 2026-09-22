@@ -1,6 +1,7 @@
 import { Console, Effect, Schema } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const endpoint = Grammar.gen(function* () {
   yield* Grammar.literal("https://")
@@ -9,7 +10,7 @@ const endpoint = Grammar.gen(function* () {
   return { host, port }
 })
 
-const Endpoint = Grammar.codec(
+const Endpoint = GrammarSchema.codec(
   endpoint,
   Schema.Struct({
     host: Schema.NonEmptyString,

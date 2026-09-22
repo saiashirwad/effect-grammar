@@ -1,6 +1,7 @@
-import { Predicate, Schema, SchemaIssue } from "effect"
+import { Predicate, Schema } from "effect"
 
 import type { Value } from "./core.ts"
+import { hex } from "./internal/bytes.ts"
 
 const describeExpected = (expected: ReadonlyArray<string>): string =>
   expected.length === 1 ? expected[0]! : `one of ${expected.join(", ")}`
@@ -93,14 +94,6 @@ export class PrintError extends Schema.TaggedError<PrintError>()("PrintError", {
     return formatIssue(issue)
   }
 }
-
-export const toSchemaIssue = (issue: PrintIssue): SchemaIssue.Issue =>
-  issue._tag === "AtPath"
-    ? new SchemaIssue.Pointer([issue.path], toSchemaIssue(issue.issue))
-    : new SchemaIssue.InvalidValue({ message: formatIssue(issue) })
-
-export const hex = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ")
 
 const show = (value: Value, seen: ReadonlyArray<Value>): string | undefined => {
   if (Predicate.isBigInt(value)) return `${value}n`

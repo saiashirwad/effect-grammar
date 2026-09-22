@@ -4,6 +4,7 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 import { assertRoundTrip, parseFail, parseOk, printFail, printOk } from "./helpers.ts"
 
 const G = Grammar
@@ -650,7 +651,7 @@ describe("sepBy", () => {
   )
 })
 
-describe("transform / decodeTo", () => {
+describe("transform / filter", () => {
   it.effect("maps both ways", () =>
     Effect.sync(() => {
       const g = G.regex(/\d+/, "digits").pipe(G.transform({ decode: Number, encode: String }))
@@ -659,7 +660,7 @@ describe("transform / decodeTo", () => {
     }),
   )
 
-  it.effect("`is` guards both parse and print", () =>
+  it.effect("filter guards both parse and print", () =>
     Effect.sync(() => {
       const even = G.integer.pipe(
         G.transform({ decode: (n) => n, encode: (n) => n }),
@@ -670,18 +671,20 @@ describe("transform / decodeTo", () => {
     }),
   )
 
-  it.effect("decodeTo uses the schema as the guard, so choice can pick a branch when printing", () =>
+  it.effect("schema guards let choice pick a branch when printing", () =>
     Effect.sync(() => {
       const Num = Schema.Struct({ kind: Schema.Literal("num"), value: Schema.Finite })
       const Word = Schema.Struct({ kind: Schema.Literal("word"), value: Schema.String })
       const num = G.integer.pipe(
-        G.decodeTo(Num)({ decode: (value) => ({ kind: "num", value }), encode: (n) => n.value }),
+        G.transform({ decode: (value): typeof Num.Type => ({ kind: "num", value }), encode: (n) => n.value }),
+        G.filter(Schema.is(Num), "a number branch"),
       )
       const w = word.pipe(
-        G.decodeTo(Word)({
-          decode: (value) => ({ kind: "word", value }),
+        G.transform({
+          decode: (value): typeof Word.Type => ({ kind: "word", value }),
           encode: (w) => w.value,
         }),
+        G.filter(Schema.is(Word), "a word branch"),
       )
       const g = G.choice([num, w])
       assert.deepEqual(parseOk(g, "12"), { kind: "num", value: 12 })
@@ -691,21 +694,21 @@ describe("transform / decodeTo", () => {
     }),
   )
 
-  it.effect("decodeTo rejects on parse when the schema does", () =>
+  it.effect("schema guards reject on parse when the schema does", () =>
     Effect.sync(() => {
       const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
-      const g = G.integer.pipe(G.decodeTo(Small, "digit")({ decode: (n) => n, encode: (n) => n }))
+      const g = G.integer.pipe(G.transform({ decode: (n) => n, encode: (n) => n }), G.filter(Schema.is(Small), "digit"))
       assert.deepEqual(parseFail(g, "10").expected, ["digit"])
     }),
   )
 
-  it.effect("decodeTo names the schema guard by default", () =>
+  it.effect("schema guards use an explicit name in parse and print errors", () =>
     Effect.sync(() => {
       const Small = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 9 }))
-      const g = G.integer.pipe(G.decodeTo(Small)({ decode: (n) => n, encode: (n) => n }))
+      const g = G.integer.pipe(G.transform({ decode: (n) => n, encode: (n) => n }), G.filter(Schema.is(Small), "digit"))
       assert.equal(parseOk(g, "9"), 9)
-      assert.deepEqual(parseFail(g, "10").expected, ["a value matching the schema"])
-      assert.match(printFail(g, 10).message, /a value matching the schema/)
+      assert.deepEqual(parseFail(g, "10").expected, ["digit"])
+      assert.match(printFail(g, 10).message, /digit/)
     }),
   )
 
@@ -990,7 +993,7 @@ describe("codec", () => {
     const n = yield* G.integer
     return { name, n }
   })
-  const Pair = G.codec(
+  const Pair = GrammarSchema.codec(
     pair,
     Schema.Struct({
       name: Schema.String,

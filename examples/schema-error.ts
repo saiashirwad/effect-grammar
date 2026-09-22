@@ -1,6 +1,7 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 
 const person = Grammar.gen(function* () {
   const name = yield* Grammar.regex(/[a-z]+/, "name")
@@ -9,7 +10,7 @@ const person = Grammar.gen(function* () {
   return { name, age }
 })
 
-const Person = Grammar.codec(
+const Person = GrammarSchema.codec(
   person,
   Schema.Struct({
     name: Schema.String.check(Schema.isMinLength(3)),
