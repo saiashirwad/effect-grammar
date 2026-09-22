@@ -2,6 +2,13 @@
 
 Define a parser, printer, and Effect schema codec from one grammar.
 
+## Documentation
+
+- [Quick start](#quick-start)
+- [Migration guide for the breaking simplification](docs/migration.md)
+- [Developer architecture and invariants](docs/architecture.md)
+- [Examples](#examples)
+
 ## Install
 
 Requires Node.js 20 or later and Effect v4.
@@ -113,8 +120,8 @@ defines the optional `print` policy, either `"first"` or `"roundTrip"`. This
 branch search also applies with `printUnchecked`. `print` checks the final
 output of the whole grammar. Both policies parse branches in the same order.
 
-Printing a `gen` object requires exactly its declared fields. Repeated items
-must consume input. Empty matches fail rather than loop.
+Printing a `gen` object requires exactly its declared fields. Parsing repeated
+items requires input progress. Empty matches fail rather than loop.
 
 ## Refs and dependent fields
 
