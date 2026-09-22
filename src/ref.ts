@@ -4,6 +4,7 @@ import {
   type AnyGrammar,
   type Expr,
   isGrammar,
+  nodeOf,
   type Pattern,
   type Ref,
   type RefBase,
@@ -22,6 +23,24 @@ export interface Scope {
 interface RefEntry {
   readonly expr: Expr
   readonly scope: Scope
+  // The fields of the bound object, when the grammar declares them; spreading the ref yields these.
+  readonly keys: ReadonlyArray<string> | undefined
+}
+
+// The fields a grammar's output is known to have.
+export const keysOf = (grammar: AnyGrammar): ReadonlyArray<string> | undefined => {
+  const node = nodeOf(grammar)
+  switch (node._tag) {
+    case "Gen":
+      return node.result._tag === "Object" ? node.result.fields.map(([key]) => key) : undefined
+    case "Transform":
+      return node.keys
+    case "Wrap":
+    case "Label":
+      return keysOf(node.inner)
+    default:
+      return undefined
+  }
 }
 
 class RefImpl<A> implements RefBase<A> {
@@ -47,6 +66,7 @@ const entryOf = (ref: RefBase<Value>): RefEntry => {
 
 // Property access on a ref yields a ref to that property. A few keys are reserved so
 // refs behave when awaited, serialized, or coerced; use `get` to read those fields.
+// Spreading a ref enumerates its known fields, so `{ ...flags }` returns each field's ref.
 const refHandler: ProxyHandler<RefImpl<Value>> = {
   get(_target, key, receiver) {
     if (key === RefTypeId) return RefTypeId
@@ -57,11 +77,27 @@ const refHandler: ProxyHandler<RefImpl<Value>> = {
     const entry = entryOf(receiver)
     return refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope)
   },
+  ownKeys(target) {
+    return [...(entryOf(target).keys ?? [])]
+  },
+  getOwnPropertyDescriptor(target, key) {
+    const entry = entryOf(target)
+    if (!Predicate.isString(key) || !entry.keys?.includes(key)) return undefined
+    return {
+      value: refFor({ _tag: "Prop", object: entry.expr, key }, entry.scope),
+      enumerable: true,
+      configurable: true,
+      writable: false,
+    }
+  },
 }
 
-export const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
-  const ref = new Proxy(new RefImpl<A>(), refHandler)
-  refs.set(ref, { expr, scope })
+export const refFor = <A>(expr: Expr, scope: Scope, keys?: ReadonlyArray<string>): Ref<A> => {
+  const target = new RefImpl<A>()
+  const ref = new Proxy(target, refHandler)
+  const entry: RefEntry = { expr, scope, keys }
+  refs.set(ref, entry)
+  refs.set(target, entry)
   // SAFETY: the proxy implements Ref<A>.
   return ref as Ref<A>
 }
@@ -94,12 +130,13 @@ const isPlainObject = <T extends object>(value: T): boolean => {
 export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet()): Pattern => {
   if (isRef(value)) {
     const { expr } = entryOf(value)
-    if (expr._tag !== "Ref") {
-      throw new Error(
-        "gen: the return holds a property of a ref; printing cannot rebuild a value from one property, so return the whole ref",
-      )
+    if (expr._tag === "Ref") return expr
+    if (expr._tag === "Prop" && expr.object._tag === "Ref" && Predicate.isString(expr.key)) {
+      return { _tag: "Prop", object: expr.object, key: expr.key }
     }
-    return expr
+    throw new Error(
+      "gen: the return holds a nested property of a ref; return the ref, one of its fields, or its spread",
+    )
   }
   if (isGrammar(value)) {
     throw new Error("gen: the return holds a grammar; yield* it to bind its value, then return the ref")
@@ -157,21 +194,32 @@ export const toPattern = (value: Value, active: WeakSet<object> = new WeakSet())
   }
 }
 
-// Printing reads a slot from wherever the pattern mentions it, so a ref may appear at most once.
+// Printing reads a slot from wherever the pattern mentions it, so a ref may appear once:
+// either whole, or through every one of its fields.
 export const assertRefsReturnedOnce = (scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, result: Pattern): void => {
-  const returned = new Set<number>()
+  const whole = new Set<number>()
+  const byField = new Map<number, Set<string>>()
   const collect = (pattern: Pattern): void => {
     switch (pattern._tag) {
-      case "Ref": {
-        if (pattern.scope !== scope) {
+      case "Ref":
+      case "Prop": {
+        const ref = pattern._tag === "Ref" ? pattern : pattern.object
+        if (ref.scope !== scope) {
           throw new Error("gen: the return holds a ref bound by another gen; return it from the gen that bound it")
         }
-        if (returned.has(pattern.slot)) {
-          throw new Error(
-            `gen: ${describeStep(steps[pattern.slot]!, pattern.slot)} is returned twice, so printing could not tell which copy to read`,
-          )
+        const step = describeStep(steps[ref.slot]!, ref.slot)
+        const fields = byField.get(ref.slot)
+        if (whole.has(ref.slot) || (pattern._tag === "Ref" && fields !== undefined)) {
+          throw new Error(`gen: ${step} is returned twice, so printing could not tell which copy to read`)
         }
-        returned.add(pattern.slot)
+        if (pattern._tag === "Ref") {
+          whole.add(ref.slot)
+          return
+        }
+        if (fields?.has(pattern.key)) {
+          throw new Error(`gen: field ${JSON.stringify(pattern.key)} of ${step} is returned twice`)
+        }
+        byField.set(ref.slot, (fields ?? new Set()).add(pattern.key))
         return
       }
       case "Const":
@@ -184,4 +232,18 @@ export const assertRefsReturnedOnce = (scope: ScopeId, steps: ReadonlyArray<AnyG
     }
   }
   collect(result)
+
+  for (const [slot, fields] of byField) {
+    const step = describeStep(steps[slot]!, slot)
+    const keys = keysOf(steps[slot]!)
+    if (keys === undefined) {
+      throw new Error(`gen: ${step} has no known fields, so it cannot be returned field by field; return the whole ref`)
+    }
+    const missing = keys.filter((key) => !fields.has(key))
+    if (missing.length > 0) {
+      throw new Error(
+        `gen: ${step} is returned field by field but ${missing.map((key) => JSON.stringify(key)).join(", ")} ${missing.length === 1 ? "is" : "are"} missing, so printing could not rebuild it; spread the whole ref`,
+      )
+    }
+  }
 }

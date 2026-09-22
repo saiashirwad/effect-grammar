@@ -45,6 +45,7 @@ const nameBindings = (pattern: Pattern, path: string | undefined, scope: ScopeId
     case "Ref":
       if (pattern.scope === scope && path !== undefined) names.set(pattern.slot, path)
       return
+    case "Prop":
     case "Const":
       return
     case "Object":
@@ -104,8 +105,6 @@ const notation = (grammar: AnyGrammar, context: Context): Fragment => {
     }
     case "Wrap":
       return sequence([notation(node.open, context), notation(node.inner, context), notation(node.close, context)])
-    case "Merge":
-      return sequence(node.parts.map((part) => notation(part.grammar, context)))
     case "Choice":
       return {
         precedence: ChoicePrecedence,

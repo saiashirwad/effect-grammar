@@ -243,12 +243,11 @@ describe("codec", () => {
     kind: Binary.uintSchema(7),
     names: Schema.Array(Schema.String),
   })
-  const frame = G.merge(
-    Binary.bits({ version: 1, kind: 7 }),
-    G.struct({
-      names: Binary.lengthPrefixed(Binary.uint8).pipe(Binary.utf8, G.countPrefixed(Binary.uint8)),
-    }),
-  )
+  const frame = G.gen(function* () {
+    const bits = yield* Binary.bits({ version: 1, kind: 7 })
+    const names = yield* Binary.lengthPrefixed(Binary.uint8).pipe(Binary.utf8, G.countPrefixed(Binary.uint8))
+    return { ...bits, names }
+  })
   const FrameFromBytes = Binary.codec(frame, Frame, { identifier: "Frame" })
   const wire = Uint8Array.of(0x85, 2, 1, 0x61, 2, 0x62, 0x63)
 

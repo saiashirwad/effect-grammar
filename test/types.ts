@@ -195,7 +195,11 @@ const variant = G.struct({
     "variant",
   ),
 )
-const merged = G.merge(variant, G.struct({ id: G.integer }))
+const merged = G.gen(function* () {
+  const v = yield* variant
+  const id = yield* G.integer
+  return { ...v, id }
+})
 const mergedValue: G.Type<typeof merged> = { kind: "b", n: 42, id: 7 }
 // @ts-expect-error kind "a" requires n to be 0
 const mergedBad: G.Type<typeof merged> = { kind: "a", n: 42, id: 7 }

@@ -14,7 +14,6 @@ export {
   literal,
   many,
   match,
-  merge,
   optional,
   partialIso,
   prefix,

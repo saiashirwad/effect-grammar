@@ -27,8 +27,6 @@ const children = (node: Node): ReadonlyArray<AnyGrammar> => {
       return node.steps
     case "Wrap":
       return [node.open, node.inner, node.close]
-    case "Merge":
-      return node.parts.map((part) => part.grammar)
     case "Choice":
       return node.options
     case "Dispatch":
@@ -75,11 +73,6 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>): EmptyMatch => {
       return allMatchEmpty(node.steps, seen)
     case "Wrap":
       return allMatchEmpty([node.open, node.inner, node.close], seen)
-    case "Merge":
-      return allMatchEmpty(
-        node.parts.map((part) => part.grammar),
-        seen,
-      )
     case "Choice":
     case "Dispatch": {
       let result: EmptyMatch = "no"
@@ -124,6 +117,9 @@ const mentionedSlots = (pattern: Pattern, slots: Set<number> = new Set()): Set<n
   switch (pattern._tag) {
     case "Ref":
       slots.add(pattern.slot)
+      break
+    case "Prop":
+      slots.add(pattern.object.slot)
       break
     case "Const":
       break

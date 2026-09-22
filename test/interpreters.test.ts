@@ -44,10 +44,14 @@ const table = {
   Literal: row({ grammar: G.literal("x"), text: "x", value: undefined, render: '"x"' }),
   Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12", render: "<num>" }),
   Gen: row({
-    grammar: G.struct({ n: G.integer }),
-    text: "5",
-    value: { n: 5 },
-    render: "n:<integer>",
+    grammar: G.gen(function* () {
+      const a = yield* G.struct({ n: G.integer })
+      const b = yield* G.struct({ w: word })
+      return { ...a, ...b }
+    }),
+    text: "5ab",
+    value: { n: 5, w: "ab" },
+    render: "n:<integer> w:<word>",
   }),
   Wrap: row({
     grammar: G.integer.pipe(G.between("(", ")")),
@@ -112,12 +116,6 @@ const table = {
     text: "2:ab",
     value: { length: 2, payload: "ab" },
     renderIncludes: "<take>{",
-  }),
-  Merge: row({
-    grammar: G.merge(G.struct({ n: G.integer }), G.struct({ w: word })),
-    text: "5ab",
-    value: { n: 5, w: "ab" },
-    render: "n:<integer> w:<word>",
   }),
 } satisfies Record<Node["_tag"], Row>
 

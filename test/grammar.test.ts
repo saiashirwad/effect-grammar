@@ -214,18 +214,26 @@ describe("gen", () => {
     }),
   )
 
-  it.effect("rejects a projection in the return", () =>
+  it.effect("returns fields of a ref only when every field is accounted for", () =>
     Effect.sync(() => {
+      const pair = G.gen(function* () {
+        const a = yield* G.integer
+        const b = yield* G.integer.pipe(G.prefix(","))
+        return { a, b }
+      })
+      const renamed = G.gen(function* () {
+        const p = yield* pair
+        return { first: p.a, second: p.b }
+      })
+      assert.deepEqual(parseOk(renamed, "1,2"), { first: 1, second: 2 })
+      assert.equal(printOk(renamed, { first: 3, second: 4 }), "3,4")
       assert.throws(
         () =>
           G.gen(function* () {
-            const pair = yield* G.gen(function* () {
-              const a = yield* G.integer
-              return { a }
-            })
-            return pair.a
+            const p = yield* pair
+            return p.a
           }),
-        /property of a ref/,
+        /"b" is missing/,
       )
     }),
   )

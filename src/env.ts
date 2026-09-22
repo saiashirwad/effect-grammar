@@ -43,21 +43,13 @@ const setOwn = (object: Record<string, Value>, key: string, value: Value): void 
   Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true })
 }
 
-export const copyFields = (
-  target: Record<string, Value>,
-  source: Readonly<Record<string, Value>>,
-  keys: ReadonlyArray<string>,
-): void => {
-  for (const key of keys) {
-    if (Object.hasOwn(source, key)) setOwn(target, key, source[key])
-  }
-}
-
 // Parsing: build the gen's return value from its bound slots.
 export const materialize = (pattern: Pattern, env: Frame): Value => {
   switch (pattern._tag) {
     case "Ref":
       return lookup(env, pattern)
+    case "Prop":
+      return evaluate(pattern, env)
     case "Const":
       return pattern.value
     case "Object": {
@@ -113,6 +105,14 @@ export const unifyPattern = (pattern: Pattern, value: Value, env: Frame): Result
     case "Ref":
       env.values[pattern.slot] = value
       return Result.void
+    case "Prop": {
+      // Fields returned one by one rebuild the object the step printed.
+      const object = env.values[pattern.object.slot]
+      const target: Record<string, Value> = Predicate.isObject(object) ? object : {}
+      setOwn(target, pattern.key, value)
+      env.values[pattern.object.slot] = target
+      return Result.void
+    }
     case "Const":
       return Equal.equals(value, pattern.value)
         ? Result.void

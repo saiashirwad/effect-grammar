@@ -57,17 +57,35 @@ describe("lengthPrefixed / countPrefixed", () => {
   )
 })
 
-describe("merge", () => {
-  const point = G.merge(G.struct({ x: G.integer }), G.struct({ y: G.integer.pipe(G.prefix(",")) }))
+describe("spreading a ref", () => {
+  const point = G.gen(function* () {
+    const a = yield* G.struct({ x: G.integer })
+    const b = yield* G.struct({ y: G.integer.pipe(G.prefix(",")) })
+    return { ...a, ...b }
+  })
 
-  it.effect("flattens its parts, nests, and sees through filter", () =>
+  it.effect("flattens the fields of each spread ref, and sees through filter", () =>
     Effect.sync(() => {
-      const named = G.merge(
-        point.pipe(G.filter((value: G.Type<typeof point>) => value.x >= 0, "a point right of the origin")),
-        G.struct({ name: word.pipe(G.prefix(";")) }),
-      )
+      const named = G.gen(function* () {
+        const p = yield* point.pipe(
+          G.filter((value: G.Type<typeof point>) => value.x >= 0, "a point right of the origin"),
+        )
+        const name = yield* word.pipe(G.prefix(";"))
+        return { ...p, name }
+      })
       assert.deepEqual(parseOk(named, "1,2;p"), { x: 1, y: 2, name: "p" })
       assertRoundTrip(named, { x: 3, y: -4, name: "q" })
+    }),
+  )
+
+  it.effect("returns single fields under new names", () =>
+    Effect.sync(() => {
+      const renamed = G.gen(function* () {
+        const p = yield* point
+        return { first: p.x, second: p.y }
+      })
+      assert.deepEqual(parseOk(renamed, "1,2"), { first: 1, second: 2 })
+      assertRoundTrip(renamed, { first: 3, second: 4 })
     }),
   )
 
@@ -82,11 +100,33 @@ describe("merge", () => {
     }),
   )
 
-  it.effect("rejects duplicate fields and parts whose fields it cannot know", () =>
+  it.effect("rejects partial spreads, double returns, and refs without known fields", () =>
     Effect.sync(() => {
+      assert.throws(
+        () =>
+          G.gen(function* () {
+            const p = yield* point
+            return { x: p.x }
+          }),
+        /"y" is missing/,
+      )
+      assert.throws(
+        () =>
+          G.gen(function* () {
+            const p = yield* point
+            return { p, ...p }
+          }),
+        /returned twice/,
+      )
       const wrapped = word.pipe(G.iso({ decode: (w) => ({ w }), encode: ({ w }) => w }))
-      assert.throws(() => G.merge(point, wrapped), /no known fields/)
-      assert.throws(() => G.merge(point, G.struct({ x: word })), /duplicate key "x"/)
+      assert.throws(
+        () =>
+          G.gen(function* () {
+            const w = yield* wrapped
+            return { first: w.w }
+          }),
+        /no known fields/,
+      )
     }),
   )
 })

@@ -5,16 +5,15 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as B from "../src/binary.ts"
 import * as G from "../src/index.ts"
 
-const header = G.merge(
-  G.struct({ id: B.uint16 }),
-  B.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 }),
-  G.struct({
-    qdcount: B.uint16,
-    ancount: B.uint16,
-    nscount: B.uint16,
-    arcount: B.uint16,
-  }),
-)
+const header = G.gen(function* () {
+  const id = yield* B.uint16
+  const flags = yield* B.bits({ qr: 1, opcode: 4, aa: 1, tc: 1, rd: 1, ra: 1, z: 3, rcode: 4 })
+  const qdcount = yield* B.uint16
+  const ancount = yield* B.uint16
+  const nscount = yield* B.uint16
+  const arcount = yield* B.uint16
+  return { id, ...flags, qdcount, ancount, nscount, arcount }
+})
 
 const label = B.uint8.pipe(
   G.filter((length: number) => length >= 1 && length <= 63, "label length"),

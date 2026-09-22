@@ -34,10 +34,15 @@ type RefProps<A> = [A] extends [ReadonlyArray<unknown>]
 
 export type Ref<A> = RefBase<A> & RefProps<A>
 
-// The value a `gen` returns, with every ref replaced by what it refers to.
+type StringKeys<T> = Extract<keyof T, string>
+
+// The value a `gen` returns, with every ref replaced by what it refers to. Spreading a ref
+// copies its brand, so a branded type with fields beyond the ref's own is an object, not a ref.
 export type Denote<T> =
   T extends RefBase<infer A>
-    ? A
+    ? Exclude<StringKeys<T>, StringKeys<A>> extends never
+      ? A
+      : Types.Simplify<A & { -readonly [K in Exclude<StringKeys<T>, StringKeys<A>>]: Denote<T[K]> }>
     : T extends ReadonlyArray<unknown>
       ? { -readonly [K in keyof T]: Denote<T[K]> }
       : T extends object
@@ -89,8 +94,10 @@ export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
 
 // The shape a `gen` returns, built from bound values when parsing and taken apart when printing.
+// A `Prop` is one field of a bound object, as produced by spreading a ref: `{ ...flags }`.
 export type Pattern =
   | RefExpr
+  | { readonly _tag: "Prop"; readonly object: RefExpr; readonly key: string }
   | { readonly _tag: "Const"; readonly value: Value }
   | { readonly _tag: "Object"; readonly fields: ReadonlyArray<readonly [string, Pattern]> }
   | { readonly _tag: "Array"; readonly items: ReadonlyArray<Pattern> }
@@ -126,10 +133,6 @@ export type Node =
       readonly result: Pattern
     }
   | { readonly _tag: "Wrap"; readonly open: Grammar<void>; readonly inner: AnyGrammar; readonly close: Grammar<void> }
-  | {
-      readonly _tag: "Merge"
-      readonly parts: ReadonlyArray<{ readonly grammar: AnyGrammar; readonly keys: ReadonlyArray<string> }>
-    }
   // Parse with the first branch that matches. Print with the first branch that accepts the value,
   // or when `checked`, the first whose printed text parses back to the input value.
   | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly checked: boolean }
@@ -151,7 +154,7 @@ export type Node =
       readonly decode: (a: any) => Result.Result<Value, string>
       readonly encode: (b: any) => Result.Result<Value, string>
       readonly fidelity: Fidelity
-      // Fields known to be in the output, so `merge` can split a value between parts.
+      // Fields known to be in the output, so a ref to it can be spread in a gen's return.
       readonly keys?: ReadonlyArray<string> | undefined
     }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }

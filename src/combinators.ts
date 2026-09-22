@@ -1,4 +1,4 @@
-import { Predicate, Result, type Types } from "effect"
+import { Predicate, Result } from "effect"
 
 import {
   type AnyGrammar,
@@ -10,15 +10,13 @@ import {
   isGrammar,
   make,
   type MatchKey,
-  nodeOf,
   type Ref,
   type ScopeId,
   type Type,
   type Value,
 } from "./core.ts"
 import { exceptionMessage, preview } from "./errors.ts"
-import { assertInScope, assertRefsReturnedOnce, refFor, type Scope, toPattern } from "./ref.ts"
-import { describe } from "./render.ts"
+import { assertInScope, assertRefsReturnedOnce, keysOf, refFor, type Scope, toPattern } from "./ref.ts"
 
 export { get } from "./ref.ts"
 
@@ -76,7 +74,7 @@ export const gen = <R>(run: () => Generator<AnyGrammar, R, unknown>): Grammar<De
       const grammar = result.value
       if (!isGrammar(grammar)) throw new TypeError("gen: only a grammar can be yielded")
       const slot = steps.push(grammar) - 1
-      result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope))
+      result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope, keysOf(grammar)))
     }
     const pattern = toPattern(result.value)
     assertRefsReturnedOnce(scope.id, steps, pattern)
@@ -141,55 +139,12 @@ export const prefix = (open: Grammar<void> | string) => between(open, empty)
 
 export const suffix = (close: Grammar<void> | string) => between(empty, close)
 
-export const keysOf = (grammar: AnyGrammar): ReadonlyArray<string> | undefined => {
-  const node = nodeOf(grammar)
-  switch (node._tag) {
-    case "Gen":
-      return node.result._tag === "Object" ? node.result.fields.map(([key]) => key) : undefined
-    case "Transform":
-      return node.keys
-    case "Merge":
-      return node.parts.flatMap((part) => part.keys)
-    case "Wrap":
-    case "Label":
-      return keysOf(node.inner)
-    default:
-      return undefined
-  }
-}
-
 const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void => {
   const seen = new Set<MatchKey>()
   for (const key of keys) {
     if (seen.has(key)) throw new RangeError(`${where}: duplicate key ${preview(key)}`)
     seen.add(key)
   }
-}
-
-type MergeValue<Parts extends ReadonlyArray<AnyGrammar>> =
-  Types.UnionToIntersection<{ [K in keyof Parts]: { readonly value: Type<Parts[K]> } }[number]> extends {
-    readonly value: infer Value
-  }
-    ? Types.Simplify<Value>
-    : never
-
-export const merge = <const Parts extends readonly [AnyGrammar, ...Array<AnyGrammar>]>(
-  ...grammars: Parts
-): Grammar<MergeValue<Parts>> => {
-  const parts = grammars.map((grammar, index) => {
-    const keys = keysOf(grammar)
-    if (keys === undefined) {
-      throw new TypeError(
-        `merge: part ${index + 1} (${describe(grammar)}) has no known fields; pass a struct, a gen that returns an object, another merge, or Binary.bits`,
-      )
-    }
-    return { grammar, keys }
-  })
-  assertUniqueKeys(
-    parts.flatMap((part) => part.keys),
-    "merge",
-  )
-  return make({ _tag: "Merge", parts })
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +340,7 @@ export const partialIso =
     transformNode(inner, options, "partial")
 
 // Reject values the predicate refuses, in both directions, reporting `name` as what was expected.
-// Keeps the inner grammar's fields for `merge`.
+// Keeps the inner grammar's fields, so a ref to it can still be spread.
 export function filter<A, B extends A>(
   refinement: (value: A) => value is B,
   name: string,

@@ -11,7 +11,7 @@ import {
   type ScopeId,
   type Value,
 } from "./core.ts"
-import { caseFor, copyFields, evaluate, type Frame, frame, Unbound, unifyPattern, validateOwnKeys } from "./env.ts"
+import { caseFor, evaluate, type Frame, frame, Unbound, unifyPattern } from "./env.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
 import { parseWithEnv } from "./parse.ts"
 import { describe, describeStep } from "./render.ts"
@@ -52,6 +52,7 @@ const bindingPath = (
   switch (pattern._tag) {
     case "Ref":
       return pattern.scope === scope && pattern.slot === slot ? path : undefined
+    case "Prop":
     case "Const":
       return undefined
     case "Object":
@@ -117,18 +118,18 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
 
       let text = ""
       for (const [slot, step] of node.steps.entries()) {
-        const path = bindingPath(node.result, node.scope, slot)
-        let result = printGrammar(step, path === undefined ? undefined : local.values[slot], local, state)
+        const bound = local.values[slot]
+        const result = printGrammar(step, bound === Unbound ? undefined : bound, local, state)
         if (Result.isFailure(result)) {
-          if (path === undefined) {
+          if (bound === Unbound) {
             return invalid(
               describeStep(step, slot),
               undefined,
               "parsed but not returned, so there is no value to print it from; return it, or discard it with skip",
             )
           }
-          result = path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
-          return result
+          const path = bindingPath(node.result, node.scope, slot) ?? []
+          return path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
         }
         text += result.success
       }
@@ -142,28 +143,6 @@ const printGrammar = (grammar: AnyGrammar, value: Value, env: Frame | undefined,
       const close = printGrammar(node.close, undefined, env, state)
       if (Result.isFailure(close)) return close
       return Result.succeed(open.success + inner.success + close.success)
-    }
-    case "Merge": {
-      if (!Predicate.isObject(value)) return fail({ _tag: "TypeMismatch", expected: "an object", actual: value })
-      const keys = validateOwnKeys(
-        value,
-        node.parts.flatMap((part) => part.keys),
-      )
-      if (Result.isFailure(keys)) return Result.fail(keys.failure)
-
-      let text = ""
-      for (const part of node.parts) {
-        const fields: Record<string, Value> = {}
-        try {
-          copyFields(fields, value, part.keys)
-        } catch (error) {
-          return invalid("readable fields", value, exceptionMessage(error))
-        }
-        const result = printGrammar(part.grammar, fields, env, state)
-        if (Result.isFailure(result)) return result
-        text += result.success
-      }
-      return Result.succeed(text)
     }
     case "Choice": {
       const issues: Array<PrintIssue> = []

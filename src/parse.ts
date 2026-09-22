@@ -1,7 +1,7 @@
-import { Predicate, Result } from "effect"
+import { Result } from "effect"
 
 import { type AnyGrammar, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
-import { caseFor, copyFields, evaluate, type Frame, frame, materialize, Unbound } from "./env.ts"
+import { caseFor, evaluate, type Frame, frame, materialize, Unbound } from "./env.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./render.ts"
 
@@ -89,17 +89,6 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       if (Result.isFailure(inner)) return inner
       const close = parseGrammar(node.close, state, env)
       return Result.isFailure(close) ? close : inner
-    }
-    case "Merge": {
-      const merged: Record<string, Value> = {}
-      for (const part of node.parts) {
-        const start = state.pos
-        const result = parseGrammar(part.grammar, state, env)
-        if (Result.isFailure(result)) return result
-        if (!Predicate.isObject(result.success)) return failAt(state, "an object to merge", start)
-        copyFields(merged, result.success, part.keys)
-      }
-      return Result.succeed(merged)
     }
     case "Choice":
     case "Dispatch": {

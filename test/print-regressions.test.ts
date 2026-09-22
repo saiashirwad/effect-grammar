@@ -64,35 +64,21 @@ describe("printer sequencing and exception boundaries", () => {
     }),
   )
 
-  it.effect("does not inspect later merge fields after a failure", () =>
+  it.effect("probes descriptors before reading fields in generators and spreads", () =>
     Effect.sync(() => {
-      const grammar = G.merge(G.struct({ first: G.integer }), G.struct({ second: G.integer }))
-      let reads = 0
-      const value = {
-        first: Number.NaN,
-        get second(): number {
-          reads++
-          throw new Error("later field")
-        },
-      }
-      printFail(grammar, value)
-      assert.equal(reads, 0)
-      const error = printFail(grammar, {
-        first: 1,
-        get second(): number {
-          throw new Error("field failed")
-        },
-      })
-      assert.match(error.message, /field failed/)
-    }),
-  )
-
-  it.effect("probes descriptors before reading fields in generators and merges", () =>
-    Effect.sync(() => {
-      for (const [index, grammar] of [
-        G.struct({ first: G.integer, second: G.integer }),
-        G.merge(G.struct({ first: G.integer }), G.struct({ second: G.integer })),
-      ].entries()) {
+      const grammars: ReadonlyArray<G.Grammar<{ first: number; second: number }>> = [
+        G.gen(function* () {
+          const first = yield* G.integer
+          const second = yield* G.integer
+          return { first, second }
+        }),
+        G.gen(function* () {
+          const a = yield* G.struct({ first: G.integer })
+          const b = yield* G.struct({ second: G.integer })
+          return { ...a, ...b }
+        }),
+      ]
+      for (const grammar of grammars) {
         const calls: Array<string> = []
         const value = new Proxy(
           { first: 1, second: 2 },
@@ -113,25 +99,26 @@ describe("printer sequencing and exception boundaries", () => {
           },
         )
         assert.equal(printOk(grammar, value), "12")
-        assert.deepEqual(calls, [
-          "keys",
-          "descriptor:first",
-          "descriptor:second",
-          ...(index === 1 ? ["descriptor:first"] : []),
-          "get:first",
-          ...(index === 1 ? ["descriptor:second"] : []),
-          "get:second",
-        ])
+        assert.deepEqual(calls, ["keys", "descriptor:first", "descriptor:second", "get:first", "get:second"])
       }
     }),
   )
 
   it.effect("catches descriptor traps before rejecting extra fields or reading getters", () =>
     Effect.sync(() => {
-      for (const grammar of [
-        G.struct({ first: G.integer, second: G.integer }),
-        G.merge(G.struct({ first: G.integer }), G.struct({ second: G.integer })),
-      ]) {
+      const grammars: ReadonlyArray<G.Grammar<{ first: number; second: number }>> = [
+        G.gen(function* () {
+          const first = yield* G.integer
+          const second = yield* G.integer
+          return { first, second }
+        }),
+        G.gen(function* () {
+          const a = yield* G.struct({ first: G.integer })
+          const b = yield* G.struct({ second: G.integer })
+          return { ...a, ...b }
+        }),
+      ]
+      for (const grammar of grammars) {
         const calls: Array<string> = []
         const value = new Proxy(
           { extra: true, first: 1, second: 2 },
