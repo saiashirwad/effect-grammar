@@ -6,8 +6,11 @@ import { Effect, Result } from "effect"
 import * as G from "../src/index.ts"
 import { assertRoundTrip, hashed, number, parseOk, plain, printOk, symbol, word, wrong } from "./helpers.ts"
 
+const bare = G.regex(/\w+/, "word")
+const quoted = G.regex(/[^"]*/, "text").pipe(G.between("\"", "\""))
+
 describe("first choice policy picks the first branch whose printer accepts", () => {
-  const g = G.choice([plain, hashed])
+  const g = G.choice([plain, hashed], { print: "first" })
 
   it.effect("mis-prints a hashed value as plain", () =>
     Effect.sync(() => {
@@ -30,21 +33,35 @@ describe("first choice policy picks the first branch whose printer accepts", () 
       assert.equal(Result.getOrThrow(G.printUnchecked(g, wrong)), "x")
     }))
 
-  it.effect("has the same default, empty-options, and explicit first policies", () =>
+  it.effect("keeps a bare word that reads back as a number", () =>
     Effect.sync(() => {
-      for (const options of [undefined, {}, { print: "first" }] as const) {
-        const grammar = G.choice([plain, hashed], options)
-        assert.deepEqual(parseOk(grammar, "#x"), wrong)
-        assert.equal(Result.getOrThrow(G.printUnchecked(grammar, wrong)), "x")
-        const result = G.print(grammar, wrong)
-        assert.ok(Result.isFailure(result))
-        assert.equal(result.failure.issue._tag, "RoundTrip")
-      }
+      const grammar = G.choice([G.integer, bare, quoted], { print: "first" })
+      assert.equal(Result.getOrThrow(G.printUnchecked(grammar, "123")), "123")
+      const result = G.print(grammar, "123")
+      assert.ok(Result.isFailure(result))
+      assert.equal(result.failure.issue._tag, "RoundTrip")
     }))
 })
 
 describe("roundTrip choice policy selects a branch that reads back", () => {
   const g = G.choice([plain, hashed], { print: "roundTrip" })
+
+  it.effect("is the default", () =>
+    Effect.sync(() => {
+      for (const options of [undefined, {}] as const) {
+        const grammar = G.choice([plain, hashed], options)
+        assert.equal(printOk(grammar, wrong), "#x")
+        assert.equal(Result.getOrThrow(G.printUnchecked(grammar, wrong)), "#x")
+      }
+    }))
+
+  it.effect("falls through a bare word that reads back as a number", () =>
+    Effect.sync(() => {
+      const grammar = G.choice([G.integer, bare, quoted])
+      assert.equal(printOk(grammar, "123"), "\"123\"")
+      assert.equal(printOk(grammar, "abc"), "abc")
+      assert.equal(printOk(grammar, 123), "123")
+    }))
 
   it.effect("prints with the branch whose text round-trips", () =>
     Effect.sync(() => {
@@ -107,9 +124,9 @@ describe("print is the whole-grammar round-trip guarantee", () => {
       assert.match(result.failure.message, /does not parse back/)
     }))
 
-  it.effect("catches an ambiguous plain choice that no branch selection fixes", () =>
+  it.effect("catches an ambiguous first choice that no branch selection fixes", () =>
     Effect.sync(() => {
-      const atom = G.choice([number, symbol])
+      const atom = G.choice([number, symbol], { print: "first" })
       const r = G.print(atom, { kind: "symbol", value: "42" })
       assert.ok(Result.isFailure(r))
       assert.equal(

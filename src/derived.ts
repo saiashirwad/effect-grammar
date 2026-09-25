@@ -61,11 +61,15 @@ export const literals = <const Values extends readonly [string, ...Array<string>
 ): Grammar<Values[number]> => {
   const longestFirst = values.toSorted((left, right) => right.length - left.length)
   // SAFETY: `values` is non-empty, so the sorted branches are too.
-  return choice(longestFirst.map((value) => as(value)(literal(value))) as [Grammar<Values[number]>])
+  // Each branch prints only its own constant, so a round-trip print check would be pure cost.
+  return choice(longestFirst.map((value) => as(value)(literal(value))) as [Grammar<Values[number]>], {
+    print: "first",
+  })
 }
 
+// The branches print only true and only false respectively, so a round-trip print check would be pure cost.
 export const flag = <T extends Grammar<void, Domain> | string>(value: T) =>
-  choice([as(true)(toGrammar(value)), as(false)(empty)])
+  choice([as(true)(toGrammar(value)), as(false)(empty)], { print: "first" })
 
 export const defaulted = <A>(value: A) => <D extends Domain>(inner: Grammar<A | undefined, D>): Grammar<A, D> =>
   inner.pipe(

@@ -142,6 +142,10 @@ const assertUniqueKeys = (keys: ReadonlyArray<MatchKey>, where: string): void =>
 type Options = readonly [AnyGrammar, ...Array<AnyGrammar>]
 
 export interface ChoiceOptions {
+  /**
+   * `"roundTrip"` (default) keeps a branch's output only if it reparses through the choice to an
+   * equal value. `"first"` keeps the first branch that prints; use it when branches cannot overlap.
+   */
   readonly print?: "first" | "roundTrip"
 }
 
@@ -149,7 +153,7 @@ export const choice = <const Grammars extends Options>(
   options: Grammars,
   policy?: ChoiceOptions,
 ): Grammar<Type<Grammars[number]>, DomainOf<Grammars[number]>> =>
-  make({ _tag: "Choice", options, print: policy?.print ?? "first" })
+  make({ _tag: "Choice", options, print: policy?.print ?? "roundTrip" })
 
 type Entries = ReadonlyArray<readonly [MatchKey, AnyGrammar]>
 

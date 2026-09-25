@@ -12,10 +12,11 @@ export type JsonValue =
 
 const jsonNull = Grammar.symbol("null").pipe(Grammar.as(null))
 
+// Each branch prints only its own constant, so the round-trip check is unnecessary.
 const jsonBool = Grammar.choice([
   Grammar.symbol("true").pipe(Grammar.as(true)),
   Grammar.symbol("false").pipe(Grammar.as(false)),
-])
+], { print: "first" })
 
 const jsonNumber = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number")).pipe(
   Grammar.transform({ decode: Number, encode: String }),
@@ -39,8 +40,10 @@ export const jsonString = Grammar.lexeme(
   }),
 )
 
+// Every branch starts with a distinct character (n, t/f, digit/-, ", [, {), so no output can read
+// back through another branch; the per-branch round-trip check would be pure, quadratic-in-depth cost.
 export const jsonValue: Grammar.Grammar<JsonValue> = Grammar.suspend(
-  () => Grammar.choice([jsonNull, jsonBool, jsonNumber, jsonString, jsonArray, jsonObject]),
+  () => Grammar.choice([jsonNull, jsonBool, jsonNumber, jsonString, jsonArray, jsonObject], { print: "first" }),
   "value",
 )
 

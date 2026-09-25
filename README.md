@@ -113,12 +113,14 @@ name))`. The guard checks the value in both directions. It does not run Schema
 transformations.
 
 `choice([first, second])` takes a nonempty readonly tuple of branches. By
-default, it prints with the first branch that accepts the value. Use
-`choice([first, second], { print: "roundTrip" })` to try later branches when a
-candidate's output reads back differently through the choice. `ChoiceOptions`
-defines the optional `print` policy, either `"first"` or `"roundTrip"`. This
-branch search also applies with `printUnchecked`. `print` checks the final
-output of the whole grammar. Both policies parse branches in the same order.
+default, it prints with the first branch whose output reads back equally through
+the choice, trying later branches otherwise. This reparses each candidate, which
+compounds in deeply nested recursive choices. Use `choice([first, second], {
+print: "first" })` to take the first branch that accepts the value when branches
+cannot overlap. `ChoiceOptions` defines the optional `print` policy, either
+`"roundTrip"` or `"first"`. This branch search also applies with
+`printUnchecked`. `print` checks the final output of the whole grammar. Both
+policies parse branches in the same order.
 
 Printing a `gen` object requires exactly its declared fields. Parsing repeated
 items requires input progress. Empty matches fail rather than loop.

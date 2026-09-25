@@ -13,8 +13,8 @@ The examples use `G` for `effect-grammar` and `Binary` for
 | `Grammar<A>` for either domain                          | `Grammar<A>` for text, `Grammar<A, "bytes">` or `Binary.Grammar<A>` for bytes                      |
 | `Silent`                                                | `void` as the grammar's value type                                                                 |
 | `many(inner)`, `between(inner, "(", ")")`               | `inner.pipe(G.many())`, `inner.pipe(G.between("(", ")"))`                                          |
-| `choice(a, b)`                                          | `G.choice([a, b])`                                                                                 |
-| `checkedChoice(a, b)`                                   | `G.choice([a, b], { print: "roundTrip" })`                                                         |
+| `choice(a, b)`                                          | `G.choice([a, b], { print: "first" })`                                                             |
+| `checkedChoice(a, b)`                                   | `G.choice([a, b])`                                                                                 |
 | `choiceOn(tag, cases)`, `choiceOnEntries(tag, entries)` | `G.dispatch(tag, [[key, grammar], ...])`                                                           |
 | `matchValue(ref, entries)`                              | `G.match(ref, entries)`                                                                            |
 | `taggedChoice(tag, cases)` with object cases            | `G.taggedChoice(tag, [[key, grammar], ...])`                                                       |
@@ -147,11 +147,12 @@ constraints such as patterns, counts, filters, and transform failures. Object
 patterns require exactly their declared own fields, including fields whose value
 is `undefined`.
 
-The default choice policy, `"first"`, selects the first branch that prints. The
-final checked print can then fail without searching other branches. `{ print:
-"roundTrip" }` searches for output that reads back equally through the choice
-itself. This search also runs under `printUnchecked`. Both policies parse
-branches in declaration order.
+The default choice policy, `"roundTrip"`, searches for output that reads back
+equally through the choice itself. This search also runs under `printUnchecked`.
+It reparses each candidate, so nested recursive choices cost more. `{ print:
+"first" }` selects the first branch that prints, for branches that cannot
+overlap. The final checked print can then fail without searching other branches.
+Both policies parse branches in declaration order.
 
 Runners return `Result` failures for exceptions from callbacks, lazy thunks,
 getters, proxy traps, and equality hooks. Sequences stop at the first failure.

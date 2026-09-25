@@ -52,8 +52,9 @@ Checks have different scopes:
 - Local execution checks apply to the actual input or value. Parsing rejects
   repetition elements that consume no input. Suspensions guard against active
   re-entry at the same parse position or with the same print value.
-- Choice policy `"roundTrip"` reparses each printable candidate through that
-  choice, with the current environment. It can select a later branch.
+- Choice policy `"roundTrip"`, the default, reparses each printable candidate
+  through that choice, with the current environment. It can select a later
+  branch. Policy `"first"` skips this check for branches that cannot overlap.
 - `print` reparses the final output through the whole grammar and uses
   `Equal.equals`. `printUnchecked` omits only this final check.
 - Law helpers use unchecked printing to report value-preservation and

@@ -34,10 +34,11 @@ changes.
   data-first overloads are removed. Unary helpers such as `optional` remain
   usable as `inner.pipe(optional)` or `optional(inner)`.
 - `choice` takes a nonempty readonly tuple and optional `ChoiceOptions`:
-  `choice([a, b], { print: "roundTrip" })`. The default `"first"` policy accepts
-  the first printable candidate. The `"roundTrip"` policy replaces
-  `checkedChoice` and searches for output that parses back equally through the
-  choice. Both policies parse branches in order.
+  `choice([a, b], { print: "first" })`. The default `"roundTrip"` policy
+  replaces `checkedChoice` and searches for output that parses back equally
+  through the choice, at the cost of reparsing each candidate. `"first"` is an
+  explicit opt-out for choices whose branches cannot overlap; it accepts the
+  first printable candidate. Both policies parse branches in order.
 - `choiceOn` and `choiceOnEntries` become `dispatch`. `matchValue` becomes
   `match`. These helpers and `taggedChoice` take `[key, grammar]` entries.
   Integer-like keys are allowed. `taggedChoice` is derived from `dispatch` and
