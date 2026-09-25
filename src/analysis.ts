@@ -26,7 +26,6 @@ const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyAr
       return node.steps.map((grammar, index) => ({ path: ["steps", index], grammar }))
     case "Choice":
       return node.options.map((grammar, index) => ({ path: ["options", index], grammar }))
-    case "Dispatch":
     case "Match":
       return node.cases.map(({ grammar }, index) => ({ path: ["cases", index, "grammar"], grammar }))
     case "Repeat":
@@ -86,8 +85,7 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
       return node.count.value === 0 ? "yes" : "no"
     case "Gen":
       return allMatchEmpty(node.steps, seen, resolutions)
-    case "Choice":
-    case "Dispatch": {
+    case "Choice": {
       let result: EmptyMatch = "no"
       for (const { grammar } of children(node)) {
         const match = matchesEmpty(grammar, seen, resolutions)

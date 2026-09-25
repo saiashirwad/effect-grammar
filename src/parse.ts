@@ -91,11 +91,9 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       const value = materialize(node.result.tree, local)
       return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
     }
-    case "Choice":
-    case "Dispatch": {
+    case "Choice": {
       const start = state.pos
-      const options = node._tag === "Choice" ? node.options : node.cases.map((matchCase) => matchCase.grammar)
-      for (const option of options) {
+      for (const option of node.options) {
         const result = parseGrammar(option, state, env)
         if (Result.isSuccess(result)) return result
         state.pos = start

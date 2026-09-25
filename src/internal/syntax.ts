@@ -19,7 +19,6 @@ const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): bool
     case "Regex":
     case "Take":
     case "Repeat":
-    case "Dispatch":
       return false
     case "Gen":
       return (
@@ -28,7 +27,8 @@ const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): bool
         && node.steps.every((step) => canOmit(step, seen, targetOf))
       )
     case "Choice":
-      return node.options.every((option) => canOmit(option, seen, targetOf))
+      // A dispatch prints from a tagged object, so it always needs a value.
+      return node.by === undefined && node.options.every((option) => canOmit(option, seen, targetOf))
     case "Match":
       return node.cases.every(({ grammar }) => canOmit(grammar, seen, targetOf))
     case "Transform":

@@ -102,8 +102,13 @@ export type Node =
     readonly steps: ReadonlyArray<AnyGrammar>
     readonly result: ReturnPattern
   }
-  | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly print: "first" | "roundTrip" }
-  | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
+  | {
+    readonly _tag: "Choice"
+    readonly options: ReadonlyArray<AnyGrammar>
+    readonly print: "first" | "roundTrip"
+    /** Set by `dispatch`: print the option whose key, aligned by index, equals the value's tag field. */
+    readonly by?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
+  }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
   | {
     readonly _tag: "Repeat"

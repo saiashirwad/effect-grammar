@@ -90,6 +90,13 @@ changes.
   lower to `Gen` sequences with a whole-ref result. The `Wrap` node is removed.
   Their diagnostic paths use `steps`. Supplied syntax retains its original print
   failure instead of an omitted-value error.
+- `optional` and `dispatch` lower to `Choice` nodes. The `Optional` and
+  `Dispatch` nodes are removed. Diagnostic paths under `optional` use the
+  lowered choice, such as `["inner", "options", 0, "inner", ...]` instead of
+  `["inner", ...]`. Dispatch paths use `["options", i, ...]` instead of
+  `["cases", i, "grammar", ...]`. Printing a defined value that `optional`'s
+  inner grammar rejects reports "no choice branch accepts", listing both
+  branches. Dispatch print errors are unchanged.
 - The printer rejects a suspended grammar re-entered with the same value at any
   active depth. A nonproductive recursive choice branch can fall through instead
   of overflowing the stack.

@@ -76,7 +76,9 @@ This separation keeps dependency lookup independent from value reshaping.
 Transforms reshape ordinary values after a generator returns its whole refs.
 `between`, `prefix`, and `suffix` use ordinary `Gen` nodes with a whole-ref
 result. Their syntax steps explicitly print `undefined` through `Skip` nodes. No
-interpreter needs a separate `Wrap` case.
+interpreter needs a separate `Wrap` case. `optional` and `dispatch` likewise
+lower to `Choice` nodes. A dispatch choice carries a tag selector, so printing
+reads the tag and prints only the selected branch.
 
 ## Domains and module dependencies
 

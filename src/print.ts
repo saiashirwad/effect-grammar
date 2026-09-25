@@ -125,6 +125,27 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       return Result.succeed(text)
     }
     case "Choice": {
+      const by = node.by
+      if (by !== undefined) {
+        if (!Predicate.isObject(value)) {
+          return fail({ _tag: "TypeMismatch", expected: `an object with a ${by.tag} field`, actual: value })
+        }
+        const tag = atPath(
+          by.tag,
+          inspect(value, "a readable field", () => (Object.hasOwn(value, by.tag) ? value[by.tag] : Unbound)),
+        )
+        if (Result.isFailure(tag)) return fail(tag.failure)
+        if (tag.success === Unbound) {
+          return fail({ _tag: "TypeMismatch", expected: `an object with a ${by.tag} field`, actual: value })
+        }
+        const key = tag.success
+        const index = by.keys.findIndex((candidate) => Object.is(candidate, key))
+        if (index === -1) {
+          const keys = by.keys.map(preview).join(", ")
+          return invalid(`${by.tag} to be one of ${keys}`, key)
+        }
+        return printGrammar(node.options[index]!, value, env, state)
+      }
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
         const result = printGrammar(option, value, env, state)
@@ -147,26 +168,6 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
         )
       }
       return fail({ _tag: "NoAlternative", actual: value, issues })
-    }
-    case "Dispatch": {
-      if (!Predicate.isObject(value)) {
-        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
-      }
-      const tag = atPath(
-        node.tag,
-        inspect(value, "a readable field", () => (Object.hasOwn(value, node.tag) ? value[node.tag] : Unbound)),
-      )
-      if (Result.isFailure(tag)) return fail(tag.failure)
-      if (tag.success === Unbound) {
-        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
-      }
-      const key = tag.success
-      const matchCase = caseFor(node.cases, key)
-      if (matchCase === undefined) {
-        const keys = node.cases.map((candidate) => preview(candidate.key)).join(", ")
-        return invalid(`${node.tag} to be one of ${keys}`, key)
-      }
-      return printGrammar(matchCase.grammar, value, env, state)
     }
     case "Match": {
       const key = evaluate(node.scrutinee, env)

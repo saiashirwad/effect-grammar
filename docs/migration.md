@@ -169,6 +169,7 @@ as `Uint8Array` and format it as hex.
 `OmittedValue`, `OutOfScopeRef`, `EmptyRepetition`, and `InvalidSuspend`. Paths
 describe grammar-graph edges, not value fields. They use zero-based indices.
 Syntax wrappers now use `steps` paths because they lower to generators.
+`optional` and `dispatch` lower to choices, so their paths use `options`.
 
 Diagnostics never call encode, decode, or predicate callbacks. They can resolve
 suspension thunks to inspect structure, and thunk failures become issues.

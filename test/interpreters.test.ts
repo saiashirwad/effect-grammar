@@ -56,17 +56,6 @@ const table = {
     text: "a",
     value: 1,
   }),
-  Dispatch: row({
-    grammar: G.dispatch(
-      "kind",
-      [
-        ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
-        ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
-      ] as const,
-    ),
-    text: "sab",
-    value: { kind: "s", value: "ab" },
-  }),
   Repeat: row({
     grammar: G.regex(/[a-z]/, "ch").pipe(G.many()),
     text: "abc",
@@ -100,8 +89,21 @@ const table = {
   }),
 } satisfies Record<Node["_tag"], Row>
 
+// dispatch lowers to a Choice that prints the branch selected by the tag field.
+const dispatchRow = row({
+  grammar: G.dispatch(
+    "kind",
+    [
+      ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
+      ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
+    ] as const,
+  ),
+  text: "sab",
+  value: { kind: "s", value: "ab" },
+})
+
 describe("interpreter table (parse / print / law per Node)", () => {
-  for (const [tag, entry] of Object.entries(table)) {
+  for (const [tag, entry] of Object.entries({ ...table, "Choice (dispatch)": dispatchRow })) {
     describe(tag, () => {
       it.effect("parses the sample text", () =>
         Effect.sync(() => {

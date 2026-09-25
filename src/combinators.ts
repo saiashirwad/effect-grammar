@@ -177,7 +177,16 @@ type TaggedEntries<Tag extends string, E extends Entries> = {
 export const dispatch = <const Tag extends string, const E extends Entries>(
   tag: Tag,
   entries: E & TaggedEntries<Tag, E>,
-): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> => make({ _tag: "Dispatch", tag, cases: cases(entries, "dispatch") })
+): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> => {
+  const checked = cases(entries, "dispatch")
+  // The tag already selects the printed branch, so the round-trip search never applies.
+  return make({
+    _tag: "Choice",
+    options: checked.map((matchCase) => matchCase.grammar),
+    print: "first",
+    by: { tag, keys: checked.map((matchCase) => matchCase.key) },
+  })
+}
 
 type CompleteEntries<K extends MatchKey, E extends Entries> = Exclude<K, E[number][0]> extends never ? E : never
 

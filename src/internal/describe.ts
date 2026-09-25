@@ -12,6 +12,8 @@ export const describe = (grammar: AnyGrammar): string => {
       return node.name
     case "Suspend":
       return node.name ?? "suspend"
+    case "Choice":
+      return node.by === undefined ? "choice" : "dispatch"
     default:
       return node._tag.toLowerCase()
   }
