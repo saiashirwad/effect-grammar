@@ -20,8 +20,8 @@ changes.
   structurally syntax-only, such as unresolved suspensions. Use `skip(printAs)`
   to discard a value explicitly.
 - Refs are opaque. Use `get(ref, key)` for dependent fields, including nested
-  fields and array indices. Direct property access is no longer supported.
-  Coercion and enumeration, including spread, throw during construction.
+  fields and array indices. Direct property access, coercion, and enumeration,
+  including spread, throw during construction.
 - Return patterns contain whole bound refs, constants, plain objects, and dense
   tuples. Property refs, duplicate refs, refs from another generator, cyclic
   patterns, and unsupported object shapes are rejected at construction. Return

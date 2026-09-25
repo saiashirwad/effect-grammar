@@ -140,8 +140,9 @@ const message = G.gen(function*() {
 ```
 
 Nested fields use nested calls, such as `G.get(G.get(ref, "header"), "size")`.
-Direct property access such as `ref.size` is a type error. Ref coercion and
-enumeration, including object spread, throw during grammar construction.
+Direct property access such as `ref.size` is a type error and throws during
+grammar construction, as do ref coercion and enumeration, including object
+spread.
 
 Return each bound value as a whole ref, either directly or inside an object or
 tuple. Property refs from `get` cannot appear in return patterns. To flatten or

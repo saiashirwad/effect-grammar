@@ -41,8 +41,19 @@ export const entryOf = (ref: Ref<Value>): RefEntry => {
   return entry
 }
 
-// Only enumeration is intercepted: a spread must not silently turn a ref into {}.
+// Enumeration and unknown field reads are intercepted: a spread must not silently
+// turn a ref into {}, and `ref.size` must not silently read undefined.
 const refHandler: ProxyHandler<object> = {
+  get(target, key, receiver) {
+    // oxlint-disable-next-line anti-slop/no-reflect-get -- A proxy trap forwards the read unchanged.
+    if (Predicate.isSymbol(key) || key in target) return Reflect.get(target, key, receiver)
+    // Duck-typing probes: a ref is not a thenable, and JSON.stringify then fails at enumeration.
+    if (key === "then" || key === "toJSON") return undefined
+    throw new TypeError(
+      `a Grammar.Ref has no fields until parse or print time; use Grammar.get(ref, ${JSON.stringify(key)}) `
+        + "to depend on a field, or return the whole ref and use transform to reshape its value",
+    )
+  },
   ownKeys() {
     throw new TypeError(
       "a Grammar.Ref cannot be spread or enumerated; return the whole ref and use transform to reshape its value",

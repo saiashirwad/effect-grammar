@@ -111,4 +111,38 @@ describe("opaque refs and return patterns", () => {
         return h
       })
     }))
+
+  it.effect("rejects direct field reads with a pointer to get", () =>
+    Effect.gen(function*() {
+      let bound: unknown
+      const grammar = G.gen(function*() {
+        const h = yield* header
+        // SAFETY: models an untyped caller; every read below goes through the proxy traps.
+        const loose: {
+          readonly layout?: unknown
+          readonly then?: unknown
+          readonly toJSON?: unknown
+          readonly [Symbol.iterator]?: unknown
+          readonly [Symbol.toPrimitive]?: unknown
+        } = h as never
+        assert.throws(() => loose.layout, {
+          name: "TypeError",
+          message: /has no fields until parse or print time; use Grammar\.get\(ref, "layout"\)/,
+        })
+        // oxlint-disable-next-line typescript/no-misused-spread -- Deliberately exercise runtime rejection.
+        assert.throws(() => ({ ...h }), /cannot be spread or enumerated/)
+        assert.equal(loose[Symbol.iterator], undefined)
+        assert.ok(loose[Symbol.toPrimitive] instanceof Function)
+        assert.equal(loose.then, undefined)
+        assert.equal(loose.toJSON, undefined)
+        assert.equal(loose.constructor.name, "RefImpl")
+        bound = h
+        const body = yield* G.take(G.get(G.get(h, "layout"), "size"))
+        return { h, body }
+      })
+      assert.equal(yield* Effect.promise(() => Promise.resolve(bound)), bound)
+      const value = { h: { layout: { kind: "text" as const, size: 3 } }, body: "abc" }
+      assert.deepEqual(parseOk(grammar, "text/3:abc"), value)
+      assert.equal(printOk(grammar, value), "text/3:abc")
+    }))
 })

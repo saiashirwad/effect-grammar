@@ -82,8 +82,9 @@ Nested fields use `G.get(G.get(ref, "header"), "size")`. Array indices use
 
 Each returned ref must belong to that generator and appear only once. Return
 patterns support constants, plain objects, and dense tuples. They reject cycles,
-symbol fields, and unsupported object shapes. Ref enumeration and coercion throw
-during construction, including object spread and interpolation.
+symbol fields, and unsupported object shapes. Direct field reads, enumeration,
+and coercion of a ref throw during construction, including object spread and
+interpolation.
 
 Omitted yields print with `undefined`. Diagnostics require these steps to be
 structurally syntax-only, and `gen` throws at construction when one provably
