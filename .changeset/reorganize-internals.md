@@ -15,9 +15,10 @@ changes.
   sequences, and yield-free generators are neutral. String delimiters always
   impose the text domain, even `""`. Use `empty` for an absent delimiter.
 - `Silent` is removed. Syntax grammars produce `void`. Every `gen` yield binds a
-  slot, and omitted slots print with `undefined`. `diagnose` reports omitted
-  outputs that are not structurally syntax-only. Use `skip(printAs)` to discard
-  a value explicitly.
+  slot, and omitted slots print with `undefined`. `gen` throws when an omitted
+  step provably produces a value; `diagnose` reports the rest that are not
+  structurally syntax-only, such as unresolved suspensions. Use `skip(printAs)`
+  to discard a value explicitly.
 - Refs are opaque. Use `get(ref, key)` for dependent fields, including nested
   fields and array indices. Direct property access is no longer supported.
   Coercion and enumeration, including spread, throw during construction.

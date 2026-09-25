@@ -172,10 +172,12 @@ describe("diagnose", () => {
       )
     }))
 
-  it.effect("reports a step that is parsed but not returned", () =>
+  it.effect("reports a step that is parsed but not returned when gen could not prove it", () =>
     Effect.sync(() => {
+      // Unresolved when gen is built, so only diagnose sees that it produces a value.
+      const later = G.suspend(() => word, "word")
       const grammar = G.gen(function*() {
-        yield* word
+        yield* later
         yield* G.literal(":")
         const port = yield* G.integer
         return { port }
@@ -248,58 +250,74 @@ describe("diagnose", () => {
       )
       assert.deepEqual(G.diagnose(syntax), [])
 
-      const values = G.gen(function*() {
-        yield* G.optional(word)
-        yield* G.choice([G.empty, word])
-        yield* G.choice([G.empty, word], { print: "roundTrip" })
-      })
-      assert.deepEqual(
-        G.diagnose(values).map(({ _tag, path }) => ({ _tag, path })),
-        [0, 1, 2].map((slot) => ({ _tag: "OmittedValue", path: ["steps", slot] })),
-      )
+      for (
+        const value of [G.optional(word), G.choice([G.empty, word]), G.choice([G.empty, word], { print: "roundTrip" })]
+      ) {
+        assert.throws(
+          () =>
+            G.gen(function*() {
+              yield* value
+            }),
+          /gen: step 1 \((optional|choice)\) is parsed but not returned/,
+        )
+      }
     }))
 
   it.effect("checks all dependent match branches without selecting a runtime value", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function*() {
-        const kind = yield* G.literals("a", "b")
-        yield* G.match(kind, [
-          ["a", G.literal("!")],
-          ["b", G.optional(word.pipe(G.skip("word")))],
-        ])
-        yield* G.match(kind, [
-          ["a", G.empty],
-          ["b", word],
-        ])
-        return kind
-      })
-      assert.deepEqual(
-        G.diagnose(grammar).map(({ _tag, path }) => ({ _tag, path })),
-        [{ _tag: "OmittedValue", path: ["steps", 2] }],
+      assert.throws(
+        () =>
+          G.gen(function*() {
+            const kind = yield* G.literals("a", "b")
+            yield* G.match(kind, [
+              ["a", G.literal("!")],
+              ["b", G.optional(word.pipe(G.skip("word")))],
+            ])
+            yield* G.match(kind, [
+              ["a", G.empty],
+              ["b", word],
+            ])
+            return kind
+          }),
+        /gen: step 3 \(match\) is parsed but not returned/,
       )
     }))
 
   it.effect("distinguishes empty-result gen syntax from discarded or constant values", () =>
     Effect.sync(() => {
-      const grammar = G.gen(function*() {
+      const syntax = G.gen(function*() {
         yield* G.seq(G.literal("x"))
         yield* G.empty.pipe(G.as(undefined))
-        yield* G.struct({})
-        yield* G.tuple()
-        yield* G.literal("y").pipe(G.as("y"))
         yield* G.gen(function*() {
-          yield* word
+          yield* G.literal("z")
         })
       })
-      assert.deepEqual(
-        G.diagnose(grammar).map(({ _tag, path }) => ({ _tag, path })),
-        [
-          { _tag: "OmittedValue", path: ["steps", 2] },
-          { _tag: "OmittedValue", path: ["steps", 3] },
-          { _tag: "OmittedValue", path: ["steps", 4] },
-          { _tag: "OmittedValue", path: ["steps", 5] },
-          { _tag: "OmittedValue", path: ["steps", 5, "steps", 0] },
-        ],
+      assert.deepEqual(G.diagnose(syntax), [])
+      for (
+        const value of [
+          G.struct({}),
+          G.tuple(),
+          G.literal("y").pipe(G.as("y")),
+          G.gen(function*() {
+            return yield* word
+          }),
+        ]
+      ) {
+        assert.throws(
+          () =>
+            G.gen(function*() {
+              yield* G.literal("x")
+              yield* value
+            }),
+          /gen: step 2 \(gen\) is parsed but not returned/,
+        )
+      }
+      assert.throws(
+        () =>
+          G.gen(function*() {
+            yield* word
+          }),
+        /gen: step 1 \(word\) is parsed but not returned/,
       )
     }))
 
@@ -381,6 +399,14 @@ describe("diagnose", () => {
         [{ _tag: "OmittedValue", path: ["steps", 0] }],
       )
       assert.deepEqual(G.diagnose(G.seq(recursiveSyntax.pipe(G.skip<void>(undefined)))), [])
+      // Resolved by now, but a cycle proves neither way, so gen leaves it to diagnose.
+      const deferred = G.gen(function*() {
+        yield* recursiveSyntax
+      })
+      assert.deepEqual(
+        G.diagnose(deferred).map(({ _tag, path }) => ({ _tag, path })),
+        [{ _tag: "OmittedValue", path: ["steps", 0] }],
+      )
     }))
 
   it.effect("retains ancestor scope checks for shared recursive grammars in either branch order", () =>
@@ -450,10 +476,13 @@ describe("direct operations", () => {
           }),
         /step 1 \(gen\) is returned twice/,
       )
-      const omitted = G.gen(function*() {
-        yield* product
-      })
-      assert.equal(Result.isFailure(G.printUnchecked(omitted, undefined)), true)
+      assert.throws(
+        () =>
+          G.gen(function*() {
+            yield* product
+          }),
+        /step 1 \(gen\) is parsed but not returned/,
+      )
 
       const transform = G.choice([G.literal("x"), unrelated]).pipe(
         G.transform<void, void>({

@@ -31,8 +31,11 @@ Public usage and compatibility changes belong in the
 
 Construction builds the graph. A `gen` callback runs once, with refs instead of
 parsed values. Constructors reject malformed counts, cases, scope usage, and
-return patterns. These errors throw. Construction does not prove that a grammar
-parses or prints every value.
+return patterns. These errors throw. `gen` also throws when an unreturned step
+provably produces a value. That check never resolves a suspension: one that is
+unresolved at construction, or a cycle, is unknown and left to `diagnose` and
+printing. Construction does not prove that a grammar parses or prints every
+value.
 
 Execution interprets the graph. Parsing fills a frame in step order, then
 materializes the return pattern. Printing unifies the supplied value with the

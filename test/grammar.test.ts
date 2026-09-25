@@ -167,12 +167,29 @@ describe("gen", () => {
       assert.deepEqual(parseOk(outer, "ab1"), { n: 1 })
     }))
 
-  it.effect("reports a binding that is not returned, and fails to print it", () =>
+  it.effect("rejects a value step that is not returned, at construction", () =>
     Effect.sync(() => {
+      assert.throws(
+        () =>
+          G.gen(function*() {
+            const a = yield* G.integer
+            yield* G.literal(",")
+            yield* G.regex(/\d+/, "digits")
+            return { a }
+          }),
+        {
+          message: "gen: step 3 (digits) is parsed but not returned; return it, or discard it with skip",
+        },
+      )
+    }))
+
+  it.effect("reports an omitted suspension that is unresolved at construction, and fails to print it", () =>
+    Effect.sync(() => {
+      const digits = G.suspend(() => G.regex(/\d+/), "digits")
       const g = G.gen(function*() {
         const a = yield* G.integer
         yield* G.literal(",")
-        yield* G.regex(/\d+/, "digits")
+        yield* digits
         return { a }
       })
       assert.deepEqual(parseOk(g, "1,2"), { a: 1 })
@@ -181,6 +198,20 @@ describe("gen", () => {
         ["gen: step 3 (digits) is parsed but not returned; return it, or discard it with skip"],
       )
       assert.match(printFail(g, { a: 1 }).message, /step 3 \(digits\): parsed but not returned/)
+    }))
+
+  it.effect("constructs and prints omitted syntax-only steps", () =>
+    Effect.sync(() => {
+      const g = G.gen(function*() {
+        const a = yield* G.integer
+        yield* G.literal(",")
+        yield* G.optional(G.literal(" "))
+        yield* G.regex(/\d+/).pipe(G.skip("0"))
+        return { a }
+      })
+      assert.deepEqual(G.diagnose(g), [])
+      assert.deepEqual(parseOk(g, "1, 2"), { a: 1 })
+      assert.equal(printOk(g, { a: 1 }), "1,0")
     }))
 
   it.effect("rejects a binding returned twice, at construction", () =>

@@ -18,7 +18,7 @@ import {
 } from "./core.ts"
 import { preview } from "./errors.ts"
 import { describeStep } from "./internal/describe.ts"
-import { presentOnly } from "./internal/syntax.ts"
+import { presentOnly, syntax } from "./internal/syntax.ts"
 import { type Pattern, returnPattern, toPattern } from "./pattern.ts"
 import { assertInScope, refFor, type Scope } from "./ref.ts"
 
@@ -76,7 +76,17 @@ export const gen = <Y extends AnyGrammar, R>(run: () => Generator<Y, R, unknown>
       const slot = steps.push(grammar) - 1
       result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope))
     }
-    return makeGen(scope.id, steps, toPattern(result.value))
+    const pattern = returnPattern(toPattern(result.value), scope.id, (slot) => describeStep(steps[slot]!, slot))
+    // Only a proof throws. Never resolve here: a recursive grammar's suspensions may refer to
+    // bindings not defined yet, so those are left to diagnose and print.
+    for (const [slot, step] of steps.entries()) {
+      if (!pattern.bindings.has(slot) && syntax(step, (suspension) => suspension.resolved) === "no") {
+        throw new Error(
+          `gen: ${describeStep(step, slot)} is parsed but not returned; return it, or discard it with skip`,
+        )
+      }
+    }
+    return make({ _tag: "Gen", scope: scope.id, steps, result: pattern })
   } finally {
     scope.open = false
   }

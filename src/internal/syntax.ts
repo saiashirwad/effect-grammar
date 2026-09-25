@@ -8,43 +8,60 @@ export const presentOnly = <A>(value: A | undefined): Result.Result<A, string> =
 
 type TargetOf = (node: Extract<Node, { readonly _tag: "Suspend" }>) => AnyGrammar | undefined
 
-// Only prove syntax/discard output. A cycle or an opaque value producer needs an
-// explicit skip, even when its printer happens to accept undefined.
-const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): boolean => {
+/** "yes": provably syntax-only. "no": provably produces a value. "unknown": depends on an unavailable suspension or a cycle. */
+export type Syntax = "yes" | "no" | "unknown"
+
+// Every child must be syntax-only. Stops at the first proof of a value, as `every` did.
+const all = <T>(children: ReadonlyArray<T>, verdictOf: (child: T) => Syntax): Syntax => {
+  let verdict: Syntax = "yes"
+  for (const child of children) {
+    const each = verdictOf(child)
+    if (each === "no") return "no"
+    if (each === "unknown") verdict = "unknown"
+  }
+  return verdict
+}
+
+// Only prove syntax/discard output. A cycle proves neither way, and an opaque value
+// producer needs an explicit skip, even when its printer happens to accept undefined.
+const syntaxOf = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): Syntax => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
     case "Skip":
-      return true
+      return "yes"
     case "Regex":
     case "Take":
     case "Repeat":
-      return false
+      return "no"
     case "Gen":
-      return (
-        ((node.result.tree._tag === "Const" && node.result.tree.value === undefined)
-          || (node.result.tree._tag === "Ref" && node.result.tree.scope === node.scope))
-        && node.steps.every((step) => canOmit(step, seen, targetOf))
-      )
+      if (
+        !(node.result.tree._tag === "Const" && node.result.tree.value === undefined)
+        && !(node.result.tree._tag === "Ref" && node.result.tree.scope === node.scope)
+      ) return "no"
+      return all(node.steps, (step) => syntaxOf(step, seen, targetOf))
     case "Choice":
       // A dispatch prints from a tagged object, so it always needs a value.
-      return node.by === undefined && node.options.every((option) => canOmit(option, seen, targetOf))
+      if (node.by !== undefined) return "no"
+      return all(node.options, (option) => syntaxOf(option, seen, targetOf))
     case "Match":
-      return node.cases.every(({ grammar }) => canOmit(grammar, seen, targetOf))
+      return all(node.cases, ({ grammar }) => syntaxOf(grammar, seen, targetOf))
     case "Transform":
-      return node.encode === presentOnly && canOmit(node.inner, seen, targetOf)
+      return node.encode === presentOnly ? syntaxOf(node.inner, seen, targetOf) : "no"
     case "Label":
-      return canOmit(node.inner, seen, targetOf)
+      return syntaxOf(node.inner, seen, targetOf)
     case "Suspend": {
-      if (seen.has(node)) return false
+      if (seen.has(node)) return "unknown"
       const target = targetOf(node)
-      if (target === undefined) return false
+      if (target === undefined) return "unknown"
       seen.add(node)
-      const omitted = canOmit(target, seen, targetOf)
+      const verdict = syntaxOf(target, seen, targetOf)
       seen.delete(node)
-      return omitted
+      return verdict
     }
   }
 }
 
-export const isSyntaxOnly = (grammar: AnyGrammar, targetOf: TargetOf): boolean => canOmit(grammar, new Set(), targetOf)
+export const syntax = (grammar: AnyGrammar, targetOf: TargetOf): Syntax => syntaxOf(grammar, new Set(), targetOf)
+
+export const isSyntaxOnly = (grammar: AnyGrammar, targetOf: TargetOf): boolean => syntax(grammar, targetOf) === "yes"

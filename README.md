@@ -165,8 +165,9 @@ Text `take` and `lengthPrefixed` count UTF-16 code units, as JavaScript string
 a grammar-graph `path`, and a human-readable `message`:
 
 ```ts
+const word = G.suspend(() => G.regex(/[a-z]+/), "word")
 const incomplete = G.gen(function*() {
-  yield* G.regex(/[a-z]+/, "word")
+  yield* word
 })
 
 G.diagnose(incomplete)
@@ -193,7 +194,11 @@ An omitted `gen` step must be structurally syntax-only:
   value.
 - A suspension must resolve to syntax-only structure without a cycle.
 
-Return other outputs or discard them explicitly with `skip(printAs)`.
+Return other outputs or discard them explicitly with `skip(printAs)`. `gen`
+throws at construction when an omitted step provably produces a value, e.g.
+`gen: step 1 (word) is parsed but not returned; return it, or discard it with
+skip`. It never resolves a suspension to decide, so an omitted suspension that
+is unresolved at construction, or recursive, is left to `diagnose` and `print`.
 Transforms, including filters, are opaque even when their callbacks could
 produce or accept `undefined`. Dependent syntax such as
 `G.take(length).pipe(G.skip("abc"))` can be omitted inside the owning `gen`.

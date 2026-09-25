@@ -86,9 +86,11 @@ symbol fields, and unsupported object shapes. Ref enumeration and coercion throw
 during construction, including object spread and interpolation.
 
 Omitted yields print with `undefined`. Diagnostics require these steps to be
-structurally syntax-only. Return value-producing steps or use `skip(printAs)` to
-supply their print value. A transform is opaque to this structural check, even
-when its callbacks accept or produce `undefined`.
+structurally syntax-only, and `gen` throws at construction when one provably
+produces a value. An omitted suspension that is not yet resolved is left to
+diagnostics. Return value-producing steps or use `skip(printAs)` to supply their
+print value. A transform is opaque to this structural check, even when its
+callbacks accept or produce `undefined`.
 
 `match` requires cases that cover the selector type. Its result is a union of
 branch values, without TypeScript correlation to a separately returned selector.
