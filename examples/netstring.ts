@@ -16,7 +16,6 @@ const show = <A>(r: Result.Result<A, { readonly message: string }>) =>
   Result.match(r, { onSuccess: JSON.stringify, onFailure: (e) => `✗ ${e.message}` })
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(netstring)}\n`)
   for (const source of ["12:hello world!,", "5:hi,"]) {
     yield* Console.log(`parse "${source}"  →  ${show(Grammar.parse(netstring, source))}`)
   }

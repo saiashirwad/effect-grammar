@@ -160,7 +160,6 @@ describe("bytes / lengthPrefixed / literal", () => {
         const body = yield* Binary.bytes(size)
         return { size, body }
       })
-      assert.equal(G.render(frame), "<0x89 0x50> size:<uint8> body:<take>{size}")
       assert.deepEqual(parseOk(frame, 0x89, 0x50, 2, 7, 8), { size: 2, body: Uint8Array.of(7, 8) })
       assert.deepEqual(printOk(frame, { size: 2, body: Uint8Array.of(7, 8) }), [0x89, 0x50, 2, 7, 8])
       assert.equal(parseFail(frame, 0x89, 0x51).message, "byte 1: expected 0x89 0x50, found 0x51")

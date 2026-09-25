@@ -2,7 +2,6 @@ import { Effect, flow, type Result, Schema, SchemaIssue, SchemaTransformation } 
 
 import type { Domain, Grammar } from "../core.ts"
 import { formatIssue, type ParseError, type PrintError, type PrintIssue } from "../errors.ts"
-import { render } from "../render.ts"
 
 export interface CodecOptions {
   readonly identifier?: string
@@ -36,5 +35,5 @@ export const codecWith = <Input extends Schema.Top, D extends Domain>(
         ),
       }),
     ),
-    Schema.annotate({ identifier: options?.identifier, description: render(grammar) }),
+    Schema.annotate({ identifier: options?.identifier }),
   )

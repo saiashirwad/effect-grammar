@@ -33,7 +33,6 @@ const check = (source: string) =>
   )
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(ip)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
   const encoded = yield* encode([10, 0, 0, 1])
   yield* Console.log(`\nencode [10,0,0,1]  →  ${encoded}`)

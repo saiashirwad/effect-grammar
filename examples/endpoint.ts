@@ -29,7 +29,6 @@ Effect.gen(function*() {
   const encoded = yield* encode(decoded)
   const noPort = yield* decode("https://effect.website")
 
-  yield* Console.log(`grammar ${Grammar.render(endpoint)}`)
   yield* Console.log(`decode ${source}\n  →  ${json(decoded)}`)
   yield* Console.log(`encode ${json(decoded)}\n  →  ${encoded}`)
   yield* Console.log(`decode https://effect.website\n  →  ${json(noPort)}`)

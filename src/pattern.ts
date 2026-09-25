@@ -14,7 +14,7 @@ export type Pattern =
 
 export interface ReturnPattern {
   readonly tree: Pattern
-  /** Presence records a returned slot; its path is shared by rendering and print errors. */
+  /** Presence records a returned slot; its path is shared by diagnostics and print errors. */
   readonly bindings: ReadonlyMap<number, ReadonlyArray<string | number>>
 }
 

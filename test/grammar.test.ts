@@ -112,7 +112,6 @@ describe("gen", () => {
       assert.equal(runs, 1)
       parseOk(g, "1")
       printOk(g, { n: 2 })
-      G.render(g)
       assert.equal(runs, 1)
     }))
 
@@ -323,10 +322,6 @@ describe("match", () => {
       assert.deepEqual(parseOk(frame, "t3:abc"), { h: { kind: "text", size: 3 }, body: "abc" })
       assert.deepEqual(parseOk(frame, "b2:01"), { h: { kind: "bin", size: 2 }, body: ["0", "1"] })
       assert.equal(printOk(frame, { h: { kind: "text", size: 2 }, body: "xy" }), "t2:xy")
-      assert.equal(
-        G.render(frame),
-        "h:(kind:(\"t\" | \"b\") size:<integer>) \":\" body:match(h.kind){\"text\" => <take>{h.size} | \"bin\" => (<bit>){h.size}}",
-      )
     }))
 
   it.effect("fails to parse when no case matches a runtime string", () =>
@@ -385,7 +380,6 @@ describe("take / repeat", () => {
       })
       assert.deepEqual(parseOk(g, "2/ab"), { n: 2, items: ["a", "b"] })
       assert.equal(printOk(g, { n: 3, items: ["x", "y", "z"] }), "3/xyz")
-      assert.equal(G.render(g), "n:<integer> \"/\" items:(<letter>){n}")
     }))
 
   it.effect("repeat accepts a constant count", () =>
@@ -395,7 +389,6 @@ describe("take / repeat", () => {
       assert.deepEqual(parseFail(pair, "a").expected, ["letter"])
       assert.equal(printOk(pair, ["x", "y"]), "xy")
       assert.match(printFail(pair, ["x"]).message, /2/)
-      assert.equal(G.render(pair), "(<letter>){2}")
       assert.throws(() => G.integer.pipe(G.repeat(-1)), /repeat: count must be a non-negative safe integer/)
       assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(0), G.many())).length, 1)
       assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(1), G.many())), [])
@@ -445,7 +438,6 @@ describe("seq", () => {
     Effect.sync(() => {
       assert.equal(parseOk(s, "ab"), undefined)
       assert.equal(printOk(s, undefined), "ab")
-      assert.equal(G.render(s), "\"a\" \"b\"")
     }))
 })
 
@@ -696,7 +688,6 @@ describe("as / flag / skip", () => {
       assert.deepEqual(parseFail(op, "<").expected, ["\">=\"", "\">\""])
       // SAFETY: deliberately printing a string outside the union.
       assert.match(printFail(op, "<" as Grammar.Type<typeof op>).message, /expected ">"/)
-      assert.equal(G.render(op), "(\">=\" | \">\")")
     }))
 
   it.effect("literals tries longer strings first, whatever order they are listed in", () =>
@@ -704,7 +695,6 @@ describe("as / flag / skip", () => {
       const op = G.literals("", ">", "<", ">=")
       assert.equal(parseOk(op, ">="), ">=")
       assert.equal(parseOk(op, ""), "")
-      assert.equal(G.render(G.literals(">", "<", ">=")), "(\">=\" | \">\" | \"<\")")
     }))
 
   it.effect("flag is presence as a boolean", () =>
@@ -749,12 +739,11 @@ describe("lexeme / symbol / trivia", () => {
       assertRoundTrip(g, [1, 2])
     }))
 
-  it.effect("trivia is silent, optional, and hidden from render", () =>
+  it.effect("trivia is silent and optional", () =>
     Effect.sync(() => {
       const spaced = G.integer.pipe(G.between(G.trivia, G.trivia))
       assert.equal(parseOk(spaced, "  4 "), 4)
       assert.equal(printOk(spaced, 4), "4")
-      assert.equal(G.render(spaced), "<integer>")
     }))
 })
 
@@ -822,11 +811,6 @@ describe("suspend", () => {
       assert.equal(printOk(nested, [1, [2]]), "[1,[2]]")
       assertRoundTrip(nested, [1, [2, []], 3])
     }))
-
-  it.effect("renders with the name at the recursion point", () =>
-    Effect.sync(() => {
-      assert.equal(G.render(nested), "(<integer> | \"[\" (nested (\",\" nested)*)? \"]\")")
-    }))
 })
 
 describe("integer", () => {
@@ -873,42 +857,6 @@ describe("parse", () => {
     }))
 })
 
-describe("render", () => {
-  it.effect("shows literals, regexes, named bindings, and repetition", () =>
-    Effect.sync(() => {
-      const g = G.gen(function*() {
-        yield* G.literal("a")
-        const n = yield* G.integer
-        const xs = yield* G.regex(/x/, "x").pipe(G.many({ min: 1 }))
-        const o = yield* G.optional(G.literal("!").pipe(G.as(true)))
-        return { n, xs, o }
-      })
-      assert.equal(G.render(g), "\"a\" n:<integer> xs:(<x>)+ o:(\"!\")?")
-    }))
-
-  it.effect("names bindings by their path in the return", () =>
-    Effect.sync(() => {
-      const g = G.gen(function*() {
-        const host = yield* word
-        yield* G.literal(":")
-        const port = yield* G.integer
-        return { address: { host }, ports: [port] }
-      })
-      assert.equal(G.render(g), "address.host:<word> \":\" ports.0:<integer>")
-    }))
-
-  it.effect("leaves a bare return and a recovered binding unnamed", () =>
-    Effect.sync(() => {
-      const g = G.gen(function*() {
-        yield* G.literal("<")
-        const n = yield* G.integer
-        yield* G.literal(">")
-        return n
-      })
-      assert.equal(G.render(g), "\"<\" <integer> \">\"")
-    }))
-})
-
 describe("codec", () => {
   const pair = G.gen(function*() {
     const name = yield* G.regex(/[a-z]+/, "name")
@@ -948,10 +896,5 @@ describe("codec", () => {
       const r = Schema.encodeUnknownResult(Pair)({ name: "A", n: 1 })
       assert.ok(Result.isFailure(r))
       if (Result.isFailure(r)) assert.match(r.failure.message, /expected \/\[a-z\]\+\/, got "A"/)
-    }))
-
-  it.effect("uses the rendered grammar as the description", () =>
-    Effect.sync(() => {
-      assert.equal(Grammar.render(pair), "name:<name> \"=\" n:<integer>")
     }))
 })

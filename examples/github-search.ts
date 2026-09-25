@@ -380,7 +380,6 @@ const check = (source: string) =>
   )
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(whole)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
   const decoded = yield* decode(grouped)
   yield* Console.log(`\nencode  →  ${yield* encode(decoded)}`)

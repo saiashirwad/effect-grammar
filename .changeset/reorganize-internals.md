@@ -84,9 +84,8 @@ changes.
   recursive graphs. Empty-match analysis reports proven cases and leaves unknown
   cases to runtime progress checks. An empty issue list is not a proof that
   every input or value succeeds.
-- `describe` gives a shallow name without resolving suspensions. `render` gives
-  descriptive grammar notation, which can resolve suspensions but does not
-  specify every runtime constraint.
+- `describe` gives a shallow name without resolving suspensions. `render` is
+  removed. Schema codecs no longer set a `description` annotation.
 - Return-pattern ownership is centralized. `between`, `prefix`, and `suffix`
   lower to `Gen` sequences with a whole-ref result. The `Wrap` node is removed.
   Their diagnostic paths use `steps`. Supplied syntax retains its original print

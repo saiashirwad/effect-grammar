@@ -90,10 +90,8 @@ describe("trivia APIs", () => {
       assert.equal(printOk(canonical, 4), " 4 ")
     }))
 
-  it.effect("renders context-free grammars", () =>
+  it.effect("describes grammars shallowly", () =>
     Effect.sync(() => {
-      const grammar = Grammar.tuple(word, Grammar.integer.pipe(Grammar.prefix(":")))
-      assert.equal(Grammar.render(grammar), "0:<word> 1:(\":\" <integer>)")
       assert.equal(Grammar.describe(word), "word")
     }))
 })

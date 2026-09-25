@@ -79,7 +79,6 @@ const check = (source: string) =>
   )
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(dsn)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
 
   const encoded = yield* encode(value)

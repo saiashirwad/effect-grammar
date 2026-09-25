@@ -113,8 +113,6 @@ const packet = Uint8Array.from([
 ])
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${G.render(query)}\n`)
-
   const head = yield* Schema.decodeEffect(HeaderFromUint8Array)(packet.slice(0, 12))
   yield* Console.log(`header  ${yield* headerJson(head)}`)
 

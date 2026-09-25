@@ -49,9 +49,7 @@ describe("Schema integration", () => {
       const binary = Binary.codec(binaryGrammar, target, { identifier: "ByteValues" })
 
       assert.equal(text.ast.annotations?.identifier, "TextValues")
-      assert.equal(text.ast.annotations?.description, G.render(textGrammar))
       assert.equal(binary.ast.annotations?.identifier, "ByteValues")
-      assert.equal(binary.ast.annotations?.description, G.render(binaryGrammar))
 
       const textError = yield* Effect.flip(Schema.encodeEffect(text)({ values: [1.5] }))
       const binaryError = yield* Effect.flip(Schema.encodeEffect(binary)({ values: [256] }))

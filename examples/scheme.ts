@@ -206,7 +206,6 @@ const check = (source: string) =>
   )
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(document)}\n`)
   yield* Effect.forEach(samples, check, { discard: true })
   const printed = yield* encode({
     kind: "list",

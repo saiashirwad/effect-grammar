@@ -173,11 +173,6 @@ describe("dispatch prints by reading the tag", () => {
       assert.equal(unknown.failure.message, "expected kind to be one of \"plain\", \"hashed\", got \"other\"")
     }))
 
-  it.effect("renders with its keys", () =>
-    Effect.sync(() => {
-      assert.equal(G.render(g), "on(kind){\"plain\" => <word> | \"hashed\" => \"#\" <word>}")
-    }))
-
   it.effect("accepts integer and numeric-looking keys", () =>
     Effect.sync(() => {
       const one = G.literal("x").pipe(G.as({ kind: 1 as const, value: "x" as const }))
@@ -232,11 +227,10 @@ describe("taggedChoice dispatches on its tag", () => {
     ] as const,
   )
 
-  it.effect("round-trips and renders", () =>
+  it.effect("round-trips", () =>
     Effect.sync(() => {
       assertRoundTrip(g, { _tag: "word", value: "abc" })
       assertRoundTrip(g, { _tag: "num", value: 7 })
-      assert.equal(G.render(g), "on(_tag){\"word\" => <word> | \"num\" => <integer>}")
     }))
 
   it.effect("rejects duplicate keys, the reserved tag, and malformed print values", () =>

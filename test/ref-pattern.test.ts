@@ -38,8 +38,6 @@ describe("opaque refs and return patterns", () => {
         packet: { header: { layout: { kind: "text", size: 3 } } },
         body: "abc",
       })
-      assert.match(G.render(grammar), /match\(packet\.header\.layout\.kind\)/)
-      assert.match(G.render(grammar), /<take>\{packet\.header\.layout\.size\}/)
       assert.match(
         printFail(grammar, {
           packet: { header: { layout: { kind: "text", size: 3 } } },
@@ -80,8 +78,6 @@ describe("opaque refs and return patterns", () => {
       assert.deepEqual(G.diagnose(grammar), [])
       assert.deepEqual(parseOk(grammar, "2:#<1:!xy??>;"), value)
       assert.equal(printOk(grammar, value), "2:#<1:!xy??>;")
-      assert.match(G.render(grammar), /<take>\{header\.size\}/)
-      assert.match(G.render(grammar), /<take>\{count\}/)
       assert.match(printFail(grammar, { ...value, body: { count: 1, value: "x" } }).message, /^\.body\.value:/)
       const syntaxFailure = printFail(grammar, { ...value, body: { count: 2, value: "xy" } })
       assert.match(syntaxFailure.message, /^\.body\.value: expected 2 characters, got "!"/)

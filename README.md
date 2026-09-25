@@ -206,11 +206,6 @@ to runtime progress checks. An empty issue list does not guarantee successful
 parsing or printing for every value.
 
 `G.describe(grammar)` returns a shallow name without resolving suspensions.
-`G.render(grammar)` returns descriptive grammar notation and can resolve
-suspensions. The notation is not a complete specification of the accepted
-language or print behavior. It does not express every filter, transform,
-dependent constraint, or round-trip check. Use the runners to validate actual
-inputs and values.
 
 ## Binary
 

@@ -12,8 +12,6 @@ interface Row<A = unknown> {
   readonly grammar: G.Grammar<A>
   readonly text: string
   readonly value: A
-  readonly render?: string | undefined
-  readonly renderIncludes?: string | undefined
 }
 // SAFETY: the table erases the value type; each row pairs a grammar with a value of its own type.
 const row = <A>(spec: Row<A>): Row => spec as Row
@@ -42,8 +40,8 @@ const takeGrammar = G.gen(function*() {
 const recursive: G.Grammar<number> = G.suspend(() => G.integer, "rec")
 
 const table = {
-  Literal: row({ grammar: G.literal("x"), text: "x", value: undefined, render: "\"x\"" }),
-  Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12", render: "<num>" }),
+  Literal: row({ grammar: G.literal("x"), text: "x", value: undefined }),
+  Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12" }),
   Gen: row({
     grammar: G.gen(function*() {
       const n = yield* G.integer
@@ -52,13 +50,11 @@ const table = {
     }),
     text: "5ab",
     value: { n: 5, w: "ab" },
-    render: "n:<integer> w:<word>",
   }),
   Choice: row({
     grammar: G.choice([G.literal("a").pipe(G.as<number>(1)), G.literal("b").pipe(G.as<number>(2))]),
     text: "a",
     value: 1,
-    render: "(\"a\" | \"b\")",
   }),
   Dispatch: row({
     grammar: G.dispatch(
@@ -70,67 +66,51 @@ const table = {
     ),
     text: "sab",
     value: { kind: "s", value: "ab" },
-    renderIncludes: "on(kind)",
   }),
   Repeat: row({
     grammar: G.regex(/[a-z]/, "ch").pipe(G.many()),
     text: "abc",
     value: ["a", "b", "c"],
-    render: "(<ch>)*",
   }),
   Optional: row({
     grammar: G.optional(G.integer),
     text: "5",
     value: 5,
-    render: "(<integer>)?",
   }),
   Transform: row({
     grammar: G.regex(/\d+/, "d").pipe(G.transform({ decode: Number, encode: String })),
     text: "7",
     value: 7,
-    render: "<d>",
   }),
   Skip: row({
     grammar: G.regex(/\s+/, "sp").pipe(G.skip(" ")),
     text: " ",
     value: undefined,
-    render: "<sp>",
   }),
   Label: row({
     grammar: G.integer.pipe(G.label("num")),
     text: "5",
     value: 5,
-    render: "<num>",
   }),
-  Suspend: row({ grammar: recursive, text: "9", value: 9, render: "<integer>" }),
+  Suspend: row({ grammar: recursive, text: "9", value: 9 }),
   Match: row({
     grammar: matchGrammar,
     text: "n5",
     value: { kind: "n", value: 5 },
-    renderIncludes: "match(",
   }),
   Take: row({
     grammar: takeGrammar,
     text: "2:ab",
     value: { length: 2, payload: "ab" },
-    renderIncludes: "<take>{",
   }),
 } satisfies Record<Node["_tag"], Row>
 
-describe("interpreter table (parse / print / render / law per Node)", () => {
+describe("interpreter table (parse / print / law per Node)", () => {
   for (const [tag, entry] of Object.entries(table)) {
     describe(tag, () => {
       it.effect("parses the sample text", () =>
         Effect.sync(() => {
           assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
-        }))
-
-      it.effect("renders", () =>
-        Effect.sync(() => {
-          const rendered = G.render(entry.grammar)
-          assert.ok(rendered.length > 0)
-          if (entry.render !== undefined) assert.equal(rendered, entry.render)
-          if (entry.renderIncludes !== undefined) assert.ok(rendered.includes(entry.renderIncludes))
         }))
 
       it.effect("obeys parse(print(value)) = value", () =>

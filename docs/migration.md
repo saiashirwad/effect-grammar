@@ -26,7 +26,7 @@ The examples use `G` for `effect-grammar` and `Binary` for
 | Root `codec` and `CodecOptions`                         | Import from `effect-grammar/Schema`, or use `effect-grammar/Text`                                  |
 | `validate(grammar)`                                     | `G.diagnose(grammar)` with structured issues                                                       |
 | `prepare`, `Prepared`, `GrammarValidationError`         | `G.diagnose` and direct parse/print calls                                                          |
-| Deep `describe(grammar)`                                | `G.render(grammar)`. `G.describe` is shallow                                                       |
+| Deep `describe(grammar)`, `render(grammar)`             | Removed. `G.describe` returns a shallow name                                                       |
 | Byte-unit `take`, raw byte-string readers               | `Binary.bytes(count)`, which produces `Uint8Array`                                                 |
 | `Binary.Bit`, `Uint(n)`, `Int(n)`                       | `Binary.bitSchema`, `uintSchema(n)`, `intSchema(n)`                                                |
 | `Binary.Uint8` through `Uint32`, `Int8` through `Int32` | `Binary.uintSchema(bits)`, `intSchema(bits)`                                                       |
@@ -176,9 +176,8 @@ Recursive inspection terminates. Empty-match analysis reports proven cases and
 leaves unknown cases to runtime progress checks. An empty issue list does not
 prove that every input parses or every value prints.
 
-`describe` returns a shallow name without resolving suspensions. `render`
-produces descriptive notation and can resolve suspensions. The notation does not
-express every runtime constraint.
+`describe` returns a shallow name without resolving suspensions. `render` is
+removed, and Schema codecs no longer set a `description` annotation from it.
 
 `effect-grammar/testing` provides text law helpers, with byte equivalents under
 `Testing.Binary`. Canonicalization checks preserve the parsed value and require

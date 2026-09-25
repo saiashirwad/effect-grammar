@@ -462,18 +462,15 @@ describe("direct operations", () => {
       if (Result.isFailure(parsed)) assert.match(parsed.failure.message, /choice: decode failed/)
       if (Result.isFailure(printed)) assert.match(printed.failure.message, /choice.*encode failed/)
       assert.equal(calls, 0)
-      assert.equal(G.render(unrelated), "\"y\"")
-      assert.equal(calls, 1)
     }))
 
-  it.effect("parse, print, printUnchecked, and render a sound grammar", () =>
+  it.effect("parse, print, and printUnchecked a sound grammar", () =>
     Effect.sync(() => {
       const g = G.struct({ host: word, port: G.integer.pipe(G.prefix(":")) })
       assert.deepEqual(G.diagnose(g), [])
       assert.deepEqual(Result.getOrThrow(G.parse(g, "h:80")), { host: "h", port: 80 })
       assert.equal(Result.getOrThrow(G.print(g, { host: "h", port: 80 })), "h:80")
       assert.equal(Result.getOrThrow(G.printUnchecked(g, { host: "h", port: 80 })), "h:80")
-      assert.equal(G.render(g), "host:<word> port:(\":\" <integer>)")
     }))
 
   it.effect("reports the issues of an invalid grammar", () =>

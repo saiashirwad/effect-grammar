@@ -7,25 +7,25 @@ Public usage and compatibility changes belong in the
 
 ## Ownership
 
-| Module                                      | Responsibility                                                                                            |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `src/core.ts`                               | Grammar and domain types, node union, scope identity, grammar construction, cached suspension resolution  |
-| `src/ref.ts`                                | Opaque ref identity, private expression metadata, construction scope checks, `get`                        |
-| `src/env.ts`                                | Execution frames, unbound slots, expression evaluation, case lookup                                       |
-| `src/pattern.ts`                            | Return-pattern conversion and validation, slot-to-path bindings, parse materialization, print unification |
-| `src/combinators.ts`                        | Primitive graph construction and structural lowering of products and syntax wrappers                      |
-| `src/derived.ts`                            | Helpers composed from primitives, including `taggedChoice`                                                |
-| `src/parse.ts`                              | Input cursor, backtracking, parse failures, progress and recursion guards                                 |
-| `src/print.ts`                              | Local print constraints, branch policy, recursion guard, final round-trip check                           |
-| `src/analysis.ts`                           | Scope-aware structural graph walk and structured diagnostic issues                                        |
-| `src/internal/syntax.ts`                    | Shared structural proof that an omitted step is syntax-only                                               |
-| `src/render.ts`, `src/internal/describe.ts` | Deep descriptive notation and shallow error names, respectively                                           |
-| `src/errors.ts`, `src/internal/runtime.ts`  | Error data and formatting, exception-to-Result boundaries, print paths                                    |
-| `src/internal/bytes.ts`, `src/binary.ts`    | Private byte-string conversion, byte terminals, public byte runners and codec                             |
-| `src/internal/prefixed.ts`                  | Shared text/byte length-prefix composition                                                                |
-| `src/internal/schema.ts`, `src/schema.ts`   | Shared Schema adapter and its text specialization                                                         |
-| `src/testing.ts`                            | Shared law implementation specialized for text and bytes                                                  |
-| `src/index.ts`, `src/text.ts`               | Public root exports and the Text facade                                                                   |
+| Module                                     | Responsibility                                                                                            |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `src/core.ts`                              | Grammar and domain types, node union, scope identity, grammar construction, cached suspension resolution  |
+| `src/ref.ts`                               | Opaque ref identity, private expression metadata, construction scope checks, `get`                        |
+| `src/env.ts`                               | Execution frames, unbound slots, expression evaluation, case lookup                                       |
+| `src/pattern.ts`                           | Return-pattern conversion and validation, slot-to-path bindings, parse materialization, print unification |
+| `src/combinators.ts`                       | Primitive graph construction and structural lowering of products and syntax wrappers                      |
+| `src/derived.ts`                           | Helpers composed from primitives, including `taggedChoice`                                                |
+| `src/parse.ts`                             | Input cursor, backtracking, parse failures, progress and recursion guards                                 |
+| `src/print.ts`                             | Local print constraints, branch policy, recursion guard, final round-trip check                           |
+| `src/analysis.ts`                          | Scope-aware structural graph walk and structured diagnostic issues                                        |
+| `src/internal/syntax.ts`                   | Shared structural proof that an omitted step is syntax-only                                               |
+| `src/internal/describe.ts`                 | Shallow grammar names for errors and diagnostics                                                          |
+| `src/errors.ts`, `src/internal/runtime.ts` | Error data and formatting, exception-to-Result boundaries, print paths                                    |
+| `src/internal/bytes.ts`, `src/binary.ts`   | Private byte-string conversion, byte terminals, public byte runners and codec                             |
+| `src/internal/prefixed.ts`                 | Shared text/byte length-prefix composition                                                                |
+| `src/internal/schema.ts`, `src/schema.ts`  | Shared Schema adapter and its text specialization                                                         |
+| `src/testing.ts`                           | Shared law implementation specialized for text and bytes                                                  |
+| `src/index.ts`, `src/text.ts`              | Public root exports and the Text facade                                                                   |
 
 ## Construction, execution, and per-value checks
 
@@ -69,8 +69,8 @@ binding is `Unbound`, distinct from a slot bound to `undefined`.
 A _return pattern_ describes the output shape and its inverse binding. Its tree
 contains whole refs, constants, objects, and arrays. It cannot contain property
 projections. Every returned ref belongs to the owning generator and appears
-once. `pattern.ts` computes one slot-to-path map at construction. Diagnostics,
-rendering, and print errors consume that map instead of rebuilding ownership.
+once. `pattern.ts` computes one slot-to-path map at construction. Diagnostics
+and print errors consume that map instead of rebuilding ownership.
 
 This separation keeps dependency lookup independent from value reshaping.
 Transforms reshape ordinary values after a generator returns its whole refs.

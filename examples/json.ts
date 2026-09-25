@@ -1,6 +1,5 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 import { jsonValue } from "./grammars/json.ts"
 
@@ -14,7 +13,6 @@ const formatIssue = SchemaIssue.makeFormatterDefault()
 const document = `{ "name": "ada", "age": 36, "tags": ["math", "code"], "address": { "city": "london", "zip": null } }`
 
 Effect.gen(function*() {
-  yield* Console.log(`grammar ${Grammar.render(jsonValue)}\n`)
   const decoded = yield* decode(document)
   yield* Console.log(`decode  →  ${json(decoded)}`)
   yield* Console.log(`encode  →  ${yield* encode(decoded)}`)
