@@ -109,13 +109,6 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       if (matchCase === undefined) return failAt(state, `a match case for ${preview(key)}`)
       return parseGrammar(matchCase.grammar, state, env)
     }
-    case "Optional": {
-      const mark = state.pos
-      const result = parseGrammar(node.inner, state, env)
-      if (Result.isSuccess(result)) return result
-      state.pos = mark
-      return Result.void
-    }
     case "Repeat": {
       const min = parseCount(state, evaluate(node.min, env), "repeat count")
       if (Result.isFailure(min)) return min

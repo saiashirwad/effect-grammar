@@ -18,6 +18,7 @@ import {
 } from "./core.ts"
 import { preview } from "./errors.ts"
 import { describeStep } from "./internal/describe.ts"
+import { presentOnly } from "./internal/syntax.ts"
 import { type Pattern, returnPattern, toPattern } from "./pattern.ts"
 import { assertInScope, refFor, type Scope } from "./ref.ts"
 
@@ -186,8 +187,16 @@ export const match = <K extends MatchKey, const E extends ReadonlyArray<readonly
 ): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> =>
   make({ _tag: "Match", scrutinee: assertInScope(scrutinee, "match"), cases: cases(entries, "match") })
 
+// The branches are disjoint (the first refuses undefined, the second accepts only undefined),
+// so a round-trip print check would be pure cost. The label never fails, so it only names it.
 export const optional = <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A | undefined, D> =>
-  make({ _tag: "Optional", inner })
+  label("optional")(
+    make({
+      _tag: "Choice",
+      options: [transformNode(inner, { decode: Result.succeed, encode: presentOnly<A> }), as(undefined)(empty)],
+      print: "first",
+    }),
+  )
 
 export interface RepeatOptions {
   readonly min?: number

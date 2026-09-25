@@ -175,8 +175,6 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       if (matchCase === undefined) return invalid(`a match case for ${preview(key)}`, value)
       return printGrammar(matchCase.grammar, value, env, state)
     }
-    case "Optional":
-      return value === undefined ? Result.succeed("") : printGrammar(node.inner, value, env, state)
     case "Repeat": {
       const min = printCount(evaluate(node.min, env), "repeat count")
       if (Result.isFailure(min)) return Result.fail(min.failure)

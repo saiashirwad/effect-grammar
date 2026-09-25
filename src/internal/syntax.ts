@@ -1,4 +1,10 @@
+import { Result } from "effect"
+
 import { type AnyGrammar, type Node, nodeOf } from "../core.ts"
+
+/** The encode of optional's present branch. Its decode is the identity, so its output is its inner's. */
+export const presentOnly = <A>(value: A | undefined): Result.Result<A, string> =>
+  value === undefined ? Result.fail("a present value") : Result.succeed(value)
 
 type TargetOf = (node: Extract<Node, { readonly _tag: "Suspend" }>) => AnyGrammar | undefined
 
@@ -12,7 +18,6 @@ const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): bool
       return true
     case "Regex":
     case "Take":
-    case "Transform":
     case "Repeat":
     case "Dispatch":
       return false
@@ -26,8 +31,9 @@ const canOmit = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): bool
       return node.options.every((option) => canOmit(option, seen, targetOf))
     case "Match":
       return node.cases.every(({ grammar }) => canOmit(grammar, seen, targetOf))
+    case "Transform":
+      return node.encode === presentOnly && canOmit(node.inner, seen, targetOf)
     case "Label":
-    case "Optional":
       return canOmit(node.inner, seen, targetOf)
     case "Suspend": {
       if (seen.has(node)) return false

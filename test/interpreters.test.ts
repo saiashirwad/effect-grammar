@@ -72,11 +72,6 @@ const table = {
     text: "abc",
     value: ["a", "b", "c"],
   }),
-  Optional: row({
-    grammar: G.optional(G.integer),
-    text: "5",
-    value: 5,
-  }),
   Transform: row({
     grammar: G.regex(/\d+/, "d").pipe(G.transform({ decode: Number, encode: String })),
     text: "7",

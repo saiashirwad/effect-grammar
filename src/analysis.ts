@@ -34,7 +34,6 @@ const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyAr
         { path: ["inner"], grammar: node.inner },
         { path: ["sep"], grammar: node.sep },
       ]
-    case "Optional":
     case "Transform":
     case "Skip":
     case "Label":
@@ -99,8 +98,6 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
     }
     case "Match":
       return "unknown"
-    case "Optional":
-      return "yes"
     case "Repeat": {
       if (node.min._tag !== "Const" || (node.max !== undefined && node.max._tag !== "Const")) return "unknown"
       if (node.max?.value === 0) return "yes"

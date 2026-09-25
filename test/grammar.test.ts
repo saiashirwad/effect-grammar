@@ -503,6 +503,23 @@ describe("optional", () => {
       assert.deepEqual(parseOk(trailing, "1,"), { n: 1 })
       assert.equal(printOk(trailing, { n: 1 }), "1")
     }))
+
+  it.effect("prints undefined as nothing without trying a silent inner", () =>
+    Effect.sync(() => {
+      const comma = G.optional(G.literal(","))
+      assert.equal(printOk(comma, undefined), "")
+      assert.equal(parseOk(comma, ","), undefined)
+      assert.equal(parseOk(comma, ""), undefined)
+    }))
+
+  it.effect("prints a value through its inner and undefined as nothing", () =>
+    Effect.sync(() => {
+      const port = G.optional(G.integer.pipe(G.prefix(":")))
+      assert.equal(printOk(port, 80), ":80")
+      assert.equal(printOk(port, undefined), "")
+      assert.equal(parseOk(port, ":80"), 80)
+      assert.equal(parseOk(port, ""), undefined)
+    }))
 })
 
 describe("many", () => {

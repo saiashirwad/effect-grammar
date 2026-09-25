@@ -105,7 +105,6 @@ export type Node =
   | { readonly _tag: "Choice"; readonly options: ReadonlyArray<AnyGrammar>; readonly print: "first" | "roundTrip" }
   | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
-  | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
   | {
     readonly _tag: "Repeat"
     readonly inner: AnyGrammar
