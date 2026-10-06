@@ -11,12 +11,11 @@ Requires `effect` 4 (currently release candidate) and Node 20 or later.
 
 ## Why this exists
 
-`effect-grammar` defines text or binary formats in a single grammar for parsing
-and printing. Parsing reads text or bytes into typed values, and printing maps
-them back to output. By default, printing succeeds only if its output parses to
-a value equal to the supplied value according to `Equal.equals`. This preserves
-values across the round trip, though not necessarily their exact source
-spelling.
+`effect-grammar` derives parsing and printing from the same grammar. Format
+structure is shared, not maintained in two implementations that can drift apart.
+User-supplied transformations and ambiguous alternatives can still break round
+trips, so printing verifies its output by default: it succeeds only if that
+output parses back to an equal value.
 
 You can use the grammar directly, or pair it with an Effect `Schema` to validate
 the values and integrate with the rest of your application.
@@ -193,6 +192,13 @@ grammar. If the parsed value is not equal to the original (using
 `Equal.equals`), printing fails. This verifies that particular value survives
 the round trip. It does not try to preserve original spelling: `G.integer`
 parses `"007"` to `7`, which prints as `"7"`.
+
+Sharing a grammar does not prove that every value can be printed. For example,
+`G.transform` accepts separate `decode` and `encode` callbacks; their types do
+not establish that `decode(encode(value))` equals `value`. Checked printing
+detects a violation for the supplied value and returns a failure instead of
+output that changes it. Use the law helpers below to test transformations across
+a range of values.
 
 Because checked printing parses the output again, it costs an extra pass.
 `G.printUnchecked` skips the final whole-grammar verification, but still
