@@ -11,19 +11,7 @@ const header = G.gen(function*() {
   const nscount = yield* B.uint16
   const arcount = yield* B.uint16
   return { id, flags, qdcount, ancount, nscount, arcount }
-}).pipe(
-  G.transform({
-    decode: ({ id, flags, ...counts }) => ({ id, ...flags, ...counts }),
-    encode: ({ id, qdcount, ancount, nscount, arcount, ...flags }) => ({
-      id,
-      flags,
-      qdcount,
-      ancount,
-      nscount,
-      arcount,
-    }),
-  }),
-)
+})
 
 const label = B.uint8.pipe(
   G.filter((length: number) => length >= 1 && length <= 63, "label length"),
@@ -43,31 +31,8 @@ const query = G.gen(function*() {
   return { header: head, questions }
 })
 
-const DnsHeader = Schema.Struct({
-  id: B.uintSchema(16),
-  qr: B.bitSchema,
-  opcode: B.uintSchema(4),
-  aa: B.bitSchema,
-  tc: B.bitSchema,
-  rd: B.bitSchema,
-  ra: B.bitSchema,
-  z: B.uintSchema(3),
-  rcode: B.uintSchema(4),
-  qdcount: B.uintSchema(16),
-  ancount: B.uintSchema(16),
-  nscount: B.uintSchema(16),
-  arcount: B.uintSchema(16),
-})
-
-const DnsQuery = Schema.Struct({
-  header: DnsHeader,
-  questions: Schema.Array(
-    Schema.Struct({ qname: Schema.Array(Schema.String), qtype: B.uintSchema(16), qclass: B.uintSchema(16) }),
-  ),
-})
-
-export const HeaderFromUint8Array = B.codec(header, DnsHeader, { identifier: "DnsHeader" })
-export const QueryFromUint8Array = B.codec(query, DnsQuery, { identifier: "DnsQuery" })
+export const HeaderFromUint8Array = B.codec(header, { identifier: "DnsHeader" })
+export const QueryFromUint8Array = B.codec(query, { identifier: "DnsQuery" })
 
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
@@ -77,8 +42,7 @@ const report = (title: string) => <A, R>(effect: Effect.Effect<A, Schema.SchemaE
     Effect.flatMap((error) => Console.log(`${title}  →  ${formatIssue(error.issue)}`)),
   )
 
-const headerJson = Schema.encodeEffect(Schema.fromJsonString(DnsHeader))
-const questionsJson = Schema.encodeEffect(Schema.fromJsonString(DnsQuery.fields.questions))
+const toJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 
 const packet = Uint8Array.from([
   0xbe,
@@ -114,10 +78,10 @@ const packet = Uint8Array.from([
 
 Effect.gen(function*() {
   const head = yield* Schema.decodeEffect(HeaderFromUint8Array)(packet.slice(0, 12))
-  yield* Console.log(`header  ${yield* headerJson(head)}`)
+  yield* Console.log(`header  ${yield* toJson(head)}`)
 
   const decoded = yield* Schema.decodeEffect(QueryFromUint8Array)(packet)
-  yield* Console.log(`query   ${yield* questionsJson(decoded.questions)}`)
+  yield* Console.log(`query   ${yield* toJson(decoded.questions)}`)
 
   const encoded = yield* Schema.encodeEffect(QueryFromUint8Array)(decoded)
   yield* Console.log(`encode  ${B.hex(encoded)}\n`)

@@ -20,8 +20,9 @@ const attempt = (run: () => string): string => {
 }
 
 const header = G.gen(function*() {
-  const kind = yield* G.choice([G.literal("raw:").pipe(G.as("raw")), G.literal("pair:").pipe(G.as("pair"))])
-  const size = yield* G.integer
+  const kind = yield* G.literals("raw", "pair")
+  yield* G.literal(":")
+  const size = yield* G.integer.pipe(G.filter((n: number) => n >= 0 && n <= 16, "a size from 0 to 16"))
   return { kind, size }
 })
 
@@ -46,17 +47,7 @@ const frame = G.gen(function*() {
   return { h, body }
 })
 
-const Frame = GrammarSchema.codec(
-  frame,
-  Schema.Struct({
-    h: Schema.Struct({
-      kind: Schema.Union([Schema.Literal("raw"), Schema.Literal("pair")]),
-      size: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 16 })),
-    }),
-    body: Schema.Union([Schema.String, Schema.Struct({ name: Schema.String, value: Schema.String })]),
-  }),
-  { identifier: "Frame" },
-)
+const Frame = GrammarSchema.codec(frame, { identifier: "Frame" })
 
 Effect.gen(function*() {
   yield* Console.log("parse   :", show(G.parse(frame, "raw:5#hello")))
@@ -73,7 +64,12 @@ Effect.gen(function*() {
   yield* Console.log("decode  :", json(yield* Schema.decodeEffect(Frame)("pair:5#user=alice")))
   yield* Console.log()
   yield* Console.log(
-    "refine ✗",
+    "decode ✗",
     attempt(() => json(Schema.decodeSync(Frame)(`raw:99#${"x".repeat(99)}`))),
+  )
+  yield* Console.log()
+  yield* Console.log(
+    "encode ✗",
+    attempt(() => Schema.encodeSync(Frame)({ h: { kind: "raw", size: 5 }, body: "hi" })),
   )
 }).pipe(Effect.runFork)

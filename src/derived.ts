@@ -1,4 +1,4 @@
-import { Equal, Predicate, Result } from "effect"
+import { Equal, Predicate, Result, Schema } from "effect"
 
 import {
   as,
@@ -14,11 +14,12 @@ import {
   take,
   toGrammar,
   transform,
-  transformOrFail,
+  transformNode,
   trivia,
 } from "./combinators.ts"
 import type { AnyGrammar, Domain, DomainOf, Grammar, MatchKey, Type, Value } from "./core.ts"
 import { preview } from "./errors.ts"
+import { constantSchema } from "./internal/derive.ts"
 import { prefixedBy } from "./internal/prefixed.ts"
 
 type Entries = ReadonlyArray<readonly [MatchKey, AnyGrammar]>
@@ -37,18 +38,21 @@ export function taggedChoice<Tag extends string>(tag: Tag, entries: Entries): An
   if (tag === "value") throw new RangeError("taggedChoice: tag name \"value\" is reserved")
   type Branch = Readonly<Record<Tag, MatchKey>> & { readonly value: Value }
   const branches = entries.map(([key, grammar]) => {
-    // SAFETY: entries pair keys with grammars; only the payload type is erased.
-    const branch = (grammar as Grammar<Value, Domain>).pipe(
-      transformOrFail<Value, Branch>({
-        // SAFETY: the computed field has exactly the supplied tag and key.
-        decode: (value) => Result.succeed({ [tag]: key, value } as Branch),
-        encode: (value) => {
-          if (!Predicate.isObject(value) || !Object.hasOwn(value, tag) || value[tag] !== key) {
-            return Result.fail(`expected an object with ${tag} equal to ${preview(key)}`)
-          }
-          if (!Object.hasOwn(value, "value")) return Result.fail("expected an object with a value field")
-          return Result.succeed(value.value)
-        },
+    const branch = transformNode<Value, Branch, Domain>(
+      // SAFETY: entries pair keys with grammars; only the payload type is erased.
+      grammar as Grammar<Value, Domain>,
+      // SAFETY: the computed field has exactly the supplied tag and key.
+      (value) => Result.succeed({ [tag]: key, value } as Branch),
+      (value) => {
+        if (!Predicate.isObject(value) || !Object.hasOwn(value, tag) || value[tag] !== key) {
+          return Result.fail(`expected an object with ${tag} equal to ${preview(key)}`)
+        }
+        if (!Object.hasOwn(value, "value")) return Result.fail("expected an object with a value field")
+        return Result.succeed(value.value)
+      },
+      (derive) => ({
+        _tag: "Struct",
+        fields: [[tag, { _tag: "Schema", schema: Schema.Literal(key) }], ["value", derive(grammar)]],
       }),
     )
     return [key, branch] as const
@@ -71,28 +75,36 @@ export const literals = <const Values extends readonly [string, ...Array<string>
 export const flag = <T extends Grammar<void, Domain> | string>(value: T) =>
   choice([as(true)(toGrammar(value)), as(false)(empty)], { print: "first" })
 
+const isDefined = Schema.makeFilter((input: Value) => input !== undefined, { expected: "a defined value" })
+
 export const defaulted = <A>(value: A) => <D extends Domain>(inner: Grammar<A | undefined, D>): Grammar<A, D> =>
-  inner.pipe(
-    transform({
-      decode: (input) => (input === undefined ? value : input),
-      encode: (input) => (Equal.equals(input, value) ? undefined : input),
+  transformNode(
+    inner,
+    (input) => Result.succeed(input === undefined ? value : input),
+    (input) => Result.succeed(Equal.equals(input, value) ? undefined : input),
+    (derive) => ({
+      _tag: "Union",
+      members: [
+        { _tag: "Check", inner: derive(inner), check: () => isDefined },
+        { _tag: "Schema", schema: constantSchema(value) },
+      ],
     }),
   )
 
-export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => prefixedBy(length, take)
+export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => prefixedBy(length, take, Schema.String)
 
 export const countPrefixed =
   <C extends Domain>(count: Grammar<number, C>) =>
   <A, D extends Domain>(item: Grammar<A, D>): Grammar<ReadonlyArray<A>, C | D> =>
-    gen(function*() {
-      const size = yield* count
-      const items = yield* repeat(size)(item)
-      return { size, items }
-    }).pipe(
-      transform({
-        decode: ({ items }) => items,
-        encode: (items: ReadonlyArray<A>) => ({ size: items.length, items }),
+    transformNode(
+      gen(function*() {
+        const size = yield* count
+        const items = yield* repeat(size)(item)
+        return { size, items }
       }),
+      ({ items }) => Result.succeed(items),
+      (items: ReadonlyArray<A>) => Result.succeed({ size: items.length, items }),
+      (derive) => ({ _tag: "Array", item: derive(item) }),
     )
 
 export const lexeme = suffix(trivia)
@@ -101,6 +113,7 @@ export const symbol = (value: string): Grammar<void> => lexeme(literal(value))
 
 export const integer = regex(/-?\d+/, "integer").pipe(
   transform({
+    to: Schema.Int,
     decode: (text) => {
       const value = Number(text)
       return Object.is(value, -0) ? 0 : value

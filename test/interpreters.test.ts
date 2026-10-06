@@ -86,6 +86,11 @@ const table = {
     text: "7",
     value: 7,
   }),
+  Filter: row({
+    grammar: G.regex(/\d+/, "d").pipe(G.filter((text: string) => text.length < 3, "short")),
+    text: "42",
+    value: "42",
+  }),
   Skip: row({
     grammar: G.regex(/\s+/, "sp").pipe(G.skip(" ")),
     text: " ",

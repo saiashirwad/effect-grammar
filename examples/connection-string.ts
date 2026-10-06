@@ -1,51 +1,6 @@
 import { Console, Effect, Schema, SchemaIssue } from "effect"
 
-import * as Grammar from "../src/index.ts"
-import * as GrammarSchema from "../src/schema.ts"
-
-const pair = Grammar.gen(function*() {
-  const key = yield* Grammar.regex(/[^=&]+/, "param key")
-  yield* Grammar.literal("=")
-  const value = yield* Grammar.regex(/[^&]*/, "param value")
-  return { key, value }
-})
-
-const queryParams = pair.pipe(
-  Grammar.sepBy("&"),
-  Grammar.prefix("?"),
-  Grammar.optional,
-  Grammar.transform({
-    decode: (pairs): Record<string, string> => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
-    encode: (record) => {
-      const entries = Object.entries(record)
-      return entries.length === 0 ? undefined : entries.map(([key, value]) => ({ key, value }))
-    },
-  }),
-  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.String)), "query parameters"),
-)
-
-const dsn = Grammar.gen(function*() {
-  yield* Grammar.literal("postgres://")
-  const user = yield* Grammar.regex(/[^:@/?#]+/, "user")
-  const password = yield* Grammar.regex(/[^@/?#]+/, "password").pipe(Grammar.prefix(":"), Grammar.optional)
-  yield* Grammar.literal("@")
-  const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
-  yield* Grammar.literal("/")
-  const database = yield* Grammar.regex(/[^/?#]+/, "database")
-  const params = yield* queryParams
-  return { user, password, host, port, database, params }
-})
-
-const ConnectionInfo = Schema.Struct({
-  user: Schema.NonEmptyString,
-  password: Schema.UndefinedOr(Schema.String),
-  host: Schema.NonEmptyString,
-  port: Schema.UndefinedOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-  database: Schema.NonEmptyString,
-  params: Schema.Record(Schema.String, Schema.String),
-})
-const Dsn = GrammarSchema.codec(dsn, ConnectionInfo, { identifier: "Dsn" })
+import { Dsn } from "./grammars/connection-string.ts"
 
 const decode = Schema.decodeEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)
@@ -66,7 +21,7 @@ const value = {
   host: "db.internal",
   port: 5432,
   database: "shop",
-  params: { sslmode: "require" },
+  params: [{ key: "sslmode", value: "require" }],
 }
 
 const check = (source: string) =>

@@ -6,13 +6,15 @@ import {
   type Domain,
   type Grammar,
   isCount,
+  matchesWhole,
   nodeOf,
+  refine,
   resolve,
   type Suspension,
   type Value,
 } from "./core.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
-import { fromByteString, nonByte } from "./internal/bytes.ts"
+import { fromByteString, nonByte, toByteString } from "./internal/bytes.ts"
 import { describe, describeStep } from "./internal/describe.ts"
 import { bindOutput, evaluate, type Frame, frame, Unbound } from "./internal/generator.ts"
 import { atPath, catchResult, inspect } from "./internal/runtime.ts"
@@ -93,19 +95,19 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       return Result.succeed(node.value)
     case "Regex": {
       if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      const match = new RegExp(node.source, `${node.flags}y`).exec(value)
-      if (match === null || match[0].length !== value.length) return invalid(`/${node.source}/`, value)
-      return Result.succeed(value)
+      return matchesWhole(node, value) ? Result.succeed(value) : invalid(`/${node.source}/`, value)
     }
     case "Take": {
+      if (state.domain === "bytes" && !Predicate.isUint8Array(value)) return invalid("bytes", value)
       const count = printCount(evaluate(node.count, env), "take count")
       if (Result.isFailure(count)) return Result.fail(count.failure)
-      if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      return value.length === count.success
-        ? Result.succeed(value)
+      const text = Predicate.isUint8Array(value) && state.domain === "bytes" ? toByteString(value) : value
+      if (!Predicate.isString(text)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
+      return text.length === count.success
+        ? Result.succeed(text)
         : invalid(
           `${count.success} ${state.domain === "bytes" ? "byte" : "character"}${count.success === 1 ? "" : "s"}`,
-          state.domain === "bytes" ? fromByteString(value) : value,
+          value,
         )
     }
     case "Sequence": {
@@ -212,8 +214,13 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       if (Result.isFailure(separator)) return separator
       return printItems(node.inner, value, separator.success, env, state)
     }
-    case "Transform": {
-      const encoded = inspect(value, describe(node.inner), () => node.encode(value))
+    case "Transform":
+    case "Filter": {
+      const encoded = inspect(
+        value,
+        describe(node.inner),
+        () => (node._tag === "Transform" ? node.encode(value) : refine(node, value)),
+      )
       if (Result.isFailure(encoded)) return fail(encoded.failure)
       if (Result.isFailure(encoded.success)) return invalid(encoded.success.failure, value)
       return printGrammar(node.inner, encoded.success.success, env, state)

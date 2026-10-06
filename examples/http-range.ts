@@ -3,26 +3,45 @@ import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const Natural = Schema.Natural
-const ClosedRange = Schema.Struct({
-  kind: Schema.Literal("closed"),
-  start: Natural,
-  end: Natural,
-}).check(
-  Schema.makeFilter((range) => range.start <= range.end, {
-    message: "the range start must not exceed the range end",
-  }),
+const offset = Grammar.integer.pipe(Grammar.filter((value: number) => value >= 0, "a non-negative byte offset"))
+
+const closed = Grammar.gen(function*() {
+  const start = yield* offset
+  yield* Grammar.literal("-")
+  const end = yield* offset
+  return { kind: "closed" as const, start, end }
+}).pipe(
+  Grammar.filter(
+    (range: { start: number; end: number }) => range.start <= range.end,
+    "a range whose start does not exceed its end",
+  ),
 )
-const OpenRange = Schema.Struct({
-  kind: Schema.Literal("open"),
-  start: Natural,
-})
-const SuffixRange = Schema.Struct({
-  kind: Schema.Literal("suffix"),
-  length: Schema.Int.check(Schema.isGreaterThan(0)),
+
+const open = Grammar.gen(function*() {
+  const start = yield* offset
+  yield* Grammar.literal("-")
+  return { kind: "open" as const, start }
 })
 
-export const ByteRanges = Schema.Array(Schema.Union([ClosedRange, OpenRange, SuffixRange])).check(Schema.isMinLength(1))
+const suffix = Grammar.gen(function*() {
+  yield* Grammar.literal("-")
+  const length = yield* Grammar.integer.pipe(Grammar.filter((value: number) => value > 0, "a positive suffix length"))
+  return { kind: "suffix" as const, length }
+})
+
+export const ByteRangeCodec = GrammarSchema.codec(
+  Grammar.dispatch(
+    "kind",
+    [
+      ["closed", closed],
+      ["open", open],
+      ["suffix", suffix],
+    ] as const,
+  ).pipe(Grammar.sepBy(",", { min: 1 }), Grammar.prefix("bytes=")),
+  { identifier: "ByteRanges" },
+)
+
+export const ByteRanges = Schema.toType(ByteRangeCodec)
 
 export type ByteRangesValue = Schema.Schema.Type<typeof ByteRanges>
 export type ByteRange = ByteRangesValue[number]
@@ -65,41 +84,4 @@ export const ManualByteRangeCodec = Schema.String.pipe(
     }),
   ),
   Schema.annotate({ identifier: "ManualByteRanges" }),
-)
-
-const tag = <const Tag extends string>(value: Tag) => Grammar.empty.pipe(Grammar.as(value))
-
-const closed = Grammar.gen(function*() {
-  const kind = yield* tag("closed")
-  const start = yield* Grammar.integer
-  yield* Grammar.literal("-")
-  const end = yield* Grammar.integer
-  return { kind, start, end }
-})
-
-const open = Grammar.gen(function*() {
-  const kind = yield* tag("open")
-  const start = yield* Grammar.integer
-  yield* Grammar.literal("-")
-  return { kind, start }
-})
-
-const suffix = Grammar.gen(function*() {
-  const kind = yield* tag("suffix")
-  yield* Grammar.literal("-")
-  const length = yield* Grammar.integer
-  return { kind, length }
-})
-
-export const ByteRangeCodec = GrammarSchema.codec(
-  Grammar.dispatch(
-    "kind",
-    [
-      ["closed", closed],
-      ["open", open],
-      ["suffix", suffix],
-    ] as const,
-  ).pipe(Grammar.sepBy(",", { min: 1 }), Grammar.prefix("bytes=")),
-  ByteRanges,
-  { identifier: "ByteRanges" },
 )

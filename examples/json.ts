@@ -3,7 +3,7 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as GrammarSchema from "../src/schema.ts"
 import { jsonValue } from "./grammars/json.ts"
 
-const Json = GrammarSchema.codec(jsonValue, Schema.Unknown, { identifier: "Json" })
+const Json = GrammarSchema.codec(jsonValue, { identifier: "Json" })
 
 const decode = Schema.decodeEffect(Json)
 const encode = Schema.encodeEffect(Json)

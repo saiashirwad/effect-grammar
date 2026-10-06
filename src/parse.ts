@@ -8,11 +8,13 @@ import {
   isCount,
   type Node,
   nodeOf,
+  refine,
   resolve,
   type Suspension,
   type Value,
 } from "./core.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
+import { fromByteString } from "./internal/bytes.ts"
 import { describe } from "./internal/describe.ts"
 import { assembleOutput, evaluate, type Frame, frame, Unbound } from "./internal/generator.ts"
 import { catchResult } from "./internal/runtime.ts"
@@ -94,7 +96,7 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       }
       const value = state.input.slice(state.pos, state.pos + count)
       state.pos += count
-      return Result.succeed(value)
+      return Result.succeed(state.domain === "bytes" ? fromByteString(value) : value)
     }
     case "Sequence": {
       const local = frame(node.scope, node.steps.length, env)
@@ -159,13 +161,14 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       state.pos = mark
       return values.length < min.success ? Result.fail(undefined) : Result.succeed(values)
     }
-    case "Transform": {
+    case "Transform":
+    case "Filter": {
       const start = state.pos
       const result = parseGrammar(node.inner, state, env)
       if (Result.isFailure(result)) return result
       const consumed = state.pos
       try {
-        const decoded = node.decode(result.success)
+        const decoded = node._tag === "Transform" ? node.decode(result.success) : refine(node, result.success)
         if (Result.isFailure(decoded)) {
           state.pos = start
           return failAt(state, decoded.failure, consumed)

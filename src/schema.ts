@@ -6,4 +6,4 @@ import { print } from "./print.ts"
 
 export type { CodecOptions } from "./internal/schema.ts"
 
-export const codec = codecWith(Schema.String, parse, print)
+export const codec = codecWith(Schema.String, "text", parse, print)

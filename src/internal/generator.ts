@@ -2,6 +2,7 @@ import { Equal, Predicate, Result } from "effect"
 
 import {
   type AnyGrammar,
+  type BoundExpr,
   type Denote,
   type Domain,
   type DomainOf,
@@ -38,7 +39,7 @@ interface Scope {
 }
 
 interface RefEntry {
-  readonly expr: Expr
+  readonly expr: BoundExpr
   readonly scope: Scope
 }
 
@@ -82,7 +83,7 @@ const refHandler: ProxyHandler<object> = {
   },
 }
 
-const refFor = <A>(expr: Expr, scope: Scope): Ref<A> => {
+const refFor = <A>(expr: BoundExpr, scope: Scope): Ref<A> => {
   const ref = new Proxy<RefImpl<A>>(new RefImpl<A>(), refHandler)
   refs.set(ref, { expr, scope })
   return ref
@@ -106,7 +107,7 @@ const entryInScope = (ref: Ref<Value>, where: string): RefEntry => {
   return entry
 }
 
-export const assertInScope = (ref: Ref<Value>, where: string): Expr => entryInScope(ref, where).expr
+export const assertInScope = (ref: Ref<Value>, where: string): BoundExpr => entryInScope(ref, where).expr
 
 export const get = <A, K extends keyof A>(ref: Ref<A>, key: K): Ref<A[K]> => {
   const { expr, scope } = entryInScope(ref, "get")

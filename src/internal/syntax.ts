@@ -39,6 +39,7 @@ const proveSyntaxOnly = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetO
     case "Match":
       return combineSyntaxVerdicts(node.cases, ({ grammar }) => proveSyntaxOnly(grammar, seen, targetOf))
     case "Transform":
+    case "Filter":
       return "no"
     case "Optional":
     case "Surrounded":

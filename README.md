@@ -7,23 +7,23 @@ grammar.
 npm install effect@rc effect-grammar
 ```
 
-Requires `effect` 4 (currently release candidate) and Node 20 or later.
+Requires `effect` version `>=4.0.0-rc.112 <5` and Node 20 or later.
 
 ## Why this exists
 
-`effect-grammar` derives parsing and printing from the same grammar. Format
-structure is shared, not maintained in two implementations that can drift apart.
-User-supplied transformations and ambiguous alternatives can still break round
-trips, so printing verifies its output by default: it succeeds only if that
-output parses back to an equal value.
+`effect-grammar` derives parsing and printing from the same grammar. You do not
+have to keep two descriptions of a format in sync.
 
-You can use the grammar directly, or pair it with an Effect `Schema` to validate
-the values and integrate with the rest of your application.
+User transformations and ambiguous alternatives can still break round trips. By
+default, printing verifies its output by parsing it back. It fails if the result
+is not an equal value.
+
+Use the grammar directly, or pair it with an Effect `Schema` to validate values.
 
 ## Quick start
 
-Parse and print a simple endpoint in the form `https://host:port`. Define the
-grammar, then pair it with an explicit target `Schema` to validate the values.
+Parse and print an endpoint like `https://host:port`. Define the grammar, then
+derive an Effect `Schema` codec from it.
 
 ```ts
 import { Schema } from "effect"
@@ -38,28 +38,28 @@ const endpoint = G.gen(function*() {
   return { host, port }
 })
 
-const Endpoint = GrammarSchema.codec(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.Int,
-  }),
-)
+const Endpoint = GrammarSchema.codec(endpoint)
+// Schema.Codec<{ host: string; port: number }, string>
 
 Schema.decodeSync(Endpoint)("https://effect.website:443")
 // { host: "effect.website", port: 443 }
 
 Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 // "https://effect.website:443"
+
+Schema.encodeSync(Endpoint)({ host: "effect.website", port: 4.5 })
+// throws: Expected an integer at ["port"]
 ```
 
-The grammar specifies the syntax of the format. The target `Schema` provides
-value validation and optional transformations. The `codec` adapter requires
-both. Schema synchronous APIs throw on invalid input.
+The grammar specifies the syntax. The codec derives the value schema from it.
 
-You can also run the grammar directly without a Schema. `G.parse` and `G.print`
-return synchronous Effect `Result`s containing a success or failure. Parsing
-requires the whole input to match:
+Schema synchronous APIs throw on invalid input. See
+[Schema codecs](#schema-codecs) for details on derived checks and custom target
+schemas.
+
+You can run the grammar directly without a Schema. `G.parse` and `G.print`
+return synchronous Effect `Result`s with a success or failure. Parsing requires
+the whole input to match:
 
 ```ts
 G.parse(endpoint, "https://effect.website")
@@ -73,28 +73,30 @@ Constructing an invalid grammar definition can throw.
 
 ## How `gen` works
 
-The `G.gen` block runs **once** when the grammar is constructed, not every time
-an input is parsed.
+The `G.gen` block runs **once** when the grammar is constructed, not on every
+parse.
 
-Each `yield*` records a format step in order. Steps that produce data, like
-`G.integer`, yield a `Ref`—a placeholder for a future value. Syntax-only steps,
-like `G.literal`, yield `void`.
+Each `yield*` records a step in order. Steps that produce data, like
+`G.integer`, yield a `Ref`, a placeholder for a future value. Syntax-only steps,
+like `G.literal`, have a yield type of `void`. This is a TypeScript type, not a
+guarantee that the yielded value is `undefined` during construction.
 
-The object you return dictates the final shape of the value.
+The object you return dictates the final value shape.
 
-- When **parsing**, the library executes the steps, collects the yielded values,
-  and fills in your return layout.
-- When **printing**, the library takes your supplied value, matches it against
-  the layout to find the data for each placeholder, and emits the steps.
+- **Parsing** executes the steps, collects yielded values, and fills your return
+  layout.
+- **Printing** matches your value against the layout to find data for each
+  placeholder, then emits the steps.
 
-Because a `Ref` is just a placeholder, you cannot inspect its fields or perform
-math on it during `gen`. Testing `if (ref)` checks placeholder truthiness, not
-the parsed value. To map values, `G.transform` requires both decode and encode
-callbacks on the completed grammar. `G.filter` checks a predicate in both
-directions.
+A `Ref` is only a placeholder. You cannot inspect its fields or perform math on
+it during `gen`. Testing `if (ref)` checks placeholder truthiness, not the
+parsed value.
 
-Every value-producing yield must be included in the return layout, or explicitly
-discarded by choosing a printing representation with `G.skip(printAs)`.
+To map values, use `G.transform` with decode and encode callbacks on the
+completed grammar. `G.filter` checks a predicate in both directions.
+
+You must include every value-producing yield in the return layout, or explicitly
+discard it by choosing a print representation with `G.skip(printAs)`.
 Syntax-only yields do not need to be returned.
 
 ## Values that depend on earlier values
@@ -119,9 +121,10 @@ G.print(netstring, { length: 3, payload: "hello" })
 ```
 
 This text variant of a netstring counts JavaScript UTF-16 code units, not
-encoded bytes. Use `Binary` for byte-oriented formats. The dependency is
-verified during printing, not automatically computed. If you want the printer to
-compute the length for you, use `G.lengthPrefixed` to wrap the payload:
+encoded bytes. Use `Binary` for byte-oriented formats.
+
+Printing verifies the dependency but does not compute it. To have the printer
+compute the length automatically, wrap the payload in `G.lengthPrefixed`:
 
 ```ts
 const payload = G.lengthPrefixed(G.integer.pipe(G.suffix(":"))).pipe(
@@ -132,22 +135,29 @@ G.print(payload, "hello")
 // Success: "5:hello,"
 ```
 
-To depend on a field from an object `Ref`, use `G.get(ref, "field")`. To choose
-between grammar branches based on a `Ref`, use `G.match(ref, entries)`.
-`G.countPrefixed` derives the item count for arrays, and `G.repeat(count)(item)`
-accepts a number or a `Ref<number>`.
+Other ways to use dependent values:
+
+- `G.get(ref, "field")` reads a field from an object `Ref`.
+- `G.match(ref, entries)` chooses grammar branches based on a `Ref`.
+- `G.countPrefixed` derives array item counts.
+- `G.repeat(count)(item)` accepts a number or a `Ref<number>`.
 
 ## Binary formats
 
-`effect-grammar/Binary` provides operations for `Uint8Array`. It includes signed
-and unsigned integers at 8, 16, 32, and 64 bits, defaulting to big-endian with a
-`le` suffix for little-endian variants, such as `uint16le`. 64-bit values, as
-well as LEB128 `varuint` and zigzag `varint`, yield bigints. It also provides
-`float32`, `float64`, `bits`, and `bytes`. To expose strings, `ascii` and `utf8`
-wrap byte payload grammars.
+`effect-grammar/Binary` provides operations for `Uint8Array`:
 
-Shared combinators from the root `effect-grammar` export work on both text and
-bytes.
+- Signed and unsigned integers at 8, 16, 32, and 64 bits.
+- LEB128 `varuint` and zigzag `varint`.
+- `float32`, `float64`, `bits`, and `bytes`.
+- `ascii` and `utf8`, which wrap byte payload grammars for strings.
+
+Fixed-width integers default to big-endian. Use a `le` suffix for little-endian
+variants like `uint16le`. Fixed-width 64-bit integers yield `bigint` values.
+`varuint` and `varint` yield numbers. `varuint` supports integers from `0`
+through `Number.MAX_SAFE_INTEGER`. `varint` supports integers from `-(2 ** 52)`
+through `2 ** 52 - 1`.
+
+Shared combinators from the `effect-grammar` root work on both text and bytes.
 
 ```ts
 import * as G from "effect-grammar"
@@ -163,14 +173,14 @@ Binary.print(strings, ["€", "yo"])
 ```
 
 The first byte counts the array items. The following prefixes count encoded
-UTF-8 bytes, so `"€"` takes 3 bytes. `Binary.bytes(size)` checks a supplied
-size, whereas `Binary.lengthPrefixed` computes the encoded byte length when
-printing.
+UTF-8 bytes, so `"€"` takes 3 bytes.
 
-Types keep text and byte grammars separate at the runners and codecs. A string
-literal like `G.literal(":")` introduces text syntax. For explicit byte
-delimiters, use `G.suffix(Binary.literal(0))`. `G.empty` is neutral and works in
-both domains.
+`Binary.bytes(size)` checks a supplied size. `Binary.lengthPrefixed` computes
+the encoded byte length when printing.
+
+Types keep text and byte grammars separate in runners and codecs.
+`G.literal(":")` introduces text syntax. Use `G.suffix(Binary.literal(0))` for
+explicit byte delimiters. `G.empty` is neutral and works in both domains.
 
 ## Useful combinators
 
@@ -188,28 +198,152 @@ both domains.
 ## Checked printing
 
 `G.print` formats the value, then parses the entire output back through the
-grammar. If the parsed value is not equal to the original (using
-`Equal.equals`), printing fails. This verifies that particular value survives
-the round trip. It does not try to preserve original spelling: `G.integer`
-parses `"007"` to `7`, which prints as `"7"`.
+grammar. Printing fails if the parsed value does not equal the original (using
+`Equal.equals`).
 
-Sharing a grammar does not prove that every value can be printed. For example,
-`G.transform` accepts separate `decode` and `encode` callbacks; their types do
-not establish that `decode(encode(value))` equals `value`. Checked printing
-detects a violation for the supplied value and returns a failure instead of
-output that changes it. Use the law helpers below to test transformations across
-a range of values.
+This verifies the value survives the round trip, not that its spelling is
+preserved. For example, `G.integer` parses `"007"` to `7`, which prints as
+`"7"`.
 
-Because checked printing parses the output again, it costs an extra pass.
-`G.printUnchecked` skips the final whole-grammar verification, but still
+Sharing a grammar does not guarantee every value can print. For instance,
+`G.transform` has separate `decode` and `encode` callbacks, but their types do
+not prove `decode(encode(value))` equals `value`.
+
+Checked printing catches violations for the supplied value. Use the
+[law helpers](#testing-and-diagnostics) to test transformations across many
+values.
+
+### Skipping the final check
+
+Because it parses the output again, checked printing costs an extra pass.
+`G.printUnchecked` skips this final whole-grammar verification but still
 enforces local constraints like regular expressions, lengths, and filters.
 
-When a `G.choice` has several branches, the default `"roundTrip"` print policy
-reparses each printable candidate through the choice and accepts one that reads
-back as an equal value. `G.printUnchecked` retains this branch check. If
-branches cannot overlap, `{ print: "first" }` takes the first branch that prints
-without checking it through the choice. `G.print` still performs the final
-whole-grammar verification with either policy.
+### Choice printing policies
+
+`G.choice` has two print policies:
+
+- **`"roundTrip"` (default):** reparses each printable candidate through the
+  choice and accepts one that returns an equal value. `G.printUnchecked` retains
+  this branch check.
+- **`"first"`:** takes the first branch that prints, without checking it through
+  the choice. Use `{ print: "first" }` when branches cannot overlap.
+
+`G.print` performs the final whole-grammar verification with either policy.
+
+## Schema codecs
+
+- `GrammarSchema.codec(grammar)` returns a `Schema.Codec<A, string>`.
+- `Binary.codec(grammar)` returns a `Schema.Codec<A, Uint8Array>`.
+
+Both codecs derive a value schema from the grammar:
+
+- **Decoding** parses the input, then validates the result.
+- **Encoding** validates the value, then prints it with checked printing.
+
+Use `Schema.toType(codec)` to get only the value schema.
+
+### What derives automatically
+
+- **Structure:** products, `gen` layouts, constants, choices, `dispatch`,
+  optional fields, and recursion.
+- **Constraints:** repetition bounds, labels, filters, full-match `regex`, and
+  lengths for `take` and `Binary.bytes`.
+- **Built-in values:** `integer`, binary integer ranges, floats, `bits`,
+  `ascii`, and `utf8`.
+
+Fields returned from `G.optional` are **required keys** whose value may be
+`undefined`.
+
+Derivation does not rerun already constructed `gen` blocks or run decode,
+encode, or predicate callbacks. It resolves suspension thunks, which may
+construct and run new `gen` blocks.
+
+### Custom transformations
+
+`G.transform` and `G.transformOrFail` cannot be read backwards. A custom
+transform must declare the schema of its decoded values with `to` when deriving
+a codec:
+
+```ts
+const percent = G.regex(/\d+%/, "percent").pipe(
+  G.transform({
+    to: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+    decode: (text) => Number(text.slice(0, -1)),
+    encode: (value) => `${value}%`,
+  }),
+)
+```
+
+`codec` throws if a transform lacks `to`, naming the transform and its path.
+
+`to` describes the transform's output type; only its type side is used. The
+codec validates decoded values and encode inputs against it.
+
+`G.parse` and `G.print` ignore `to`. It does not steer choice backtracking.
+
+### Dependent values and printability
+
+Values that depend on earlier ones become checks with Schema paths. A
+`take(length)`, `repeat(count)`, or `match(kind, ...)` inside a `gen` is checked
+against the bound value it reads. Failures include a path, such as `Expected 3
+characters` at `["payload"]`.
+
+Dependencies on references from an enclosing `gen` are **not part of the
+schema** when those references cross into:
+
+- A `choice`, `dispatch`, or `match` branch.
+- An `optional` or repeated item.
+- A transform or suspension.
+
+An inner `gen` still derives checks for its own locally bound dependencies. For
+example, wrapping the netstring grammar above in `G.optional` preserves its
+length check.
+
+The derived schema checks structure, **not printability**. Checked printing
+still enforces excluded dependencies and rejects `encode` output that no longer
+fits the grammar. Failures are reported as Schema issues at the value's path.
+
+By default, derived structural schemas preserve excess object keys, which
+printing rejects just as `G.print` does. Custom schemas can handle excess keys
+differently.
+
+### Explicit target schemas
+
+Pass an explicit target schema to validate into a different type, add brands, or
+use Schema transformations and services. The grammar's values must match the
+target's encoded side:
+
+```ts
+const StrictEndpoint = GrammarSchema.codec(
+  endpoint,
+  Schema.Struct({ host: Schema.NonEmptyString, port: Schema.Int }),
+)
+```
+
+With an explicit target, the grammar's transforms do not need `to`.
+
+### Recursive codec performance limits
+
+Automatic codecs support recursive grammars, including parentheses that do not
+change the returned value and nested objects or arrays.
+
+**Both codec construction and value validation can become expensive** when many
+mutually recursive alternatives are separated by filters or labels. The derived
+schema can expand into many paths.
+
+To manage the cost:
+
+- **Reuse codecs.** Construct them once to avoid repeated derivation.
+- **Supply a target schema.** `GrammarSchema.codec(grammar, target)` and
+  `Binary.codec(grammar, target)` bypass automatic derivation. The target must
+  supply the value constraints you need.
+
+An explicit target does not remove parser or printer recursion costs. It also
+does not guarantee cheap target-schema validation.
+
+Normalization assumes deterministic, non-mutating predicates. Deeply nested
+values still face Effect's normal recursive-validation depth limits.
 
 ## Testing and diagnostics
 
@@ -231,24 +365,32 @@ Testing.assertParsePrintCanonical(G.integer, "007")
 // "7"
 ```
 
-`assertPrintParse` checks a single value, and `checkCanonicalization` tests
-accepted inputs for value preservation and idempotent canonical output.
-`Testing.Binary` provides the same helpers for byte grammars. These helpers use
-`printUnchecked` so failures provide targeted messages rather than relying on
-the printer's final check.
+- `assertPrintParse` checks a single value.
+- `checkCanonicalization` tests accepted inputs for value preservation and
+  idempotent canonical output.
+- `Testing.Binary` provides the same helpers for byte grammars.
+
+These helpers use `printUnchecked` so failures provide targeted messages instead
+of failing at the printer's final check.
+
+### Diagnostics
 
 If your grammar behaves unexpectedly, `G.diagnose(grammar)` inspects its
-structure and returns a list of issues, including unreturned values, invalid
-reference scopes, and unbounded repetitions whose items can match empty input:
+structure and reports:
+
+- Unreturned values.
+- Invalid reference scopes.
+- Unbounded repetitions whose items can match empty input.
 
 ```ts
 G.diagnose(G.regex(/a*/, "as").pipe(G.many()))
 // Returns issues including _tag: "EmptyRepetition" on path ["inner"]
 ```
 
-Diagnostics do not execute predicate or transform callbacks, but lazy suspension
-thunks may run, and broken suspensions are reported. An empty issues list does
-not prove all inputs parse or all values print.
+Diagnostics do not execute predicate or transform callbacks. Lazy suspension
+thunks may run, and broken suspensions are reported.
+
+An empty issues list does not prove all inputs parse or all values print.
 
 ## Exports
 
@@ -266,20 +408,19 @@ not prove all inputs parse or all values print.
 
 - [examples/](examples/) – Working grammars for JSON, DNS queries, HTTP byte
   ranges, connection strings, and more.
-- [Architecture](docs/architecture.md) – Implementation details for
-  contributors.
 - [Contributing](docs/contributing.md) – Checks, benchmarks, and test ownership.
 
 ## Background
 
-`effect-grammar` sits between two traditional styles of parser combinators.
-Applicative parsers can be inspected and run backwards, but cannot easily handle
-formats where later steps depend on earlier values. Monadic parsers allow
-arbitrary dependencies using opaque functions, but hide the structure needed for
-printing.
+`effect-grammar` sits between two traditional parser combinator styles.
+
+- **Applicative parsers** can be inspected and run backwards but struggle with
+  formats where later steps depend on earlier values.
+- **Monadic parsers** allow arbitrary dependencies using opaque functions but
+  hide the structure needed for printing.
 
 By providing a constrained dependency system (`Ref`, `G.get`, `G.match`), this
-library keeps the grammar inspectable enough to reverse, while remaining
+library keeps the grammar inspectable enough to reverse while remaining
 expressive enough to handle length prefixes and tags.
 
 Related work:
