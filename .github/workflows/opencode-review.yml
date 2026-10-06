@@ -27,6 +27,7 @@ jobs:
 
       - uses: anomalyco/opencode/github@aec0b9a6d8898f68f923aaf08b7306d931fd9d76 # v1.18.34
         env:
+          OPENCODE_LOG_LEVEL: ERROR
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -38,6 +39,9 @@ jobs:
             its base branch. Start with the PR diff and changed files.
             Read surrounding code only when needed to understand a changed
             behavior or verify a suspected bug. Do not audit the whole repository.
+            During the review, emit brief progress updates naming the changed
+            files or behaviors you are checking. Keep the final findings in one
+            concise review comment.
 
             Report concrete bugs or regressions caused by these changes.
             Ignore pre-existing problems, style, naming, and speculative improvements.
