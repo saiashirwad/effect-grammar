@@ -20,6 +20,7 @@ Public usage belongs in the [README](../README.md).
 | `src/errors.ts`, `src/internal/runtime.ts` | Error data, formatting, exception boundaries, and print paths                                                                        |
 | `src/internal/bytes.ts`, `src/binary.ts`   | Byte-string conversion, byte terminals, byte runners, and codec                                                                      |
 | `src/internal/prefixed.ts`                 | Shared text and byte length-prefix composition                                                                                       |
+| `src/internal/derive.ts`                   | Value schema derivation for `codec(grammar)`, transform output hooks, dependency checks                                              |
 | `src/internal/schema.ts`, `src/schema.ts`  | Shared Schema adapter and its text specialization                                                                                    |
 | `src/testing.ts`                           | Law implementations specialized for text and bytes                                                                                   |
 | `src/index.ts`, `src/text.ts`              | Public root exports and the Text facade                                                                                              |
@@ -91,13 +92,19 @@ Checks have different scopes:
   `Equal.equals`. `printUnchecked` omits only this final check.
 - Law helpers use unchecked printing to report value-preservation and
   canonicalization failures with test-specific context.
+- `codec(grammar)` validates values against a schema derived from the graph,
+  after parsing and before printing. Derivation, like `diagnose`, never runs
+  `gen` blocks or callbacks. The schema is structural: it may accept a value
+  that checked printing then rejects, but it should never reject one that
+  prints.
 
 ## Expressions and return layouts
 
 An _expression_ reads a dependent input. `Expr` contains a whole-slot `Ref`, a
-property projection `Prop`, or a numeric `Const`. `get` constructs projections.
-`evaluate` reads them against the current frame and its ancestors. An absent
-binding is `Unbound`, distinct from a slot bound to `undefined`.
+property projection `Prop`, or a numeric `Const`. `BoundExpr` excludes `Const`,
+so `match` scrutinees and refs always read a binding. `get` constructs
+projections. `evaluate` reads them against the current frame and its ancestors.
+An absent binding is `Unbound`, distinct from a slot bound to `undefined`.
 
 A _return layout_ contains local slots, constants, objects, and arrays. Capture
 checks that every returned ref belongs to the owning generator. Compilation
@@ -121,6 +128,20 @@ incoming frame. They introduce no slots or scope. Delimiters print with
 tries cases in order, while printing selects only the case matching the tag.
 Neither operation relies on transform callback identity or choice metadata.
 
+`Filter` holds a predicate and a name. `Transform` holds decode, encode, and an
+optional `OutputSchema` hook, which parsing and printing never read. The
+derivation walker calls the hook with a function that derives child grammars, so
+helpers such as `defaulted`, `countPrefixed`, and `taggedChoice` describe their
+output from their inner grammar's schema.
+
+Derivation turns `Take`, `Repeat`, and `Match` expressions into dependencies
+with a value path. Each `Sequence` folds the dependencies that read its own
+slots into one struct-level check reporting `{ path, issue }`, and passes the
+rest outward with the path prefixed. Dependencies stop at `Choice`, `Dispatch`
+and `Match` cases, `Optional`, repeated items, `Transform`, `Suspend`, and
+unreturned steps, where no single unconditional path locates the value. Checked
+printing still enforces them.
+
 ## State lifetimes
 
 Parsing keeps the cursor separate from `Diagnostics`. Backtracking rewinds
@@ -143,8 +164,10 @@ and law-helper types. Runtime nodes do not carry a domain brand.
 
 Both interpreters use strings internally. `toByteString` maps each byte to one
 code unit; `fromByteString` reverses that representation. These operations are
-not text decoding. Binary runners select byte diagnostics. These strings and the
-domain-polymorphic runner functions are private package details.
+not text decoding. Byte `Take` converts its slice back to a `Uint8Array`, so
+payload values are never byte strings. Binary runners select byte diagnostics.
+These strings and the domain-polymorphic runner functions are private package
+details.
 
 Dependencies point from public facades and adapters toward interpreters and
 graph constructors. Derived helpers build constructors. Interpreters share
@@ -154,10 +177,11 @@ analysis does not depend on either interpreter or execute their callbacks.
 
 `core.ts` has type-only dependencies on `ReturnLayout` and `SequenceStep`.
 `generator.ts` uses core runtime constructors, so those type links do not create
-a runtime cycle. The Schema adapter depends on supplied runners and notation.
-Core combinators do not import the adapter. Internal modules import concrete
-modules, not public export barrels. `text.ts` is the intentional facade that
-re-exports `index.ts`.
+a runtime cycle. The Schema adapter depends on supplied runners, notation, and
+`derive.ts`, which reads only the graph. `derived.ts` imports `constantSchema`
+from it for `defaulted`. Core combinators do not import the adapter. Internal
+modules import concrete modules, not public export barrels. `text.ts` is the
+intentional facade that re-exports `index.ts`.
 
 `package.json` defines the supported import boundary. Internal modules ship for
 relative runtime imports and declarations, but have no public package subpaths.

@@ -23,7 +23,7 @@ the values and integrate with the rest of your application.
 ## Quick start
 
 Parse and print a simple endpoint in the form `https://host:port`. Define the
-grammar, then pair it with an explicit target `Schema` to validate the values.
+grammar, then derive an Effect `Schema` codec from it.
 
 ```ts
 import { Schema } from "effect"
@@ -38,24 +38,23 @@ const endpoint = G.gen(function*() {
   return { host, port }
 })
 
-const Endpoint = GrammarSchema.codec(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.Int,
-  }),
-)
+const Endpoint = GrammarSchema.codec(endpoint)
+// Schema.Codec<{ host: string; port: number }, string>
 
 Schema.decodeSync(Endpoint)("https://effect.website:443")
 // { host: "effect.website", port: 443 }
 
 Schema.encodeSync(Endpoint)({ host: "effect.website", port: 443 })
 // "https://effect.website:443"
+
+Schema.encodeSync(Endpoint)({ host: "effect.website", port: 4.5 })
+// throws: Expected an integer at ["port"]
 ```
 
-The grammar specifies the syntax of the format. The target `Schema` provides
-value validation and optional transformations. The `codec` adapter requires
-both. Schema synchronous APIs throw on invalid input.
+The grammar specifies the syntax of the format, and the codec's value schema is
+derived from it. Schema synchronous APIs throw on invalid input. See
+[Schema codecs](#schema-codecs) for what the derived schema checks and how to
+use your own target schema instead.
 
 You can also run the grammar directly without a Schema. `G.parse` and `G.print`
 return synchronous Effect `Result`s containing a success or failure. Parsing
@@ -210,6 +209,66 @@ back as an equal value. `G.printUnchecked` retains this branch check. If
 branches cannot overlap, `{ print: "first" }` takes the first branch that prints
 without checking it through the choice. `G.print` still performs the final
 whole-grammar verification with either policy.
+
+## Schema codecs
+
+`GrammarSchema.codec(grammar)` returns a `Schema.Codec<A, string>`, and
+`Binary.codec(grammar)` returns a `Schema.Codec<A, Uint8Array>`. Decoding parses
+the input and validates the result against the derived value schema. Encoding
+validates the value against that schema, then prints it with checked printing.
+Use `Schema.toType(codec)` when you only need the value schema.
+
+The value schema comes from the grammar. Products, `gen` layouts, constants,
+choices, `dispatch`, optional fields, repetition bounds, labels, filters, and
+recursion all derive without annotations, as do the built-in terminals:
+`integer`, full-match `regex`, `take` and `Binary.bytes` lengths, the binary
+integer ranges, floats, `bits`, `ascii`, and `utf8`. Fields returned from
+`G.optional` are required keys whose value may be `undefined`. Derivation never
+runs `gen` blocks or decode, encode, and predicate callbacks.
+
+`G.transform` and `G.transformOrFail` cannot be read backwards, so a custom
+transform declares the schema of the values it decodes with `to`:
+
+```ts
+const percent = G.regex(/\d+%/, "percent").pipe(
+  G.transform({
+    to: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+    decode: (text) => Number(text.slice(0, -1)),
+    encode: (value) => `${value}%`,
+  }),
+)
+```
+
+`codec` throws when a transform has no `to`, naming the transform and its path.
+`to` must describe the transform's output type, and only its type side is used.
+The codec checks decoded values against it and rejects encode inputs that fail
+it. `G.parse` and `G.print` ignore `to`: it does not steer choice backtracking.
+
+Values that depend on earlier ones become checks with Schema paths. A
+`take(length)`, `repeat(count)`, or `match(kind, ...)` inside a `gen` is checked
+against the bound value it reads, for example `Expected 3 characters` at
+`["payload"]`. Dependencies inside a `choice`, `dispatch`, or `match` branch, an
+`optional`, a repeated item, a transform, or a suspension are not part of the
+schema.
+
+The derived schema checks structure; it does not prove printability. Anything it
+cannot express, such as an `encode` callback whose output no longer fits its
+grammar or the dependencies above, still fails at checked printing, and the
+failure is reported as a Schema issue at the value's path. Excess object keys
+pass the schema and are rejected by printing, as they are by `G.print`.
+
+To validate into a different type, add brands, or use Schema transformations and
+services, pass an explicit target schema. The grammar's values must match its
+encoded side:
+
+```ts
+const StrictEndpoint = GrammarSchema.codec(
+  endpoint,
+  Schema.Struct({ host: Schema.NonEmptyString, port: Schema.Int }),
+)
+```
+
+In that form the grammar's transforms do not need `to`.
 
 ## Testing and diagnostics
 
