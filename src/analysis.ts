@@ -40,6 +40,7 @@ const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyAr
         { path: ["sep"], grammar: node.sep },
       ]
     case "Transform":
+    case "Filter":
     case "Optional":
     case "Skip":
     case "Label":
@@ -113,7 +114,8 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
       if (item === "unknown") return "unknown"
       return node.min.value === 0 ? "yes" : "no"
     }
-    case "Transform": {
+    case "Transform":
+    case "Filter": {
       const inner = matchesEmpty(node.inner, seen, resolutions)
       return inner === "yes" ? "unknown" : inner
     }

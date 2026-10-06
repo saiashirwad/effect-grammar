@@ -132,6 +132,12 @@ export type Node =
     readonly decode: (a: any) => Result.Result<Value, string>
     readonly encode: (b: any) => Result.Result<Value, string>
   }
+  | {
+    readonly _tag: "Filter"
+    readonly inner: AnyGrammar
+    readonly predicate: (a: any) => boolean
+    readonly name: string
+  }
   | { readonly _tag: "Skip"; readonly inner: AnyGrammar; readonly printAs: Value; readonly hidden: boolean }
   | { readonly _tag: "Label"; readonly inner: AnyGrammar; readonly name: string }
   | {
@@ -143,6 +149,9 @@ export type Node =
   }
 
 export type Suspension = Extract<Node, { readonly _tag: "Suspend" }>
+
+export const refine = (node: Extract<Node, { readonly _tag: "Filter" }>, value: Value): Result.Result<Value, string> =>
+  node.predicate(value) ? Result.succeed(value) : Result.fail(node.name)
 
 export const resolve = (node: Suspension): AnyGrammar => {
   if (node.resolved !== undefined) return node.resolved

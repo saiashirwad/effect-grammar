@@ -8,6 +8,7 @@ import {
   isCount,
   type Node,
   nodeOf,
+  refine,
   resolve,
   type Suspension,
   type Value,
@@ -160,13 +161,14 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       state.pos = mark
       return values.length < min.success ? Result.fail(undefined) : Result.succeed(values)
     }
-    case "Transform": {
+    case "Transform":
+    case "Filter": {
       const start = state.pos
       const result = parseGrammar(node.inner, state, env)
       if (Result.isFailure(result)) return result
       const consumed = state.pos
       try {
-        const decoded = node.decode(result.success)
+        const decoded = node._tag === "Transform" ? node.decode(result.success) : refine(node, result.success)
         if (Result.isFailure(decoded)) {
           state.pos = start
           return failAt(state, decoded.failure, consumed)

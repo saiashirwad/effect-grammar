@@ -7,6 +7,7 @@ import {
   type Grammar,
   isCount,
   nodeOf,
+  refine,
   resolve,
   type Suspension,
   type Value,
@@ -214,8 +215,13 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       if (Result.isFailure(separator)) return separator
       return printItems(node.inner, value, separator.success, env, state)
     }
-    case "Transform": {
-      const encoded = inspect(value, describe(node.inner), () => node.encode(value))
+    case "Transform":
+    case "Filter": {
+      const encoded = inspect(
+        value,
+        describe(node.inner),
+        () => (node._tag === "Transform" ? node.encode(value) : refine(node, value)),
+      )
       if (Result.isFailure(encoded)) return fail(encoded.failure)
       if (Result.isFailure(encoded.success)) return invalid(encoded.success.failure, value)
       return printGrammar(node.inner, encoded.success.success, env, state)

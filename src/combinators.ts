@@ -227,10 +227,8 @@ export function filter<A>(
   name: string,
 ): <I extends A, D extends Domain>(inner: Grammar<I, D>) => Grammar<I, D>
 export function filter<A>(predicate: (value: A) => boolean, name: string) {
-  return <I extends A, D extends Domain>(inner: Grammar<I, D>): Grammar<I, D> => {
-    const check = (value: I) => (predicate(value) ? Result.succeed(value) : Result.fail(name))
-    return transformNode(inner, { decode: check, encode: check })
-  }
+  return <I extends A, D extends Domain>(inner: Grammar<I, D>): Grammar<I, D> =>
+    make({ _tag: "Filter", inner, predicate, name })
 }
 
 export const skip = <A>(printAs: A) => <D extends Domain>(inner: Grammar<A, D>): Grammar<void, D> =>
