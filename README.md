@@ -65,15 +65,15 @@ G.print(endpoint, { host: "a:b", port: 1 })
 The `gen` body runs once when the grammar is built, not once per input. Each
 `yield*` records a step. Steps that produce a value (like `G.integer`) return a
 `Ref`, a placeholder for the value that will exist at parse or print time.
-Syntax-only steps (like `G.literal`) return nothing.
+Syntax-only steps (like `G.literal`) expose `void`.
 
 The object you return describes the shape of the result. Parsing fills it in
 from the input. Printing works backwards: it matches the value against the shape
 to find what each step should print.
 
-Because a `Ref` has no value while the grammar is built, you cannot branch on it
-with `if` or read its fields directly. Doing so throws. Use `G.match` to branch
-and `G.get` to read a field.
+A `Ref` is not a runtime value. Reading its fields or coercing it throws. `if
+(ref)` tests the placeholder's truthiness, not the parsed value. Use `G.match`
+to branch and `G.get` to read a field.
 
 ## Values that depend on earlier values
 
@@ -110,7 +110,7 @@ and `match` accept refs.
 `float64`, LEB128 `varuint`, zigzag `varint`, bit fields with `bits`, raw
 `bytes`, and `ascii` and `utf8` decoding. 64-bit integers are bigints.
 
-Combinators from `effect-grammar` work on both text and bytes:
+Structural combinators from `effect-grammar` work on both text and bytes:
 
 ```ts
 import * as G from "effect-grammar"
@@ -122,12 +122,27 @@ const strings = Binary.lengthPrefixed(Binary.uint8).pipe(
   G.countPrefixed(Binary.uint8),
 )
 
-Binary.print(strings, ["hi", "yo"])
-// Success: <02 02 68 69 02 79 6f>
+Binary.print(strings, ["€", "yo"])
+// Success: <02 03 e2 82 ac 02 79 6f>
 ```
 
 Types keep text and bytes apart. A grammar mixing both cannot be passed to
 `G.parse` or `Binary.parse`.
+
+The first byte counts strings. Each following prefix counts encoded bytes, so
+`"€"` has length 3. `Binary.bytes(size)` checks a supplied size;
+`Binary.lengthPrefixed` derives it when printing.
+
+| Operation                                              | Text                       | Bytes                           |
+| ------------------------------------------------------ | -------------------------- | ------------------------------- |
+| Products, generators, choices, repetitions, transforms | Shared `G` combinators     | Shared `G` combinators          |
+| Fixed syntax                                           | `G.literal("x")`           | `Binary.literal(0x78)`          |
+| Fixed-length payload                                   | `G.take(size)`             | `Binary.bytes(size)`            |
+| Length-prefixed payload                                | `G.lengthPrefixed(length)` | `Binary.lengthPrefixed(length)` |
+| Runners                                                | `G.parse`, `G.print`       | `Binary.parse`, `Binary.print`  |
+
+String delimiters are text syntax. Use a byte grammar for a binary delimiter,
+such as `G.suffix(Binary.literal(0))`. `G.empty` is neutral in either domain.
 
 ## Printing is checked
 
@@ -169,8 +184,8 @@ Testing.assertParsePrintCanonical(G.integer, "007")
 
 ## Diagnostics
 
-`G.diagnose` inspects a grammar's structure without running your callbacks. It
-returns a list of issues:
+`G.diagnose` inspects structure without running transform or predicate
+callbacks. It can resolve lazy suspension thunks. It returns a list of issues:
 
 ```ts
 G.diagnose(G.regex(/a*/, "as").pipe(G.many()))
@@ -194,8 +209,9 @@ prints.
 
 ## Further reading
 
-- [Migration guide](docs/migration.md) for changes after 0.5.0
 - [Architecture](docs/architecture.md) for contributors
+- [Contributing](docs/contributing.md) for checks, benchmarks, and test
+  ownership
 - [examples/](examples/) for complete grammars: JSON, DNS queries, HTTP byte
   ranges, connection strings, and more
 

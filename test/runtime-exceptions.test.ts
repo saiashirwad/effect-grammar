@@ -215,6 +215,64 @@ describe("operational exceptions", () => {
       assert.match(parseFail(grammar, "x").message, /<unprintable value>/)
       assert.match(printFail(grammar, "x").message, /<unprintable value>/)
     }))
+
+  it.effect("contains callback failures in Result", () =>
+    Effect.sync(() => {
+      const total = G.regex(/x/, "x").pipe(
+        G.transform<string, string>({
+          decode: () => {
+            throw new Error("decode failed")
+          },
+          encode: () => {
+            throw new Error("encode failed")
+          },
+        }),
+      )
+      const fallible = G.regex(/x/, "x").pipe(
+        G.transformOrFail<string, string>({
+          decode: () => Result.fail("decode rejected"),
+          encode: () => Result.fail("encode rejected"),
+        }),
+      )
+
+      assert.deepEqual(parseFail(total, "x").expected, ["x: decode failed"])
+      assert.deepEqual(printFail(total, "x").issue, {
+        _tag: "InvalidValue",
+        expected: "x",
+        actual: "x",
+        detail: "encode failed",
+      })
+      assert.match(parseFail(fallible, "x").message, /decode rejected/)
+      assert.match(printFail(fallible, "x").message, /encode rejected/)
+    }))
+
+  it.effect("preview and object inspection errors survive hostile coercion", () =>
+    Effect.sync(() => {
+      const hostile = Object.create(null, {
+        toJSON: {
+          value: () => {
+            throw new Error("no json")
+          },
+        },
+        toString: {
+          value: () => {
+            throw new Error("no string")
+          },
+        },
+      })
+      assert.equal(
+        G.PrintError.format({ _tag: "TypeMismatch", expected: "x", actual: hostile }),
+        "expected x, got <unprintable value>",
+      )
+
+      const target = { value: 1 }
+      const proxy = new Proxy(target, {
+        ownKeys: () => {
+          throw hostile
+        },
+      })
+      assert.match(printFail(G.struct({ value: G.integer }), proxy).message, /<unprintable value>/)
+    }))
 })
 
 describe("binary operational diagnostics", () => {

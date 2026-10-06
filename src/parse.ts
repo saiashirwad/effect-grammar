@@ -1,28 +1,43 @@
 import { Result } from "effect"
 
-import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
+import {
+  type AnyGrammar,
+  caseFor,
+  type Domain,
+  type Grammar,
+  isCount,
+  type Node,
+  nodeOf,
+  resolve,
+  type Suspension,
+  type Value,
+} from "./core.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
 import { describe } from "./internal/describe.ts"
+import { assembleOutput, evaluate, type Frame, frame, Unbound } from "./internal/generator.ts"
 import { catchResult } from "./internal/runtime.ts"
-import { materialize } from "./pattern.ts"
+
+interface Diagnostics {
+  furthest: number
+  expected: Set<string>
+  consumingSuccesses: number
+}
 
 interface State {
   readonly domain: Domain
   readonly input: string
   pos: number
-  furthest: number
-  expected: Set<string>
-  progress: number
-  readonly activeAt: Map<Node, Set<number>>
+  readonly diagnostics: Diagnostics
+  readonly activeAt: Map<Suspension, Set<number>>
 }
 
 const failAt = (state: State, expected: string, position = state.pos): Result.Result<never, void> => {
-  if (position > state.furthest) {
-    state.furthest = position
-    state.expected = new Set([expected])
-  } else if (position === state.furthest) {
-    state.expected.add(expected)
+  const diagnostics = state.diagnostics
+  if (position > diagnostics.furthest) {
+    diagnostics.furthest = position
+    diagnostics.expected = new Set([expected])
+  } else if (position === diagnostics.furthest) {
+    diagnostics.expected.add(expected)
   }
   return Result.fail(undefined)
 }
@@ -41,7 +56,7 @@ const parseGrammar = (grammar: AnyGrammar, state: State, env: Frame | undefined)
       failAt(state, `${describe(grammar)}: ${exceptionMessage(error)}`)
     },
   )
-  if (Result.isSuccess(result) && state.pos > start) state.progress++
+  if (Result.isSuccess(result) && state.pos > start) state.diagnostics.consumingSuccesses++
   return result
 }
 
@@ -81,24 +96,41 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       state.pos += count
       return Result.succeed(value)
     }
-    case "Gen": {
+    case "Sequence": {
       const local = frame(node.scope, node.steps.length, env)
       for (const [slot, step] of node.steps.entries()) {
-        const result = parseGrammar(step, state, local)
+        const result = parseGrammar(step.grammar, state, local)
         if (Result.isFailure(result)) return result
         local.values[slot] = result.success
       }
-      const value = materialize(node.result.tree, local)
+      const value = assembleOutput(node.output, local)
       return value === Unbound ? failAt(state, "a bound generator result") : Result.succeed(value)
     }
-    case "Choice": {
+    case "Surrounded": {
+      const open = parseGrammar(node.open, state, env)
+      if (Result.isFailure(open)) return open
+      const inner = parseGrammar(node.inner, state, env)
+      if (Result.isFailure(inner)) return inner
+      const close = parseGrammar(node.close, state, env)
+      return Result.isFailure(close) ? close : inner
+    }
+    case "Choice":
+    case "Dispatch": {
       const start = state.pos
-      for (const option of node.options) {
+      const options = node._tag === "Choice" ? node.options : node.cases.map(({ grammar }) => grammar)
+      for (const option of options) {
         const result = parseGrammar(option, state, env)
         if (Result.isSuccess(result)) return result
         state.pos = start
       }
       return Result.fail(undefined)
+    }
+    case "Optional": {
+      const start = state.pos
+      const result = parseGrammar(node.inner, state, env)
+      if (Result.isSuccess(result)) return result
+      state.pos = start
+      return Result.void
     }
     case "Match": {
       const key = evaluate(node.scrutinee, env)
@@ -150,12 +182,13 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
     }
     case "Label": {
       const start = state.pos
-      const { furthest, progress } = state
-      const siblings = furthest === start ? [...state.expected] : []
+      const diagnostics = state.diagnostics
+      const { furthest, consumingSuccesses } = diagnostics
+      const siblings = furthest === start ? [...diagnostics.expected] : []
       const result = parseGrammar(node.inner, state, env)
-      if (Result.isFailure(result) && state.progress === progress) {
-        if (state.furthest === start) state.expected = new Set([...siblings, node.name])
-        else if (state.furthest > furthest) state.expected = new Set([node.name])
+      if (Result.isFailure(result) && diagnostics.consumingSuccesses === consumingSuccesses) {
+        if (diagnostics.furthest === start) diagnostics.expected = new Set([...siblings, node.name])
+        else if (diagnostics.furthest > furthest) diagnostics.expected = new Set([node.name])
       }
       return result
     }
@@ -191,9 +224,7 @@ export const parseWithEnv = (
     domain,
     input: text,
     pos: 0,
-    furthest: 0,
-    expected: new Set(),
-    progress: 0,
+    diagnostics: { furthest: 0, expected: new Set(), consumingSuccesses: 0 },
     activeAt: new Map(),
   }
   const result = parseGrammar(grammar, state, env)
@@ -201,14 +232,15 @@ export const parseWithEnv = (
     if (state.pos === text.length) return Result.succeed(result.success)
     failAt(state, "end of input")
   }
-  const before = state.input.slice(0, state.furthest)
-  const code = state.input.codePointAt(state.furthest)
+  const { furthest, expected } = state.diagnostics
+  const before = state.input.slice(0, furthest)
+  const code = state.input.codePointAt(furthest)
   return Result.fail(
     new ParseError({
-      pos: state.furthest,
+      pos: furthest,
       line: domain === "bytes" ? undefined : before.split("\n").length,
       column: domain === "bytes" ? undefined : before.length - before.lastIndexOf("\n"),
-      expected: [...state.expected],
+      expected: [...expected],
       found: code === undefined ? undefined : String.fromCodePoint(code),
     }),
   )

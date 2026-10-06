@@ -1,18 +1,27 @@
 import { Equal, Predicate, Result } from "effect"
 
-import { type AnyGrammar, type Domain, type Grammar, isCount, type Node, nodeOf, resolve, type Value } from "./core.ts"
-import { caseFor, evaluate, type Frame, frame, Unbound } from "./env.ts"
+import {
+  type AnyGrammar,
+  caseFor,
+  type Domain,
+  type Grammar,
+  isCount,
+  nodeOf,
+  resolve,
+  type Suspension,
+  type Value,
+} from "./core.ts"
 import { describeRoundTrip, exceptionMessage, preview, PrintError, type PrintIssue } from "./errors.ts"
-import { nonByte, toBytes } from "./internal/bytes.ts"
+import { fromByteString, nonByte } from "./internal/bytes.ts"
 import { describe, describeStep } from "./internal/describe.ts"
+import { bindOutput, evaluate, type Frame, frame, Unbound } from "./internal/generator.ts"
 import { atPath, catchResult, inspect } from "./internal/runtime.ts"
-import { isSyntaxOnly } from "./internal/syntax.ts"
+import { cachedSyntaxVerdict } from "./internal/syntax.ts"
 import { parseWithEnv } from "./parse.ts"
-import { unifyPattern } from "./pattern.ts"
 
 interface State {
   readonly domain: Domain
-  readonly activeFor: Map<Node, Set<Value>>
+  readonly activeFor: Map<Suspension, Set<Value>>
 }
 
 type Printed = Result.Result<string, PrintIssue>
@@ -32,7 +41,7 @@ const roundTripIssue = (
   if (domain === "bytes" && nonByte.test(printed)) {
     return { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value }
   }
-  const output = domain === "bytes" ? toBytes(printed) : printed
+  const output = domain === "bytes" ? fromByteString(printed) : printed
   const back = parseWithEnv(grammar, printed, env, domain)
   if (Result.isFailure(back)) return { _tag: "RoundTrip", value, printed: output, error: back.failure.message }
   const equal = inspect(value, "round-trip equality", () => Equal.equals(back.success, value))
@@ -96,56 +105,63 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
         ? Result.succeed(value)
         : invalid(
           `${count.success} ${state.domain === "bytes" ? "byte" : "character"}${count.success === 1 ? "" : "s"}`,
-          state.domain === "bytes" ? toBytes(value) : value,
+          state.domain === "bytes" ? fromByteString(value) : value,
         )
     }
-    case "Gen": {
+    case "Sequence": {
       const local = frame(node.scope, node.steps.length, env)
-      const unified = unifyPattern(node.result.tree, value, local)
-      if (Result.isFailure(unified)) return Result.fail(unified.failure)
+      const boundOutput = bindOutput(node.output, value, local)
+      if (Result.isFailure(boundOutput)) return Result.fail(boundOutput.failure)
 
       let text = ""
       for (const [slot, step] of node.steps.entries()) {
         const bound = local.values[slot]
-        const result = printGrammar(step, bound === Unbound ? undefined : bound, local, state)
+        const result = printGrammar(step.grammar, bound === Unbound ? undefined : bound, local, state)
         if (Result.isFailure(result)) {
-          // Error classification must not resolve suspensions that execution never reached.
-          if (bound === Unbound && !isSyntaxOnly(step, (suspension) => suspension.resolved)) {
+          if (bound === Unbound && cachedSyntaxVerdict(step.grammar) !== "yes") {
             return invalid(
-              describeStep(step, slot),
+              describeStep(step.grammar, slot),
               undefined,
               "parsed but not returned, so there is no value to print it from; return it, or discard it with skip",
             )
           }
-          const path = node.result.bindings.get(slot) ?? []
+          const path = step.path ?? []
           return path.reduceRight<Printed>((inner, part) => atPath(part, inner), result)
         }
         text += result.success
       }
       return Result.succeed(text)
     }
-    case "Choice": {
-      const by = node.by
-      if (by !== undefined) {
-        if (!Predicate.isObject(value)) {
-          return fail({ _tag: "TypeMismatch", expected: `an object with a ${by.tag} field`, actual: value })
-        }
-        const tag = atPath(
-          by.tag,
-          inspect(value, "a readable field", () => (Object.hasOwn(value, by.tag) ? value[by.tag] : Unbound)),
-        )
-        if (Result.isFailure(tag)) return fail(tag.failure)
-        if (tag.success === Unbound) {
-          return fail({ _tag: "TypeMismatch", expected: `an object with a ${by.tag} field`, actual: value })
-        }
-        const key = tag.success
-        const index = by.keys.findIndex((candidate) => Object.is(candidate, key))
-        if (index === -1) {
-          const keys = by.keys.map(preview).join(", ")
-          return invalid(`${by.tag} to be one of ${keys}`, key)
-        }
-        return printGrammar(node.options[index]!, value, env, state)
+    case "Optional":
+      return value === undefined ? Result.succeed("") : printGrammar(node.inner, value, env, state)
+    case "Surrounded": {
+      const open = printGrammar(node.open, undefined, env, state)
+      if (Result.isFailure(open)) return open
+      const inner = printGrammar(node.inner, value, env, state)
+      if (Result.isFailure(inner)) return inner
+      const close = printGrammar(node.close, undefined, env, state)
+      return Result.isFailure(close) ? close : Result.succeed(open.success + inner.success + close.success)
+    }
+    case "Dispatch": {
+      if (!Predicate.isObject(value)) {
+        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
       }
+      const tag = atPath(
+        node.tag,
+        inspect(value, "a readable field", () => (Object.hasOwn(value, node.tag) ? value[node.tag] : Unbound)),
+      )
+      if (Result.isFailure(tag)) return fail(tag.failure)
+      if (tag.success === Unbound) {
+        return fail({ _tag: "TypeMismatch", expected: `an object with a ${node.tag} field`, actual: value })
+      }
+      const branch = caseFor(node.cases, tag.success)
+      if (branch === undefined) {
+        const keys = node.cases.map(({ key }) => preview(key)).join(", ")
+        return invalid(`${node.tag} to be one of ${keys}`, tag.success)
+      }
+      return printGrammar(branch.grammar, value, env, state)
+    }
+    case "Choice": {
       const issues: Array<PrintIssue> = []
       for (const option of node.options) {
         const result = printGrammar(option, value, env, state)

@@ -60,6 +60,6 @@
       }
     ]
   },
-  "include": ["src", "examples", "test"],
+  "include": ["src", "examples", "test", "benchmarks", "tools/verify-readability.ts"],
   "$schema": "./node_modules/@effect/tsgo/schema.json"
 }

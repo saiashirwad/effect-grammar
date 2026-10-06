@@ -1,19 +1,14 @@
-import { Result } from "effect"
+import { type AnyGrammar, type Node, nodeOf, type Suspension } from "../core.ts"
 
-import { type AnyGrammar, type Node, nodeOf } from "../core.ts"
+type TargetOf = (node: Suspension) => AnyGrammar | undefined
 
-/** The encode of optional's present branch. Its decode is the identity, so its output is its inner's. */
-export const presentOnly = <A>(value: A | undefined): Result.Result<A, string> =>
-  value === undefined ? Result.fail("a present value") : Result.succeed(value)
+export type SyntaxVerdict = "yes" | "no" | "unknown"
 
-type TargetOf = (node: Extract<Node, { readonly _tag: "Suspend" }>) => AnyGrammar | undefined
-
-/** "yes": provably syntax-only. "no": provably produces a value. "unknown": depends on an unavailable suspension or a cycle. */
-export type Syntax = "yes" | "no" | "unknown"
-
-// Every child must be syntax-only. Stops at the first proof of a value, as `every` did.
-const all = <T>(children: ReadonlyArray<T>, verdictOf: (child: T) => Syntax): Syntax => {
-  let verdict: Syntax = "yes"
+const combineSyntaxVerdicts = <T>(
+  children: ReadonlyArray<T>,
+  verdictOf: (child: T) => SyntaxVerdict,
+): SyntaxVerdict => {
+  let verdict: SyntaxVerdict = "yes"
   for (const child of children) {
     const each = verdictOf(child)
     if (each === "no") return "no"
@@ -22,9 +17,7 @@ const all = <T>(children: ReadonlyArray<T>, verdictOf: (child: T) => Syntax): Sy
   return verdict
 }
 
-// Only prove syntax/discard output. A cycle proves neither way, and an opaque value
-// producer needs an explicit skip, even when its printer happens to accept undefined.
-const syntaxOf = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): Syntax => {
+const proveSyntaxOnly = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): SyntaxVerdict => {
   const node = nodeOf(grammar)
   switch (node._tag) {
     case "Literal":
@@ -33,35 +26,38 @@ const syntaxOf = (grammar: AnyGrammar, seen: Set<Node>, targetOf: TargetOf): Syn
     case "Regex":
     case "Take":
     case "Repeat":
+    case "Dispatch":
       return "no"
-    case "Gen":
+    case "Sequence":
       if (
-        !(node.result.tree._tag === "Const" && node.result.tree.value === undefined)
-        && !(node.result.tree._tag === "Ref" && node.result.tree.scope === node.scope)
+        !(node.output._tag === "Const" && node.output.value === undefined)
+        && node.output._tag !== "Slot"
       ) return "no"
-      return all(node.steps, (step) => syntaxOf(step, seen, targetOf))
+      return combineSyntaxVerdicts(node.steps, (step) => proveSyntaxOnly(step.grammar, seen, targetOf))
     case "Choice":
-      // A dispatch prints from a tagged object, so it always needs a value.
-      if (node.by !== undefined) return "no"
-      return all(node.options, (option) => syntaxOf(option, seen, targetOf))
+      return combineSyntaxVerdicts(node.options, (option) => proveSyntaxOnly(option, seen, targetOf))
     case "Match":
-      return all(node.cases, ({ grammar }) => syntaxOf(grammar, seen, targetOf))
+      return combineSyntaxVerdicts(node.cases, ({ grammar }) => proveSyntaxOnly(grammar, seen, targetOf))
     case "Transform":
-      return node.encode === presentOnly ? syntaxOf(node.inner, seen, targetOf) : "no"
+      return "no"
+    case "Optional":
+    case "Surrounded":
     case "Label":
-      return syntaxOf(node.inner, seen, targetOf)
+      return proveSyntaxOnly(node.inner, seen, targetOf)
     case "Suspend": {
       if (seen.has(node)) return "unknown"
       const target = targetOf(node)
       if (target === undefined) return "unknown"
       seen.add(node)
-      const verdict = syntaxOf(target, seen, targetOf)
+      const verdict = proveSyntaxOnly(target, seen, targetOf)
       seen.delete(node)
       return verdict
     }
   }
 }
 
-export const syntax = (grammar: AnyGrammar, targetOf: TargetOf): Syntax => syntaxOf(grammar, new Set(), targetOf)
+export const syntaxVerdict = (grammar: AnyGrammar, targetOf: TargetOf): SyntaxVerdict =>
+  proveSyntaxOnly(grammar, new Set(), targetOf)
 
-export const isSyntaxOnly = (grammar: AnyGrammar, targetOf: TargetOf): boolean => syntax(grammar, targetOf) === "yes"
+export const cachedSyntaxVerdict = (grammar: AnyGrammar): SyntaxVerdict =>
+  syntaxVerdict(grammar, (suspension) => suspension.resolved)

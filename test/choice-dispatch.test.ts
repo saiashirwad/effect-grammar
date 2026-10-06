@@ -272,3 +272,37 @@ describe("taggedChoice dispatches on its tag", () => {
       assert.match(malformed.failure.message, /value field/)
     }))
 })
+
+describe("match key identity", () => {
+  it.effect("keeps mixed match keys distinct", () =>
+    Effect.sync(() => {
+      const selector = G.choice([
+        G.literal("n:").pipe(G.as(1)),
+        G.literal("s:").pipe(G.as("1")),
+      ])
+      const grammar = G.gen(function*() {
+        const kind = yield* selector
+        const value = yield* G.match(
+          kind,
+          [
+            [1, G.literal("one").pipe(G.as(10))],
+            ["1", G.literal("string-one").pipe(G.as(20))],
+          ] as const,
+        )
+        return { kind, value }
+      })
+
+      assert.deepEqual(parseOk(grammar, "n:one"), { kind: 1, value: 10 })
+      assert.deepEqual(parseOk(grammar, "s:string-one"), { kind: "1", value: 20 })
+      assert.equal(printOk(grammar, { kind: 1, value: 10 }), "n:one")
+      assert.equal(printOk(grammar, { kind: "1", value: 20 }), "s:string-one")
+    }))
+})
+
+describe("taggedChoice tag validation", () => {
+  it.effect("rejects value as the taggedChoice tag", () =>
+    Effect.sync(() => {
+      // @ts-expect-error "value" is reserved for the branch payload
+      assert.throws(() => G.taggedChoice("value", [["number", G.integer]] as const), /reserved/)
+    }))
+})

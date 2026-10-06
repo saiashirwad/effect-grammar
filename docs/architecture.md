@@ -2,30 +2,58 @@
 
 The library interprets one grammar graph for parsing, printing, diagnostics, and
 notation. This document maps internal ownership and invariants for contributors.
-Public usage and compatibility changes belong in the
-[migration guide](migration.md).
+Public usage belongs in the [README](../README.md).
 
 ## Ownership
 
-| Module                                     | Responsibility                                                                                            |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `src/core.ts`                              | Grammar and domain types, node union, scope identity, grammar construction, cached suspension resolution  |
-| `src/ref.ts`                               | Opaque ref identity, private expression metadata, construction scope checks, `get`                        |
-| `src/env.ts`                               | Execution frames, unbound slots, expression evaluation, case lookup                                       |
-| `src/pattern.ts`                           | Return-pattern conversion and validation, slot-to-path bindings, parse materialization, print unification |
-| `src/combinators.ts`                       | Primitive graph construction and structural lowering of products and syntax wrappers                      |
-| `src/derived.ts`                           | Helpers composed from primitives, including `taggedChoice`                                                |
-| `src/parse.ts`                             | Input cursor, backtracking, parse failures, progress and recursion guards                                 |
-| `src/print.ts`                             | Local print constraints, branch policy, recursion guard, final round-trip check                           |
-| `src/analysis.ts`                          | Scope-aware structural graph walk and structured diagnostic issues                                        |
-| `src/internal/syntax.ts`                   | Shared structural proof that an omitted step is syntax-only                                               |
-| `src/internal/describe.ts`                 | Shallow grammar names for errors and diagnostics                                                          |
-| `src/errors.ts`, `src/internal/runtime.ts` | Error data and formatting, exception-to-Result boundaries, print paths                                    |
-| `src/internal/bytes.ts`, `src/binary.ts`   | Private byte-string conversion, byte terminals, public byte runners and codec                             |
-| `src/internal/prefixed.ts`                 | Shared text/byte length-prefix composition                                                                |
-| `src/internal/schema.ts`, `src/schema.ts`  | Shared Schema adapter and its text specialization                                                         |
-| `src/testing.ts`                           | Shared law implementation specialized for text and bytes                                                  |
-| `src/index.ts`, `src/text.ts`              | Public root exports and the Text facade                                                                   |
+| Module                                     | Responsibility                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/core.ts`                              | Grammar and domain types, node union, case lookup, cached suspension resolution                                                      |
+| `src/internal/generator.ts`                | Symbolic refs, construction scopes, sequence compilation, return layouts, frames, dependency evaluation, output assembly and binding |
+| `src/combinators.ts`                       | Public constructors, product lowering, explicit optional, dispatch, and delimiter nodes                                              |
+| `src/derived.ts`                           | Helpers composed from constructors, including `taggedChoice`                                                                         |
+| `src/parse.ts`                             | Input cursor, backtracking, diagnostic evidence, progress and recursion guards                                                       |
+| `src/print.ts`                             | Local print constraints, branch policy, recursion guard, final round-trip check                                                      |
+| `src/analysis.ts`                          | Scope-aware structural graph walk and diagnostic issues                                                                              |
+| `src/internal/syntax.ts`                   | Structural proof that an omitted step is syntax-only                                                                                 |
+| `src/internal/describe.ts`                 | Shallow grammar names for errors and diagnostics                                                                                     |
+| `src/errors.ts`, `src/internal/runtime.ts` | Error data, formatting, exception boundaries, and print paths                                                                        |
+| `src/internal/bytes.ts`, `src/binary.ts`   | Byte-string conversion, byte terminals, byte runners, and codec                                                                      |
+| `src/internal/prefixed.ts`                 | Shared text and byte length-prefix composition                                                                                       |
+| `src/internal/schema.ts`, `src/schema.ts`  | Shared Schema adapter and its text specialization                                                                                    |
+| `src/testing.ts`                           | Law implementations specialized for text and bytes                                                                                   |
+| `src/index.ts`, `src/text.ts`              | Public root exports and the Text facade                                                                                              |
+
+`gen` is a construction API, not a runtime node. It compiles to `Sequence`.
+Products use the same reversible sequence representation. Optional values,
+tagged dispatch, and delimiters have direct nodes because lowering them would
+hide their execution rules.
+
+## One generator in both directions
+
+Consider the netstring grammar from the README. Its four yields compile to four
+steps:
+
+| Slot | Grammar        | Returned path |
+| ---- | -------------- | ------------- |
+| 0    | `integer`      | `["length"]`  |
+| 1    | `literal(":")` | Omitted       |
+| 2    | `take(length)` | `["payload"]` |
+| 3    | `literal(",")` | Omitted       |
+
+The `take` node holds a dependency expression for slot 0. The return layout is
+an object with `length` reading slot 0 and `payload` reading slot 2. Expressions
+read earlier values; the layout describes the result. These are different jobs.
+
+Parsing `5:hello,` fills the local frame in step order. `take` evaluates its
+count from slot 0, then stores `"hello"` in slot 2. `assembleOutput` constructs
+`{ length: 5, payload: "hello" }` from the layout and those local slots.
+
+Printing first calls `bindOutput`. It checks the supplied object's fields and
+fills slots 0 and 2 before any step prints. The interpreter then emits the
+integer, colon, payload, and comma. Omitted slots remain `Unbound` and receive
+`undefined` only when their steps print. `take` checks the bound payload against
+the bound length. Checked printing finally parses the complete output again.
 
 ## Construction, execution, and per-value checks
 
@@ -37,10 +65,11 @@ unresolved at construction, or a cycle, is unknown and left to `diagnose` and
 printing. Construction does not prove that a grammar parses or prints every
 value.
 
-Execution interprets the graph. Parsing fills a frame in step order, then
-materializes the return pattern. Printing unifies the supplied value with the
-return pattern, then prints each step from its bound slot. Unreturned slots
-receive `undefined`. Each sequence stops at the first failure.
+Execution interprets the graph. Parsing assembles a result after its steps
+succeed. Printing binds the whole return layout before executing steps. Binding
+reads fields depth-first in return-layout order; execution follows yield order.
+Both stop at the first failure. A failed binding can partially fill its fresh
+frame, which the caller abandons.
 
 Runtime boundaries convert callback and value-inspection exceptions into
 `ParseError` or `PrintError` failures. They preserve normal backtracking and
@@ -63,26 +92,47 @@ Checks have different scopes:
 - Law helpers use unchecked printing to report value-preservation and
   canonicalization failures with test-specific context.
 
-## Expressions and return patterns
+## Expressions and return layouts
 
 An _expression_ reads a dependent input. `Expr` contains a whole-slot `Ref`, a
 property projection `Prop`, or a numeric `Const`. `get` constructs projections.
-`env.ts` evaluates them against the current frame and its ancestors. An absent
+`evaluate` reads them against the current frame and its ancestors. An absent
 binding is `Unbound`, distinct from a slot bound to `undefined`.
 
-A _return pattern_ describes the output shape and its inverse binding. Its tree
-contains whole refs, constants, objects, and arrays. It cannot contain property
-projections. Every returned ref belongs to the owning generator and appears
-once. `pattern.ts` computes one slot-to-path map at construction. Diagnostics
-and print errors consume that map instead of rebuilding ownership.
+A _return layout_ contains local slots, constants, objects, and arrays. Capture
+checks that every returned ref belongs to the owning generator. Compilation
+rejects repeated slots and stores each returned path on its sequence step. A
+path of `[]` means the whole result; `undefined` means omitted. Diagnostics and
+print errors read that step metadata. There is no persistent binding map.
+
+Output assembly reads only the sequence's own slots. It does not search ancestor
+frames. Dependency expressions still need ancestor lookup for nested generators.
+Property projections cannot appear in a return layout.
 
 This separation keeps dependency lookup independent from value reshaping.
 Transforms reshape ordinary values after a generator returns its whole refs.
-`between`, `prefix`, and `suffix` use ordinary `Gen` nodes with a whole-ref
-result. Their syntax steps explicitly print `undefined` through `Skip` nodes. No
-interpreter needs a separate `Wrap` case. `optional` and `dispatch` likewise
-lower to `Choice` nodes. A dispatch choice carries a tag selector, so printing
-reads the tag and prints only the selected branch.
+`between`, `prefix`, and `suffix` construct `Surrounded` nodes. These execute
+opening syntax, the inner grammar, and closing syntax in order using the
+incoming frame. They introduce no slots or scope. Delimiters print with
+`undefined`.
+
+`Optional` tries its inner grammar and rewinds the cursor on failure. It prints
+`undefined` as empty output. `Dispatch` keeps keys paired with grammars: parsing
+tries cases in order, while printing selects only the case matching the tag.
+Neither operation relies on transform callback identity or choice metadata.
+
+## State lifetimes
+
+Parsing keeps the cursor separate from `Diagnostics`. Backtracking rewinds
+`pos`, but retains the furthest failure, expected tokens, and
+`consumingSuccesses`. This counter records successful consuming grammar calls,
+not characters. Labels use it to distinguish a direct mismatch from deeper
+failure after a successful child.
+
+Suspension resolution caches success on the node. Diagnosis separately caches
+both success and failure for one call. `expanding` tracks the current recursive
+expansion; `expandedUnder` records completed visits for each ancestor-scope
+path. The parse and print recursion guards last only for active invocations.
 
 ## Domains and module dependencies
 
@@ -91,21 +141,23 @@ union, and neutral `never` contributes no domain. String syntax contributes
 `"text"`, even when empty. Domain restrictions apply at public runner, codec,
 and law-helper types. Runtime nodes do not carry a domain brand.
 
-Both interpreters use strings internally. Binary runners convert `Uint8Array` to
-raw byte strings and select byte diagnostics. These strings and the
+Both interpreters use strings internally. `toByteString` maps each byte to one
+code unit; `fromByteString` reverses that representation. These operations are
+not text decoding. Binary runners select byte diagnostics. These strings and the
 domain-polymorphic runner functions are private package details.
 
 Dependencies point from public facades and adapters toward interpreters and
-graph primitives. Derived helpers build primitives. Interpreters share frames,
-patterns, errors, and runtime utilities. Printing depends on parsing for
-round-trip checks. Parsing does not depend on printing. Structural analysis does
-not depend on either interpreter or execute their callbacks.
+graph constructors. Derived helpers build constructors. Interpreters share
+generator binding operations, errors, and runtime utilities. Printing depends on
+parsing for round-trip checks. Parsing does not depend on printing. Structural
+analysis does not depend on either interpreter or execute their callbacks.
 
-`core.ts` has a type-only dependency on `ReturnPattern`. `pattern.ts` uses core
-types and runtime primitives, so this link does not create a runtime cycle. The
-Schema adapter depends on supplied runners and notation. Core combinators do not
-import the adapter. Internal modules import concrete modules, not public export
-barrels. `text.ts` is the intentional facade that re-exports `index.ts`.
+`core.ts` has type-only dependencies on `ReturnLayout` and `SequenceStep`.
+`generator.ts` uses core runtime constructors, so those type links do not create
+a runtime cycle. The Schema adapter depends on supplied runners and notation.
+Core combinators do not import the adapter. Internal modules import concrete
+modules, not public export barrels. `text.ts` is the intentional facade that
+re-exports `index.ts`.
 
 `package.json` defines the supported import boundary. Internal modules ship for
 relative runtime imports and declarations, but have no public package subpaths.

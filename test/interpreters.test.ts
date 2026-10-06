@@ -8,13 +8,23 @@ import * as G from "../src/index.ts"
 import { assertPrintParse } from "../src/testing.ts"
 import { parseOk } from "./helpers.ts"
 
-interface Row<A = unknown> {
+interface Sample<A> {
   readonly grammar: G.Grammar<A>
   readonly text: string
   readonly value: A
 }
-// SAFETY: the table erases the value type; each row pairs a grammar with a value of its own type.
-const row = <A>(spec: Row<A>): Row => spec as Row
+
+interface Checks {
+  readonly parse: () => void
+  readonly roundTrip: () => void
+}
+
+const row = <A>({ grammar, text, value }: Sample<A>): Checks => ({
+  parse: () => assert.deepEqual(parseOk(grammar, text), value),
+  roundTrip: () => {
+    assertPrintParse(grammar, value)
+  },
+})
 
 const word = G.regex(/[a-z]+/, "word")
 
@@ -42,7 +52,7 @@ const recursive: G.Grammar<number> = G.suspend(() => G.integer, "rec")
 const table = {
   Literal: row({ grammar: G.literal("x"), text: "x", value: undefined }),
   Regex: row({ grammar: G.regex(/\d+/, "num"), text: "12", value: "12" }),
-  Gen: row({
+  Sequence: row({
     grammar: G.gen(function*() {
       const n = yield* G.integer
       const w = yield* word
@@ -55,6 +65,16 @@ const table = {
     grammar: G.choice([G.literal("a").pipe(G.as<number>(1)), G.literal("b").pipe(G.as<number>(2))]),
     text: "a",
     value: 1,
+  }),
+  Optional: row({ grammar: G.optional(G.integer), text: "42", value: 42 }),
+  Surrounded: row({ grammar: G.integer.pipe(G.between("[", "]")), text: "[42]", value: 42 }),
+  Dispatch: row({
+    grammar: G.dispatch("kind", [
+      ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
+      ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
+    ]),
+    text: "sab",
+    value: { kind: "s", value: "ab" },
   }),
   Repeat: row({
     grammar: G.regex(/[a-z]/, "ch").pipe(G.many()),
@@ -87,33 +107,14 @@ const table = {
     text: "2:ab",
     value: { length: 2, payload: "ab" },
   }),
-} satisfies Record<Node["_tag"], Row>
-
-// dispatch lowers to a Choice that prints the branch selected by the tag field.
-const dispatchRow = row({
-  grammar: G.dispatch(
-    "kind",
-    [
-      ["n", G.struct({ kind: G.literal("n").pipe(G.as("n" as const)), value: G.integer })],
-      ["s", G.struct({ kind: G.literal("s").pipe(G.as("s" as const)), value: word })],
-    ] as const,
-  ),
-  text: "sab",
-  value: { kind: "s", value: "ab" },
-})
+} satisfies Record<Node["_tag"], Checks>
 
 describe("interpreter table (parse / print / law per Node)", () => {
-  for (const [tag, entry] of Object.entries({ ...table, "Choice (dispatch)": dispatchRow })) {
+  for (const [tag, entry] of Object.entries(table)) {
     describe(tag, () => {
-      it.effect("parses the sample text", () =>
-        Effect.sync(() => {
-          assert.deepEqual(parseOk(entry.grammar, entry.text), entry.value)
-        }))
+      it.effect("parses the sample text", () => Effect.sync(entry.parse))
 
-      it.effect("obeys parse(print(value)) = value", () =>
-        Effect.sync(() => {
-          assertPrintParse(entry.grammar, entry.value)
-        }))
+      it.effect("obeys parse(print(value)) = value", () => Effect.sync(entry.roundTrip))
     })
   }
 })

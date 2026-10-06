@@ -6,7 +6,30 @@ import { Effect } from "effect"
 import * as G from "../src/index.ts"
 import { parseOk, printFail, printOk } from "./helpers.ts"
 
-describe("opaque refs and return patterns", () => {
+describe("opaque generator refs and return layouts", () => {
+  it.effect("rejects a foreign return ref before inspecting later fields", () =>
+    Effect.sync(() => {
+      let foreign: G.Ref<string> | undefined
+      G.gen(function*() {
+        const value = yield* G.regex(/a/)
+        foreign = value
+        return value
+      })
+      let reads = 0
+      assert.throws(() =>
+        G.gen(function*() {
+          yield* G.empty
+          return {
+            foreign,
+            get later(): number {
+              reads++
+              throw new Error("later getter")
+            },
+          }
+        }), /ref bound by another gen/)
+      assert.equal(reads, 0)
+    }))
+
   const header = G.struct({
     layout: G.struct({
       kind: G.literals("text", "bits").pipe(G.suffix("/")),

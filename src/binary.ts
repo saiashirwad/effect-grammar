@@ -3,7 +3,7 @@ import { Predicate, Result, Schema } from "effect"
 import { countExpr, filter, label, transform, transformNode, transformOrFail } from "./combinators.ts"
 import { type Grammar as CoreGrammar, isCount, make, type Ref, type Value } from "./core.ts"
 import { exceptionMessage, ParseError, PrintError } from "./errors.ts"
-import { hex, nonByte, toBytes, toText } from "./internal/bytes.ts"
+import { fromByteString, hex, nonByte, toByteString } from "./internal/bytes.ts"
 import { prefixedBy } from "./internal/prefixed.ts"
 import { catchResult } from "./internal/runtime.ts"
 import { codecWith } from "./internal/schema.ts"
@@ -44,7 +44,7 @@ const takeByteString = (count: Ref<number> | number): Grammar<string> =>
   make<string, "bytes">({ _tag: "Take", count: countExpr(count, "bytes") }).pipe(filter(isBinary, "a byte"))
 
 const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
-  inner.pipe(transform({ decode: toBytes, encode: toText }), filter(Predicate.isUint8Array, "bytes"))
+  inner.pipe(transform({ decode: fromByteString, encode: toByteString }), filter(Predicate.isUint8Array, "bytes"))
 
 export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => asBytes(takeByteString(count))
 
@@ -56,12 +56,12 @@ export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
     throw new RangeError(`literal: expected bytes, got ${values.join(", ")}`)
   }
   const name = values.map((value) => `0x${hex(Uint8Array.of(value))}`).join(" ")
-  return make<void, "bytes">({ _tag: "Literal", value: toText(Uint8Array.from(values)) }).pipe(label(name))
+  return make<void, "bytes">({ _tag: "Literal", value: toByteString(Uint8Array.from(values)) }).pipe(label(name))
 }
 
 export const ascii = (inner: Grammar<Uint8Array>): Grammar<string> =>
   inner.pipe(
-    transform<Uint8Array, string>({ decode: toText, encode: toBytes }),
+    transform<Uint8Array, string>({ decode: toByteString, encode: fromByteString }),
     filter((value: Value) => Predicate.isString(value) && /^[\0-\x7f]*$/.test(value), "ascii"),
   )
 
@@ -87,13 +87,13 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
     label(name),
     transform({
       decode: (binary) => {
-        const bytes = littleEndian ? toBytes(binary).reverse() : toBytes(binary)
+        const bytes = littleEndian ? fromByteString(binary).reverse() : fromByteString(binary)
         return bytes.reduce((value, byte) => (value << 8n) | BigInt(byte), 0n)
       },
       encode: (value) => {
         const bytes = Uint8Array.from({ length: size }, (_, index) =>
           Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))))
-        return toText(littleEndian ? bytes.reverse() : bytes)
+        return toByteString(littleEndian ? bytes.reverse() : bytes)
       },
     }),
   )
@@ -136,10 +136,9 @@ export const uint64le = uint64Of("uint64le", true)
 export const int64 = int64Of("int64")
 export const int64le = int64Of("int64le", true)
 
-const scratch = new DataView(new ArrayBuffer(8))
-
-const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> =>
-  takeByteString(size).pipe(
+const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> => {
+  const scratch = new DataView(new ArrayBuffer(size))
+  return takeByteString(size).pipe(
     label(name),
     transform({
       decode: (binary) => {
@@ -156,6 +155,7 @@ const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number>
     }),
     filter((value) => Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)), name),
   )
+}
 
 export const float32 = float(4, "float32")
 export const float64 = float(8, "float64")
@@ -258,7 +258,7 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
   Result.flatMap(
     catchResult(
-      () => Result.succeed(toText(input)),
+      () => Result.succeed(toByteString(input)),
       (error) =>
         new ParseError({
           pos: 0,
@@ -280,7 +280,7 @@ const toByteResult = (
       ? Result.fail(
         new PrintError({ issue: { _tag: "InvalidValue", expected: "only bytes to be printed", actual: value } }),
       )
-      : Result.succeed(toBytes(binary)))
+      : Result.succeed(fromByteString(binary)))
 
 export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
   toByteResult(value, printDomain(grammar, value, "bytes"))

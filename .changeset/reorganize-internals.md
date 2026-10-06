@@ -88,23 +88,22 @@ changes.
   every input or value succeeds.
 - `describe` gives a shallow name without resolving suspensions. `render` is
   removed. Schema codecs no longer set a `description` annotation.
-- Return-pattern ownership is centralized. `between`, `prefix`, and `suffix`
-  lower to `Gen` sequences with a whole-ref result. The `Wrap` node is removed.
-  Their diagnostic paths use `steps`. Supplied syntax retains its original print
-  failure instead of an omitted-value error.
-- `optional` and `dispatch` lower to `Choice` nodes. The `Optional` and
-  `Dispatch` nodes are removed. Diagnostic paths under `optional` use the
-  lowered choice, such as `["inner", "options", 0, "inner", ...]` instead of
-  `["inner", ...]`. Dispatch paths use `["options", i, ...]` instead of
-  `["cases", i, "grammar", ...]`. Printing a defined value that `optional`'s
-  inner grammar rejects reports "no choice branch accepts", listing both
-  branches. Dispatch print errors are unchanged.
+- Generator ownership is centralized in `src/internal/generator.ts`. Generators
+  compile to `Sequence` nodes with local return slots and output paths attached
+  to their steps. Foreign refs in return objects are rejected before later
+  getters run.
+- `between`, `prefix`, and `suffix` use direct `Surrounded` nodes without a
+  synthetic frame. Their diagnostic paths use `open`, `inner`, and `close`.
+  Supplied syntax retains its original print failure instead of an omitted-value
+  error.
+- `optional` and `dispatch` use explicit `Optional` and `Dispatch` nodes.
+  Optional diagnostic paths use `inner`; dispatch paths use `["cases", i,
+  "grammar", ...]`. A rejected present optional value reports the inner
+  printer's issue directly. Dispatch print errors are unchanged.
 - The printer rejects a suspended grammar re-entered with the same value at any
   active depth. A nonproductive recursive choice branch can fall through instead
   of overflowing the stack.
 
 See the repository's
-[migration guide](https://github.com/saiashirwad/effect-grammar/blob/main/docs/migration.md)
-for before/after examples and the
 [architecture guide](https://github.com/saiashirwad/effect-grammar/blob/main/docs/architecture.md)
 for module ownership and invariants.

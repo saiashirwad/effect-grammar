@@ -71,6 +71,23 @@ describe("regex", () => {
     Effect.sync(() => {
       assertRoundTrip(word, "roundtrip")
     }))
+
+  it.effect("validates regex printing with the parser matcher", () =>
+    Effect.sync(() => {
+      const grammar = Grammar.regex(/a/m, "a")
+
+      assert.equal(printOk(grammar, "a"), "a")
+      assert.match(printFail(grammar, "a\nb").message, /expected \/a\/, got "a\\nb"/)
+    }))
+
+  it.effect("does not mutate a caller-owned RegExp", () =>
+    Effect.sync(() => {
+      const expression = /a/g
+      expression.lastIndex = 1
+      const grammar = Grammar.regex(expression, "a")
+      assert.equal(parseOk(grammar, "a"), "a")
+      assert.equal(expression.lastIndex, 1)
+    }))
 })
 
 describe("gen", () => {
@@ -424,6 +441,19 @@ describe("take / repeat", () => {
       assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(0), G.many())).length, 1)
       assert.deepEqual(G.diagnose(G.integer.pipe(G.repeat(1), G.many())), [])
     }))
+
+  it.effect("handles huge exact counts without generated grammars", () =>
+    Effect.sync(() => {
+      const grammar = Grammar.gen(function*() {
+        const count = yield* Grammar.integer
+        yield* Grammar.literal(":")
+        const value = yield* Grammar.take(count)
+        return { count, value }
+      })
+
+      const error = parseFail(grammar, `${Number.MAX_SAFE_INTEGER}:`)
+      assert.deepEqual(error.expected, [`${Number.MAX_SAFE_INTEGER} more characters`])
+    }))
 })
 
 describe("wrap / prefix / suffix", () => {
@@ -506,6 +536,14 @@ describe("choice", () => {
 })
 
 describe("optional", () => {
+  it.effect("reports the selected present branch's rejection directly", () =>
+    Effect.sync(() => {
+      const grammar = G.optional(G.regex(/a/))
+      const error = printFail(grammar, "b")
+      assert.deepEqual(error.issue, { _tag: "InvalidValue", expected: "/a/", actual: "b", detail: undefined })
+      assert.equal(error.message, "expected /a/, got \"b\"")
+    }))
+
   const g = G.gen(function*() {
     const sign = yield* G.optional(G.literal("-").pipe(G.as(true)))
     const n = yield* G.integer
@@ -605,6 +643,14 @@ describe("many", () => {
   it.effect("round-trips", () =>
     Effect.sync(() => {
       assertRoundTrip(g, ["a", "b"])
+    }))
+
+  it.effect("rejects invalid repetition bounds at construction", () =>
+    Effect.sync(() => {
+      for (const n of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.throws(() => Grammar.literal("x").pipe(Grammar.many({ min: n })), RangeError)
+        assert.throws(() => Grammar.literal("x").pipe(Grammar.sepBy(",", { min: n })), RangeError)
+      }
     }))
 })
 
@@ -714,6 +760,19 @@ describe("transform / filter", () => {
       })
       assert.deepEqual(parseOk(g, "2:ab"), { n: 2, chars: ["a", "b"] })
       assert.equal(printOk(g, { n: 3, chars: ["x", "y", "z"] }), "3:xyz")
+    }))
+
+  it.effect("parses the old global failure symbol as a value", () =>
+    Effect.sync(() => {
+      const value = Symbol.for("effect-grammar/fail")
+      const grammar = Grammar.regex(/x/, "x").pipe(
+        Grammar.transform({
+          decode: () => value,
+          encode: () => "x",
+        }),
+      )
+
+      assert.equal(parseOk(grammar, "x"), value)
     }))
 })
 
@@ -874,6 +933,14 @@ describe("integer", () => {
       assert.equal(printOk(G.integer, 7), "7")
       assert.match(printFail(G.integer, 1.5).message, /integer/)
     }))
+
+  it.effect("normalizes negative zero", () =>
+    Effect.sync(() => {
+      const value = parseOk(Grammar.integer, "-0")
+
+      assert.equal(Object.is(value, -0), false)
+      assert.equal(printOk(Grammar.integer, value), "0")
+    }))
 })
 
 describe("parse", () => {
@@ -944,5 +1011,50 @@ describe("codec", () => {
       const r = Schema.encodeUnknownResult(Pair)({ name: "A", n: 1 })
       assert.ok(Result.isFailure(r))
       if (Result.isFailure(r)) assert.match(r.failure.message, /expected \/\[a-z\]\+\/, got "A"/)
+    }))
+})
+
+describe("take with a constant count", () => {
+  it.effect("reads and prints exactly that many characters", () =>
+    Effect.sync(() => {
+      const code = G.take(3)
+      assert.equal(parseOk(code, "abc"), "abc")
+      assert.deepEqual(parseFail(code, "ab").expected, ["3 more characters"])
+      assert.match(printFail(code, "abcd").message, /expected 3 characters/)
+      assert.throws(() => G.take(1.5), RangeError)
+      assert.equal(G.diagnose(G.take(0).pipe(G.many())).length, 1)
+    }))
+})
+
+describe("filter", () => {
+  it.effect("rejects values in both directions", () =>
+    Effect.sync(() => {
+      const small = G.integer.pipe(G.filter((n: number) => n <= 63, "small"))
+      assert.equal(parseOk(small, "42"), 42)
+      assert.deepEqual(parseFail(small, "64").expected, ["small"])
+      assert.match(printFail(small, 64).message, /expected small/)
+      assert.deepEqual(parseFail(G.integer.pipe(G.filter((n: number) => n > 0, "positive")), "0").expected, [
+        "positive",
+      ])
+    }))
+})
+
+describe("lengthPrefixed / countPrefixed", () => {
+  it.effect("derives the length from the payload when printing", () =>
+    Effect.sync(() => {
+      const netstring = G.lengthPrefixed(G.integer.pipe(G.suffix(":"))).pipe(G.suffix(","))
+      assert.equal(parseOk(netstring, "5:hello,"), "hello")
+      assert.equal(printOk(netstring, "hello world!"), "12:hello world!,")
+      assert.deepEqual(parseFail(netstring, "5:hi,").expected, ["5 more characters"])
+    }))
+
+  it.effect("derives the count from the items when printing", () =>
+    Effect.sync(() => {
+      const item = word.pipe(G.suffix(";"))
+      const words = item.pipe(G.countPrefixed(G.integer.pipe(G.suffix(":"))))
+      assert.deepEqual(parseOk(words, "2:ab;cd;"), ["ab", "cd"])
+      assert.equal(printOk(words, ["x", "y", "z"]), "3:x;y;z;")
+      assert.deepEqual(parseFail(words, "3:ab;cd;").expected, ["word"])
+      assert.deepEqual(parseOk(item.pipe(G.countPrefixed(G.integer)), "1a;"), ["a"])
     }))
 })

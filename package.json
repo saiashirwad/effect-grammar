@@ -49,7 +49,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "bench": "vitest bench --dir bench",
+    "bench": "vitest bench --dir benchmarks",
     "build": "pnpm clean && tsc -p tsconfig.build.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "check": "pnpm fmt:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",

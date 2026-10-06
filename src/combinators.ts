@@ -2,13 +2,11 @@ import { Predicate, Result } from "effect"
 
 import {
   type AnyGrammar,
-  type Denote,
   type Domain,
   type DomainOf,
   type Expr,
   type Grammar,
   isCount,
-  isGrammar,
   make,
   type MatchKey,
   nodeOf,
@@ -17,12 +15,9 @@ import {
   type Type,
 } from "./core.ts"
 import { preview } from "./errors.ts"
-import { describeStep } from "./internal/describe.ts"
-import { presentOnly, syntax } from "./internal/syntax.ts"
-import { type Pattern, returnPattern, toPattern } from "./pattern.ts"
-import { assertInScope, refFor, type Scope } from "./ref.ts"
+import { assertInScope, sequence } from "./internal/generator.ts"
 
-export { get } from "./ref.ts"
+export { gen, get } from "./internal/generator.ts"
 
 export const literal = (value: string): Grammar<void> => make({ _tag: "Literal", value })
 
@@ -55,46 +50,9 @@ export const countExpr = (count: Ref<number> | number, where: string): Expr => {
 export const take = (count: Ref<number> | number): Grammar<string> =>
   make({ _tag: "Take", count: countExpr(count, "take") })
 
-const makeGen = <A, D extends Domain>(scope: ScopeId, steps: ReadonlyArray<AnyGrammar>, tree: Pattern): Grammar<A, D> =>
-  make({
-    _tag: "Gen",
-    scope,
-    steps,
-    result: returnPattern(tree, scope, (slot) => describeStep(steps[slot]!, slot)),
-  })
-
-export const gen = <Y extends AnyGrammar, R>(run: () => Generator<Y, R, unknown>): Grammar<Denote<R>, DomainOf<Y>> => {
-  const iterator = run()
-  const steps: Array<AnyGrammar> = []
-  const scope: Scope = { id: { _tag: "ScopeId" }, open: true }
-
-  try {
-    let result = iterator.next()
-    while (!result.done) {
-      const grammar = result.value
-      if (!isGrammar(grammar)) throw new TypeError("gen: only a grammar can be yielded")
-      const slot = steps.push(grammar) - 1
-      result = iterator.next(refFor({ _tag: "Ref", scope: scope.id, slot }, scope))
-    }
-    const pattern = returnPattern(toPattern(result.value), scope.id, (slot) => describeStep(steps[slot]!, slot))
-    // Only a proof throws. Never resolve here: a recursive grammar's suspensions may refer to
-    // bindings not defined yet, so those are left to diagnose and print.
-    for (const [slot, step] of steps.entries()) {
-      if (!pattern.bindings.has(slot) && syntax(step, (suspension) => suspension.resolved) === "no") {
-        throw new Error(
-          `gen: ${describeStep(step, slot)} is parsed but not returned; return it, or discard it with skip`,
-        )
-      }
-    }
-    return make({ _tag: "Gen", scope: scope.id, steps, result: pattern })
-  } finally {
-    scope.open = false
-  }
-}
-
 export const seq = <const Parts extends ReadonlyArray<Grammar<void, Domain>>>(
   ...parts: Parts
-): Grammar<void, DomainOf<Parts[number]>> => makeGen({ _tag: "ScopeId" }, parts, { _tag: "Const", value: undefined })
+): Grammar<void, DomainOf<Parts[number]>> => sequence({ _tag: "ScopeId" }, parts, { _tag: "Const", value: undefined })
 
 type StructValue<Fields extends Readonly<Record<string, AnyGrammar>>> = {
   readonly [K in keyof Fields]: Type<Fields[K]>
@@ -105,10 +63,10 @@ export const struct = <const Fields extends Readonly<Record<string, AnyGrammar>>
 ): Grammar<StructValue<Fields>, DomainOf<Fields[keyof Fields]>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
   const entries = Object.entries(fields)
-  return makeGen(
+  return sequence(
     scope,
     entries.map(([, grammar]) => grammar),
-    { _tag: "Object", fields: entries.map(([key], slot) => [key, { _tag: "Ref", scope, slot }]) },
+    { _tag: "Object", fields: entries.map(([key], slot) => [key, { _tag: "Slot", slot }]) },
   )
 }
 
@@ -120,22 +78,16 @@ export const tuple = <const Elements extends ReadonlyArray<AnyGrammar>>(
   ...elements: Elements
 ): Grammar<TupleValue<Elements>, DomainOf<Elements[number]>> => {
   const scope: ScopeId = { _tag: "ScopeId" }
-  return makeGen(scope, elements, { _tag: "Array", items: elements.map((_, slot) => ({ _tag: "Ref", scope, slot })) })
+  return sequence(scope, elements, { _tag: "Array", items: elements.map((_, slot) => ({ _tag: "Slot", slot })) })
 }
 
 export const as = <const V>(value: V) => <D extends Domain>(inner: Grammar<void, D>): Grammar<V, D> =>
-  makeGen({ _tag: "ScopeId" }, [inner], { _tag: "Const", value })
+  sequence({ _tag: "ScopeId" }, [inner], { _tag: "Const", value })
 
 export const between =
   <Open extends Delimiter, Close extends Delimiter>(open: Open, close: Close) =>
-  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A, D | DelimiterDomain<Open> | DelimiterDomain<Close>> => {
-    const scope: ScopeId = { _tag: "ScopeId" }
-    return makeGen(scope, [skip<void>(undefined)(toGrammar(open)), inner, skip<void>(undefined)(toGrammar(close))], {
-      _tag: "Ref",
-      scope,
-      slot: 1,
-    })
-  }
+  <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A, D | DelimiterDomain<Open> | DelimiterDomain<Close>> =>
+    make({ _tag: "Surrounded", open: toGrammar(open), inner, close: toGrammar(close) })
 
 export const prefix = <Open extends Delimiter>(open: Open) => between(open, empty)
 
@@ -192,14 +144,7 @@ export const dispatch = <const Tag extends string, const E extends Entries>(
   tag: Tag,
   entries: E & TaggedEntries<Tag, E>,
 ): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> => {
-  const checked = cases(entries, "dispatch")
-  // The tag already selects the printed branch, so the round-trip search never applies.
-  return make({
-    _tag: "Choice",
-    options: checked.map((matchCase) => matchCase.grammar),
-    print: "first",
-    by: { tag, keys: checked.map((matchCase) => matchCase.key) },
-  })
+  return make({ _tag: "Dispatch", tag, cases: cases(entries, "dispatch") })
 }
 
 type CompleteEntries<K extends MatchKey, E extends Entries> = Exclude<K, E[number][0]> extends never ? E : never
@@ -210,16 +155,8 @@ export const match = <K extends MatchKey, const E extends ReadonlyArray<readonly
 ): Grammar<EntryOutput<E>, DomainOf<E[number][1]>> =>
   make({ _tag: "Match", scrutinee: assertInScope(scrutinee, "match"), cases: cases(entries, "match") })
 
-// The branches are disjoint (the first refuses undefined, the second accepts only undefined),
-// so a round-trip print check would be pure cost. The label never fails, so it only names it.
 export const optional = <A, D extends Domain>(inner: Grammar<A, D>): Grammar<A | undefined, D> =>
-  label("optional")(
-    make({
-      _tag: "Choice",
-      options: [transformNode(inner, { decode: Result.succeed, encode: presentOnly<A> }), as(undefined)(empty)],
-      print: "first",
-    }),
-  )
+  make({ _tag: "Optional", inner })
 
 export interface RepeatOptions {
   readonly min?: number

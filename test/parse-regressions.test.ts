@@ -87,4 +87,62 @@ describe("parser result regressions", () => {
       assert.equal(error.pos, 0)
       assert.deepEqual(error.expected, ["attempt 1", "attempt 2"])
     }))
+
+  it.effect("a failing choice option does not leave the cursor moved", () =>
+    Effect.sync(() => {
+      const g = G.gen(function*() {
+        const head = yield* G.choice([
+          G.literal("abc").pipe(G.as(1)),
+          G.literal("ab").pipe(G.as(2)),
+        ])
+        yield* G.literal("!")
+        return { head }
+      })
+      assert.deepEqual(parseOk(g, "ab!"), { head: 2 })
+    }))
+
+  it.effect("a transform guard that rejects rewinds so the next option can try", () =>
+    Effect.sync(() => {
+      const small = G.integer.pipe(
+        G.transform({
+          decode: (n) => n,
+          encode: (n) => n,
+        }),
+        G.filter((u: number) => Number.isSafeInteger(u) && u < 10, "small"),
+      )
+      const g = G.choice([small, G.regex(/\d+/, "digits")])
+      assert.equal(parseOk(g, "123"), "123")
+      assert.equal(parseOk(g, "3"), 3)
+    }))
+
+  it.effect("strict end-of-input reports alongside the deeper expectation", () =>
+    Effect.sync(() => {
+      const e = parseFail(G.integer.pipe(G.sepBy(",")), "1,2 ")
+      assert.equal(e.pos, 3)
+      assert.deepEqual(e.expected, ["\",\"", "end of input"])
+    }))
+
+  it.effect("gen does not force a suspend thunk at construction", () =>
+    Effect.sync(() => {
+      const later: G.Grammar<number> = G.suspend(() => target)
+      const g = G.gen(function*() {
+        const n = yield* later
+        return n
+      })
+      const target = G.integer
+      assert.equal(parseOk(g, "7"), 7)
+    }))
+
+  it.effect("rejects left recursion without overflowing the stack", () =>
+    Effect.sync(() => {
+      const recursive: G.Grammar<void> = G.suspend(() => recursive, "recursive")
+      assert.match(parseFail(recursive, "").message, /non-left-recursive/)
+    }))
+
+  it.effect("rejects an invalid suspend target", () =>
+    Effect.sync(() => {
+      // SAFETY: deliberately invalid return value exercises runtime validation.
+      const invalid = G.suspend(() => undefined as never, "invalid")
+      assert.match(parseFail(invalid, "").message, /thunk must return a grammar/)
+    }))
 })

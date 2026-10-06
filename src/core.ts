@@ -1,6 +1,6 @@
 import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
-import type { ReturnPattern } from "./pattern.ts"
+import type { ReturnLayout, SequenceStep } from "./internal/generator.ts"
 
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
@@ -92,22 +92,31 @@ export interface Case {
   readonly grammar: AnyGrammar
 }
 
+export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
+  cases.find((matchCase) => Object.is(matchCase.key, value))
+
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
   | { readonly _tag: "Regex"; readonly source: string; readonly flags: string }
   | { readonly _tag: "Take"; readonly count: Expr }
   | {
-    readonly _tag: "Gen"
+    readonly _tag: "Sequence"
     readonly scope: ScopeId
-    readonly steps: ReadonlyArray<AnyGrammar>
-    readonly result: ReturnPattern
+    readonly steps: ReadonlyArray<SequenceStep>
+    readonly output: ReturnLayout
   }
   | {
     readonly _tag: "Choice"
     readonly options: ReadonlyArray<AnyGrammar>
     readonly print: "first" | "roundTrip"
-    /** Set by `dispatch`: print the option whose key, aligned by index, equals the value's tag field. */
-    readonly by?: { readonly tag: string; readonly keys: ReadonlyArray<MatchKey> } | undefined
+  }
+  | { readonly _tag: "Optional"; readonly inner: AnyGrammar }
+  | { readonly _tag: "Dispatch"; readonly tag: string; readonly cases: ReadonlyArray<Case> }
+  | {
+    readonly _tag: "Surrounded"
+    readonly open: Grammar<void, Domain>
+    readonly inner: AnyGrammar
+    readonly close: Grammar<void, Domain>
   }
   | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
   | {
@@ -133,7 +142,9 @@ export type Node =
     resolving?: true | undefined
   }
 
-export const resolve = (node: Extract<Node, { _tag: "Suspend" }>): AnyGrammar => {
+export type Suspension = Extract<Node, { readonly _tag: "Suspend" }>
+
+export const resolve = (node: Suspension): AnyGrammar => {
   if (node.resolved !== undefined) return node.resolved
   const where = `suspend${node.name === undefined ? "" : ` ${JSON.stringify(node.name)}`}`
   if (node.resolving) throw new Error(`${where}: thunk resolved itself while it was being evaluated`)

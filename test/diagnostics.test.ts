@@ -443,17 +443,17 @@ describe("diagnose", () => {
       })
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
-      assert.deepEqual(issues[0]!.path, ["steps", 1, "cases", 0, "grammar", "steps", 1, "count"])
+      assert.deepEqual(issues[0]!.path, ["steps", 1, "cases", 0, "grammar", "inner", "count"])
     }))
 
-  it.effect("reports dispatch branches as choice options", () =>
+  it.effect("reports paired dispatch case paths", () =>
     Effect.sync(() => {
       const grammar = G.dispatch("kind", [
         ["a", G.struct({ kind: G.literal("a").pipe(G.as("a" as const)), items: G.literal("").pipe(G.many()) })],
       ])
       const issues = G.diagnose(grammar)
       assert.equal(issues.length, 1)
-      assert.deepEqual(issues[0]!.path, ["options", 0, "steps", 1, "inner"])
+      assert.deepEqual(issues[0]!.path, ["cases", 0, "grammar", "steps", 1, "inner"])
     }))
 })
 

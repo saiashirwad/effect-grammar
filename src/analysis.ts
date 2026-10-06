@@ -1,7 +1,7 @@
-import { type AnyGrammar, type Expr, type Node, nodeOf, resolve, type ScopeId } from "./core.ts"
+import { type AnyGrammar, type Expr, type Node, nodeOf, resolve, type ScopeId, type Suspension } from "./core.ts"
 import { exceptionMessage } from "./errors.ts"
 import { describe, describeStep } from "./internal/describe.ts"
-import { isSyntaxOnly } from "./internal/syntax.ts"
+import { syntaxVerdict } from "./internal/syntax.ts"
 
 export interface GrammarIssue {
   readonly _tag: "OutOfScopeRef" | "EmptyRepetition" | "OmittedValue" | "InvalidSuspend"
@@ -15,18 +15,24 @@ interface Edge {
   readonly grammar: AnyGrammar
 }
 
-// Suspensions have a separate resolution boundary so failed thunks remain diagnosable.
 const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyArray<Edge> => {
   switch (node._tag) {
     case "Literal":
     case "Regex":
     case "Take":
       return []
-    case "Gen":
-      return node.steps.map((grammar, index) => ({ path: ["steps", index], grammar }))
+    case "Sequence":
+      return node.steps.map(({ grammar }, index) => ({ path: ["steps", index], grammar }))
+    case "Surrounded":
+      return [
+        { path: ["open"], grammar: node.open },
+        { path: ["inner"], grammar: node.inner },
+        { path: ["close"], grammar: node.close },
+      ]
     case "Choice":
       return node.options.map((grammar, index) => ({ path: ["options", index], grammar }))
     case "Match":
+    case "Dispatch":
       return node.cases.map(({ grammar }, index) => ({ path: ["cases", index, "grammar"], grammar }))
     case "Repeat":
       return [
@@ -34,21 +40,19 @@ const children = (node: Exclude<Node, { readonly _tag: "Suspend" }>): ReadonlyAr
         { path: ["sep"], grammar: node.sep },
       ]
     case "Transform":
+    case "Optional":
     case "Skip":
     case "Label":
       return [{ path: ["inner"], grammar: node.inner }]
   }
 }
 
-type Suspension = Extract<Node, { readonly _tag: "Suspend" }>
 type Resolution =
   | { readonly _tag: "Resolved"; readonly grammar: AnyGrammar }
   | { readonly _tag: "Failed"; readonly message: string }
 type Resolutions = WeakMap<Suspension, Resolution>
 
-// Queries and the walk share failures as well as successes. The walk reports failures
-// at their graph paths, even if a query short-circuits before reaching that suspension.
-const inspect = (node: Suspension, resolutions: Resolutions): Resolution => {
+const resolveForDiagnosis = (node: Suspension, resolutions: Resolutions): Resolution => {
   const cached = resolutions.get(node)
   if (cached !== undefined) return cached
   let result: Resolution
@@ -83,9 +87,12 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
     case "Take":
       if (node.count._tag !== "Const") return "unknown"
       return node.count.value === 0 ? "yes" : "no"
-    case "Gen":
-      return allMatchEmpty(node.steps, seen, resolutions)
-    case "Choice": {
+    case "Sequence":
+      return allMatchEmpty(node.steps.map(({ grammar }) => grammar), seen, resolutions)
+    case "Surrounded":
+      return allMatchEmpty([node.open, node.inner, node.close], seen, resolutions)
+    case "Choice":
+    case "Dispatch": {
       let result: EmptyMatch = "no"
       for (const { grammar } of children(node)) {
         const match = matchesEmpty(grammar, seen, resolutions)
@@ -96,6 +103,8 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
     }
     case "Match":
       return "unknown"
+    case "Optional":
+      return "yes"
     case "Repeat": {
       if (node.min._tag !== "Const" || (node.max !== undefined && node.max._tag !== "Const")) return "unknown"
       if (node.max?.value === 0) return "yes"
@@ -113,7 +122,7 @@ const matchesEmpty = (grammar: AnyGrammar, seen: Set<Node>, resolutions: Resolut
       return matchesEmpty(node.inner, seen, resolutions)
     case "Suspend": {
       if (seen.has(node)) return "unknown"
-      const target = inspect(node, resolutions)
+      const target = resolveForDiagnosis(node, resolutions)
       if (target._tag === "Failed") return "unknown"
       seen.add(node)
       const empty = matchesEmpty(target.grammar, seen, resolutions)
@@ -133,8 +142,8 @@ const sameScopePath = (left: ScopePath, right: ScopePath): boolean =>
 
 interface Walk {
   readonly issues: Array<GrammarIssue>
-  readonly visiting: Set<Node>
-  readonly walkedUnder: WeakMap<Node, Array<ScopePath>>
+  readonly expanding: Set<Suspension>
+  readonly expandedUnder: WeakMap<Suspension, Array<ScopePath>>
   readonly resolutions: Resolutions
 }
 
@@ -166,40 +175,42 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
   }
 
   if (node._tag === "Suspend") {
-    if (state.visiting.has(node)) return
-    const paths = state.walkedUnder.get(node)
+    if (state.expanding.has(node)) return
+    const paths = state.expandedUnder.get(node)
     if (paths?.some((previous) => sameScopePath(previous, active))) return
-    const target = inspect(node, state.resolutions)
+    const target = resolveForDiagnosis(node, state.resolutions)
     if (target._tag === "Failed") {
       state.issues.push({ _tag: "InvalidSuspend", path, message: `invalid suspend: ${target.message}` })
     } else {
-      state.visiting.add(node)
+      state.expanding.add(node)
       try {
         walk(target.grammar, active, [...path, "resolved"], state)
       } finally {
-        state.visiting.delete(node)
+        state.expanding.delete(node)
       }
     }
-    if (paths === undefined) state.walkedUnder.set(node, [active])
+    if (paths === undefined) state.expandedUnder.set(node, [active])
     else paths.push(active)
     return
   }
 
   switch (node._tag) {
-    case "Gen":
+    case "Sequence":
       for (const [slot, step] of node.steps.entries()) {
-        const omitted = !node.result.bindings.has(slot)
+        const omitted = step.path === undefined
         if (
           omitted
-          && !isSyntaxOnly(step, (suspension) => {
-            const target = inspect(suspension, state.resolutions)
-            return target._tag === "Resolved" ? target.grammar : undefined
-          })
+          && syntaxVerdict(step.grammar, (suspension) => {
+              const target = resolveForDiagnosis(suspension, state.resolutions)
+              return target._tag === "Resolved" ? target.grammar : undefined
+            }) !== "yes"
         ) {
           state.issues.push({
             _tag: "OmittedValue",
             path: [...path, "steps", slot],
-            message: `gen: ${describeStep(step, slot)} is parsed but not returned; return it, or discard it with skip`,
+            message: `gen: ${
+              describeStep(step.grammar, slot)
+            } is parsed but not returned; return it, or discard it with skip`,
           })
         }
       }
@@ -218,7 +229,7 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
       checkRef(node.count, "count", "take")
       break
   }
-  const scopes = node._tag === "Gen" ? [...active, node.scope] : active
+  const scopes = node._tag === "Sequence" ? [...active, node.scope] : active
   for (const edge of children(node)) walk(edge.grammar, scopes, [...path, ...edge.path], state)
 }
 
@@ -233,7 +244,7 @@ const walk = (grammar: AnyGrammar, active: ScopePath, path: GrammarIssue["path"]
  * An empty issue list does not prove that parsing or printing succeeds for every value.
  */
 export const diagnose = (grammar: AnyGrammar): ReadonlyArray<GrammarIssue> => {
-  const state: Walk = { issues: [], visiting: new Set(), walkedUnder: new WeakMap(), resolutions: new WeakMap() }
+  const state: Walk = { issues: [], expanding: new Set(), expandedUnder: new WeakMap(), resolutions: new WeakMap() }
   walk(grammar, [], [], state)
   return state.issues
 }

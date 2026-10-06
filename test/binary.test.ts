@@ -53,6 +53,22 @@ describe("signed and 64-bit integers", () => {
 })
 
 describe("floats", () => {
+  it.effect("keeps alternating widths and byte orders independent", () =>
+    Effect.sync(() => {
+      const cases: ReadonlyArray<readonly [Binary.Grammar<number>, number, ReadonlyArray<number>]> = [
+        [Binary.float32, -1.5, [0xbf, 0xc0, 0, 0]],
+        [Binary.float64le, 0.1, [0x9a, 0x99, 0x99, 0x99, 0x99, 0x99, 0xb9, 0x3f]],
+        [Binary.float32le, -0, [0, 0, 0, 0x80]],
+        [Binary.float64, 1.5, [0x3f, 0xf8, 0, 0, 0, 0, 0, 0]],
+      ]
+      for (let pass = 0; pass < 3; pass++) {
+        for (const [grammar, value, bytes] of cases) {
+          assert.deepEqual(printOk(grammar, value), bytes)
+          assert.ok(Object.is(parseOk(grammar, ...bytes), value))
+        }
+      }
+    }))
+
   it.effect("round-trips IEEE 754 values and refuses to round a float32", () =>
     Effect.sync(() => {
       assert.deepEqual(printOk(Binary.float32, -1.5), [0xbf, 0xc0, 0, 0])
@@ -125,8 +141,7 @@ describe("bits", () => {
   it.effect("rejects values that do not fit the layout when printing unchecked", () =>
     Effect.sync(() => {
       const byte = Binary.bits({ a: 8 })
-      // SAFETY: deliberately adding a field to show the printer rejects it.
-      const extra = { a: 1, extra: true } as G.Type<typeof byte>
+      const extra = { a: 1, extra: true }
       const extraResult = Binary.printUnchecked(byte, extra)
       assert.ok(Result.isFailure(extraResult))
       assert.match(extraResult.failure.message, /expected no field named extra/)
@@ -152,6 +167,16 @@ describe("bits", () => {
 })
 
 describe("bytes / lengthPrefixed / literal", () => {
+  it.effect("round-trips all 256 byte values without text decoding", () =>
+    Effect.sync(() => {
+      const input = Uint8Array.from({ length: 256 }, (_, byte) => byte)
+      const grammar = Binary.bytes(input.length)
+      const parsed = Result.getOrThrow(Binary.parse(grammar, input))
+      assert.deepEqual(parsed, input)
+      assert.deepEqual(Result.getOrThrow(Binary.print(grammar, parsed)), input)
+      assert.deepEqual(Result.getOrThrow(Binary.printUnchecked(grammar, input)), input)
+    }))
+
   it.effect("reads a bound run of bytes after a magic number", () =>
     Effect.sync(() => {
       const frame = G.gen(function*() {
