@@ -132,6 +132,23 @@ describe("codec(grammar) structure", () => {
       }])
     }))
 
+  it.effect("checks recursive references and leaves a recursive root open to further checks", () =>
+    Effect.gen(function*() {
+      const nonEmpty = (tree: Tree): boolean => !Array.isArray(tree) || tree.length > 0
+      const tree: G.Grammar<Tree> = G.suspend(() =>
+        G.choice([G.integer, tree.pipe(G.filter(nonEmpty, "a non-empty tree"), G.sepBy(","), G.between("[", "]"))])
+      )
+      const lists = GrammarSchema.codec(tree).check(
+        Schema.makeFilter((value: Tree) => Array.isArray(value), { expected: "a list" }),
+      )
+      assert.deepEqual(yield* Schema.decodeEffect(lists)("[1,[2]]"), [1, [2]])
+      assert.deepEqual(yield* failure(Schema.decodeEffect(lists)("1")), [{ path: [], message: "Expected a list" }])
+      assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(lists)([1, [2, []]])), [{
+        path: [1, 1],
+        message: "Expected a non-empty tree",
+      }])
+    }))
+
   it.effect("names the transform that has no output schema and keeps the explicit-target form", () =>
     Effect.gen(function*() {
       const grammar = G.struct({
