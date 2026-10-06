@@ -15,6 +15,7 @@ const queryParams = pair.pipe(
   Grammar.prefix("?"),
   Grammar.optional,
   Grammar.transform({
+    to: Schema.Record(Schema.String, Schema.String),
     decode: (pairs): Record<string, string> => Object.fromEntries((pairs ?? []).map((p) => [p.key, p.value])),
     encode: (record) => {
       const entries = Object.entries(record)
@@ -30,22 +31,18 @@ const dsn = Grammar.gen(function*() {
   const password = yield* Grammar.regex(/[^@/?#]+/, "password").pipe(Grammar.prefix(":"), Grammar.optional)
   yield* Grammar.literal("@")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
+  const port = yield* Grammar.integer.pipe(
+    Grammar.filter((n: number) => n >= 1 && n <= 65535, "a port from 1 to 65535"),
+    Grammar.prefix(":"),
+    Grammar.optional,
+  )
   yield* Grammar.literal("/")
   const database = yield* Grammar.regex(/[^/?#]+/, "database")
   const params = yield* queryParams
   return { user, password, host, port, database, params }
 })
 
-const ConnectionInfo = Schema.Struct({
-  user: Schema.NonEmptyString,
-  password: Schema.UndefinedOr(Schema.String),
-  host: Schema.NonEmptyString,
-  port: Schema.UndefinedOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-  database: Schema.NonEmptyString,
-  params: Schema.Record(Schema.String, Schema.String),
-})
-const Dsn = GrammarSchema.codec(dsn, ConnectionInfo, { identifier: "Dsn" })
+const Dsn = GrammarSchema.codec(dsn, { identifier: "Dsn" })
 
 const decode = Schema.decodeEffect(Dsn)
 const encode = Schema.encodeEffect(Dsn)

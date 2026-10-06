@@ -3,19 +3,19 @@ import { Console, Effect, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const Octet = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
-const IpAddress = Schema.Tuple([Octet, Octet, Octet, Octet])
+const Octet = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 255 }))
 
 const ip = Grammar.regex(/\d{1,3}/, "octet").pipe(
-  Grammar.transform({ decode: Number, encode: String }),
+  Grammar.transform({ to: Octet, decode: Number, encode: String }),
   Grammar.sepBy(".", { min: 4, max: 4 }),
   Grammar.transform({
+    to: Schema.Tuple([Octet, Octet, Octet, Octet]),
     decode: ([a, b, c, d]) => [a!, b!, c!, d!] as const,
     encode: (tuple) => tuple,
   }),
 )
 
-const Ip = GrammarSchema.codec(ip, IpAddress, { identifier: "IpAddress" })
+const Ip = GrammarSchema.codec(ip, { identifier: "IpAddress" })
 
 const decode = Schema.decodeEffect(Ip)
 const encode = Schema.encodeEffect(Ip)

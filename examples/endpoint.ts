@@ -3,21 +3,16 @@ import { Console, Effect, Schema } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
+const portNumber = Grammar.integer.pipe(Grammar.filter((n: number) => n >= 1 && n <= 65535, "a port from 1 to 65535"))
+
 const endpoint = Grammar.gen(function*() {
   yield* Grammar.literal("https://")
   const host = yield* Grammar.regex(/[^:/?#]+/, "host")
-  const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
+  const port = yield* portNumber.pipe(Grammar.prefix(":"), Grammar.optional)
   return { host, port }
 })
 
-const Endpoint = GrammarSchema.codec(
-  endpoint,
-  Schema.Struct({
-    host: Schema.NonEmptyString,
-    port: Schema.UndefinedOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-  }),
-  { identifier: "Endpoint" },
-)
+const Endpoint = GrammarSchema.codec(endpoint, { identifier: "Endpoint" })
 
 const decode = Schema.decodeEffect(Endpoint)
 const encode = Schema.encodeEffect(Endpoint)
