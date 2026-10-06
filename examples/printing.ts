@@ -1,6 +1,7 @@
 import { Console, Effect, Result, Schema } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import { query } from "./grammars/query.ts"
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
@@ -44,15 +45,6 @@ const endpoint = Grammar.gen(function*() {
   const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
   return { host, port }
 })
-
-const param = Grammar.gen(function*() {
-  const key = yield* Grammar.regex(/[a-z]+/, "key")
-  yield* Grammar.literal("=")
-  const value = yield* Grammar.regex(/[^&]+/, "value")
-  return { key, value }
-})
-
-const query = param.pipe(Grammar.sepBy("&"), Grammar.prefix("?"))
 
 const program = Effect.gen(function*() {
   yield* Console.log("── netstring ────────────────────────────────────────")
