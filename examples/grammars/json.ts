@@ -20,7 +20,7 @@ const jsonBool = Grammar.choice([
 
 const jsonNumber = Grammar.lexeme(Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, "number")).pipe(
   Grammar.transform({ to: Schema.Finite, decode: Number, encode: String }),
-  Grammar.filter(Schema.is(Schema.Finite), "a finite number"),
+  Grammar.filter(Number.isFinite, "a finite number"),
 )
 
 export const jsonString = Grammar.lexeme(
@@ -69,5 +69,5 @@ const jsonObject = member.pipe(
       Object.fromEntries(members.map(({ key, value }) => [key, value])),
     encode: (object) => Object.entries(object).map(([key, value]) => ({ key, value })),
   }),
-  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.Unknown)), "object"),
+  Grammar.filter(Predicate.isObject, "object"),
 )

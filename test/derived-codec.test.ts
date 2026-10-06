@@ -132,6 +132,23 @@ describe("codec(grammar) structure", () => {
       }])
     }))
 
+  it.effect("checks recursive references and leaves a recursive root open to further checks", () =>
+    Effect.gen(function*() {
+      const nonEmpty = (tree: Tree): boolean => !Array.isArray(tree) || tree.length > 0
+      const tree: G.Grammar<Tree> = G.suspend(() =>
+        G.choice([G.integer, tree.pipe(G.filter(nonEmpty, "a non-empty tree"), G.sepBy(","), G.between("[", "]"))])
+      )
+      const lists = GrammarSchema.codec(tree).check(
+        Schema.makeFilter((value: Tree) => Array.isArray(value), { expected: "a list" }),
+      )
+      assert.deepEqual(yield* Schema.decodeEffect(lists)("[1,[2]]"), [1, [2]])
+      assert.deepEqual(yield* failure(Schema.decodeEffect(lists)("1")), [{ path: [], message: "Expected a list" }])
+      assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(lists)([1, [2, []]])), [{
+        path: [1, 1],
+        message: "Expected a non-empty tree",
+      }])
+    }))
+
   it.effect("names the transform that has no output schema and keeps the explicit-target form", () =>
     Effect.gen(function*() {
       const grammar = G.struct({
@@ -147,6 +164,83 @@ describe("codec(grammar) structure", () => {
       )
       const explicit = GrammarSchema.codec(grammar, Schema.Struct({ a: Schema.Int, b: Schema.String }))
       assert.deepEqual(yield* Schema.decodeEffect(explicit)("1,2"), { a: 1, b: "2" })
+    }))
+
+  it.effect("preserves excess fields until checked printing for filtered and dependent roots", () =>
+    Effect.gen(function*() {
+      const point = G.struct({ x: G.integer }).pipe(G.filter(() => true, "a point"))
+      for (
+        const grammar of [
+          point,
+          G.suspend(() => point),
+          G.suspend(() => point).pipe(G.filter(() => true, "point")),
+        ]
+      ) {
+        const codec = GrammarSchema.codec(grammar).check(Schema.makeFilter(() => true))
+        assert.deepEqual(yield* Schema.decodeEffect(codec)("1"), { x: 1 })
+        assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(codec)({ x: 1, extra: 2 })), [{
+          path: [],
+          message: "exactly the fields x: unexpected own field",
+        }])
+      }
+      const dependent = GrammarSchema.codec(G.gen(function*() {
+        const size = yield* G.integer.pipe(G.suffix(":"))
+        const body = yield* G.take(size)
+        return { size, body }
+      }))
+      assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(dependent)({ size: 1, body: "a", extra: 2 })), [{
+        path: [],
+        message: "exactly the fields size, body: unexpected own field",
+      }])
+    }))
+
+  it.effect("retains suspended output schema annotations beneath filters", () =>
+    Effect.gen(function*() {
+      const target = Schema.suspend(() => Schema.Struct({ x: Schema.Int })).annotate({
+        expected: "DeclaredPoint",
+        identifier: "DeclaredPoint",
+        parseOptions: { onExcessProperty: "error" },
+      })
+      const point = G.integer.pipe(
+        G.transform({ to: target, decode: (x) => ({ x }), encode: ({ x }) => x }),
+        G.filter(() => true, "a point"),
+      )
+      const codec = GrammarSchema.codec(G.struct({ point }))
+      assert.deepEqual(yield* Schema.decodeEffect(codec)("1"), { point: { x: 1 } })
+      assert.equal(yield* Schema.encodeUnknownEffect(codec)({ point: { x: 1 } }), "1")
+      assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(codec)({ point: { x: 1, extra: 2 } })), [{
+        path: ["point", "extra"],
+        message: "Expected no excess property",
+      }])
+      const direct = yield* failure(Schema.encodeUnknownEffect(target)("not a point"))
+      assert.deepEqual(
+        yield* failure(Schema.encodeUnknownEffect(codec)({ point: "not a point" })),
+        direct.map((issue) => ({ ...issue, path: ["point", ...(issue.path ?? [])] })),
+      )
+    }))
+
+  it.effect("derives dispatch checks on suspended branches", () =>
+    Effect.gen(function*() {
+      const plain = G.suspend(() => G.struct({ kind: G.empty.pipe(G.as("plain")), value: G.integer }))
+      const hashed = G.suspend(() => G.struct({ kind: G.literal("#").pipe(G.as("hashed")), value: G.integer }))
+      const codec = GrammarSchema.codec(G.dispatch("kind", [["plain", plain], ["hashed", hashed]] as const))
+      assert.deepEqual(yield* Schema.decodeEffect(codec)("#1"), { kind: "hashed", value: 1 })
+      assert.equal(yield* Schema.encodeEffect(codec)({ kind: "plain", value: 2 }), "2")
+      assert.deepEqual(yield* failure(Schema.encodeUnknownEffect(codec)({ kind: "hashed", value: 1.5 })), [{
+        path: ["kind"],
+        message: "Expected \"plain\"",
+      }, {
+        path: ["value"],
+        message: "Expected an integer",
+      }])
+    }))
+
+  it.effect("leaves left-recursive grammar diagnostics to parsing rather than overflowing during derivation", () =>
+    Effect.gen(function*() {
+      const recursive: G.Grammar<void> = G.suspend(() => recursive, "recursive")
+      const codec = GrammarSchema.codec(recursive)
+      const issues = yield* failure(Schema.decodeEffect(codec)(""))
+      assert.match(issues[0]!.message, /non-left-recursive/)
     }))
 
   it.effect("derives without running gens, transforms, or predicates", () =>

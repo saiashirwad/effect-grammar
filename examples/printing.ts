@@ -1,6 +1,7 @@
 import { Console, Effect, Result, Schema } from "effect"
 
 import * as Grammar from "../src/index.ts"
+import { query } from "./grammars/query.ts"
 
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
@@ -44,25 +45,6 @@ const endpoint = Grammar.gen(function*() {
   const port = yield* Grammar.integer.pipe(Grammar.prefix(":"), Grammar.optional)
   return { host, port }
 })
-
-const param = Grammar.gen(function*() {
-  const key = yield* Grammar.regex(/[a-z]+/, "key")
-  yield* Grammar.literal("=")
-  const value = yield* Grammar.regex(/[^&]+/, "value")
-  return { key, value }
-})
-
-const query = Grammar.gen(function*() {
-  yield* Grammar.literal("?")
-  const params = yield* param.pipe(Grammar.sepBy("&"))
-  return params
-}).pipe(
-  Grammar.transform({
-    decode: (entries) => Object.fromEntries(entries.map(({ key, value }) => [key, value])),
-    encode: (record) => Object.entries(record).map(([key, value]) => ({ key, value })),
-  }),
-  Grammar.filter(Schema.is(Schema.Record(Schema.String, Schema.String)), "record"),
-)
 
 const program = Effect.gen(function*() {
   yield* Console.log("── netstring ────────────────────────────────────────")
@@ -114,8 +96,8 @@ const program = Effect.gen(function*() {
   yield* Console.log(show("parse \"?sslmode=require&user=alice\"", Grammar.parse(query, "?sslmode=require&user=alice")))
   yield* Console.log(
     show(
-      "print { user: \"alice\", sslmode: \"require\" }",
-      Grammar.print(query, { user: "alice", sslmode: "require" }),
+      "print ordered query parameters",
+      Grammar.print(query, [{ key: "user", value: "alice" }, { key: "sslmode", value: "require" }]),
     ),
   )
 

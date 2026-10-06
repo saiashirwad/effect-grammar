@@ -250,8 +250,12 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
       }
       return Result.succeed(packed)
     },
-    () =>
-      Schema.Struct(Object.fromEntries(fields.map(([key, size]) => [key, size === 1 ? bitSchema : uintSchema(size)]))),
+    () => ({
+      _tag: "Schema",
+      schema: Schema.Struct(
+        Object.fromEntries(fields.map(([key, size]) => [key, size === 1 ? bitSchema : uintSchema(size)])),
+      ),
+    }),
   )
 }
 

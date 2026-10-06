@@ -3,3 +3,6 @@ dist
 .repos/effect
 .claude
 .mypad*
+.env
+.env.*
+!.env.example
