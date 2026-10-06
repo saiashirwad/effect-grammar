@@ -7,7 +7,7 @@ grammar.
 npm install effect@rc effect-grammar
 ```
 
-Requires `effect` 4 (currently release candidate) and Node 20 or later.
+Requires `effect` version `>=4.0.0-rc.112 <5` and Node 20 or later.
 
 ## Why this exists
 
@@ -77,8 +77,9 @@ The `G.gen` block runs **once** when the grammar is constructed, not on every
 parse.
 
 Each `yield*` records a step in order. Steps that produce data, like
-`G.integer`, yield a `Ref`—a placeholder for a future value. Syntax-only steps,
-like `G.literal`, yield `void`.
+`G.integer`, yield a `Ref`, a placeholder for a future value. Syntax-only steps,
+like `G.literal`, have a yield type of `void`. This is a TypeScript type, not a
+guarantee that the yielded value is `undefined` during construction.
 
 The object you return dictates the final value shape.
 
@@ -151,8 +152,10 @@ Other ways to use dependent values:
 - `ascii` and `utf8`, which wrap byte payload grammars for strings.
 
 Fixed-width integers default to big-endian. Use a `le` suffix for little-endian
-variants like `uint16le`. 64-bit integers, `varuint`, and `varint` yield
-bigints.
+variants like `uint16le`. Fixed-width 64-bit integers yield `bigint` values.
+`varuint` and `varint` yield numbers. `varuint` supports integers from `0`
+through `Number.MAX_SAFE_INTEGER`. `varint` supports integers from `-(2 ** 52)`
+through `2 ** 52 - 1`.
 
 Shared combinators from the `effect-grammar` root work on both text and bytes.
 
@@ -252,7 +255,9 @@ Use `Schema.toType(codec)` to get only the value schema.
 Fields returned from `G.optional` are **required keys** whose value may be
 `undefined`.
 
-Derivation never runs `gen` blocks or decode, encode, and predicate callbacks.
+Derivation does not rerun already constructed `gen` blocks or run decode,
+encode, or predicate callbacks. It resolves suspension thunks, which may
+construct and run new `gen` blocks.
 
 ### Custom transformations
 
@@ -284,18 +289,24 @@ Values that depend on earlier ones become checks with Schema paths. A
 against the bound value it reads. Failures include a path, such as `Expected 3
 characters` at `["payload"]`.
 
-Dependencies are **not part of the schema** when they are inside:
+Dependencies on references from an enclosing `gen` are **not part of the
+schema** when those references cross into:
 
 - A `choice`, `dispatch`, or `match` branch.
 - An `optional` or repeated item.
 - A transform or suspension.
 
+An inner `gen` still derives checks for its own locally bound dependencies. For
+example, wrapping the netstring grammar above in `G.optional` preserves its
+length check.
+
 The derived schema checks structure, **not printability**. Checked printing
 still enforces excluded dependencies and rejects `encode` output that no longer
 fits the grammar. Failures are reported as Schema issues at the value's path.
 
-Excess object keys pass the schema but are rejected by printing, just as they
-are by `G.print`.
+By default, derived structural schemas preserve excess object keys, which
+printing rejects just as `G.print` does. Custom schemas can handle excess keys
+differently.
 
 ### Explicit target schemas
 
