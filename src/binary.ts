@@ -38,18 +38,10 @@ export const int64Schema = Schema.BigInt.check(
   Schema.isBetweenBigInt({ minimum: -(2n ** 63n), maximum: 2n ** 63n - 1n }),
 )
 
-const isBinary = (value: string): boolean => !nonByte.test(value)
+export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> =>
+  make({ _tag: "Take", count: countExpr(count, "bytes") })
 
-const takeByteString = (count: Ref<number> | number): Grammar<string> =>
-  make<string, "bytes">({ _tag: "Take", count: countExpr(count, "bytes") }).pipe(filter(isBinary, "a byte"))
-
-const asBytes = (inner: Grammar<string>): Grammar<Uint8Array> =>
-  inner.pipe(transform({ decode: fromByteString, encode: toByteString }), filter(Predicate.isUint8Array, "bytes"))
-
-export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> => asBytes(takeByteString(count))
-
-export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> =>
-  asBytes(prefixedBy(length, takeByteString))
+export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> => prefixedBy(length, bytes)
 
 export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
   if (values.some((value) => !Schema.is(uintSchema(8))(value))) {
@@ -83,17 +75,15 @@ export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
   )
 
 const word = (size: number, name: string, littleEndian = false): Grammar<bigint> =>
-  takeByteString(size).pipe(
+  bytes(size).pipe(
     label(name),
     transform({
-      decode: (binary) => {
-        const bytes = littleEndian ? fromByteString(binary).reverse() : fromByteString(binary)
-        return bytes.reduce((value, byte) => (value << 8n) | BigInt(byte), 0n)
-      },
+      decode: (input) =>
+        (littleEndian ? input.toReversed() : input).reduce((value, byte) => (value << 8n) | BigInt(byte), 0n),
       encode: (value) => {
-        const bytes = Uint8Array.from({ length: size }, (_, index) =>
+        const output = Uint8Array.from({ length: size }, (_, index) =>
           Number(BigInt.asUintN(8, value >> BigInt(8 * (size - 1 - index)))))
-        return toByteString(littleEndian ? bytes.reverse() : bytes)
+        return littleEndian ? output.reverse() : output
       },
     }),
   )
@@ -138,19 +128,17 @@ export const int64le = int64Of("int64le", true)
 
 const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number> => {
   const scratch = new DataView(new ArrayBuffer(size))
-  return takeByteString(size).pipe(
+  return bytes(size).pipe(
     label(name),
     transform({
-      decode: (binary) => {
-        for (let index = 0; index < size; index++) scratch.setUint8(index, binary.charCodeAt(index))
+      decode: (input) => {
+        input.forEach((byte, index) => scratch.setUint8(index, byte))
         return size === 4 ? scratch.getFloat32(0, littleEndian) : scratch.getFloat64(0, littleEndian)
       },
       encode: (value) => {
         if (size === 4) scratch.setFloat32(0, value, littleEndian)
         else scratch.setFloat64(0, value, littleEndian)
-        let binary = ""
-        for (let index = 0; index < size; index++) binary += String.fromCharCode(scratch.getUint8(index))
-        return binary
+        return Uint8Array.from({ length: size }, (_, index) => scratch.getUint8(index))
       },
     }),
     filter((value) => Predicate.isNumber(value) && (size === 8 || Object.is(Math.fround(value), value)), name),

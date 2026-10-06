@@ -13,6 +13,7 @@ import {
   type Value,
 } from "./core.ts"
 import { exceptionMessage, ParseError, preview } from "./errors.ts"
+import { fromByteString } from "./internal/bytes.ts"
 import { describe } from "./internal/describe.ts"
 import { assembleOutput, evaluate, type Frame, frame, Unbound } from "./internal/generator.ts"
 import { catchResult } from "./internal/runtime.ts"
@@ -94,7 +95,7 @@ const parseNode = (node: Node, state: State, env: Frame | undefined): Result.Res
       }
       const value = state.input.slice(state.pos, state.pos + count)
       state.pos += count
-      return Result.succeed(value)
+      return Result.succeed(state.domain === "bytes" ? fromByteString(value) : value)
     }
     case "Sequence": {
       const local = frame(node.scope, node.steps.length, env)
