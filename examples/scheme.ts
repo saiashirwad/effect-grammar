@@ -3,70 +3,42 @@ import { Console, Effect, Iterable, Result, Schema, SchemaIssue } from "effect"
 import * as Grammar from "../src/index.ts"
 import * as GrammarSchema from "../src/schema.ts"
 
-const NumberAtom = Schema.Struct({ kind: Schema.Literal("number"), value: Schema.Finite })
-const StringAtom = Schema.Struct({ kind: Schema.Literal("string"), value: Schema.String })
-const BooleanAtom = Schema.Struct({ kind: Schema.Literal("boolean"), value: Schema.Boolean })
-const SymbolAtom = Schema.Struct({ kind: Schema.Literal("symbol"), value: Schema.String })
-
-const AtomSchema = Schema.Union([NumberAtom, StringAtom, BooleanAtom, SymbolAtom])
-
-type Atom = typeof AtomSchema.Type
+type Atom = Grammar.Type<typeof numberAtom | typeof stringAtom | typeof booleanAtom | typeof symbolAtom>
 
 type List = { readonly kind: "list"; readonly elements: ReadonlyArray<Expr> }
 type Quote = { readonly kind: "quote"; readonly inner: Expr }
 type Expr = Atom | List | Quote
 
-const ExprRef = Schema.suspend((): Schema.Codec<Expr> => ExprSchema)
-
-const ListSchema: Schema.Codec<List> = Schema.Struct({
-  kind: Schema.Literal("list"),
-  elements: Schema.Array(ExprRef),
+const numberAtom = Grammar.gen(function*() {
+  const value = yield* Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number").pipe(
+    Grammar.transform({ to: Schema.Finite, decode: Number, encode: String }),
+  )
+  return { kind: "number" as const, value }
 })
 
-const QuoteSchema: Schema.Codec<Quote> = Schema.Struct({
-  kind: Schema.Literal("quote"),
-  inner: ExprRef,
-})
-
-const ExprSchema: Schema.Codec<Expr> = Schema.Union([
-  NumberAtom,
-  StringAtom,
-  BooleanAtom,
-  SymbolAtom,
-  ListSchema,
-  QuoteSchema,
-])
-
-const numberAtom = Grammar.regex(/-?(?:0|[1-9]\d*)(?:\.\d+)?/, "number").pipe(
-  Grammar.transform({
-    decode: (raw): typeof NumberAtom.Type => ({ kind: "number", value: Number(raw) }),
-    encode: (n) => String(n.value),
-  }),
-)
-
-const stringAtom = Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
-  Grammar.transform({
-    decode: (raw): typeof StringAtom.Type => ({ kind: "string", value: JSON.parse(raw) }),
-    encode: (s) => JSON.stringify(s.value),
-  }),
-)
-
-const booleanAtom = Grammar.regex(/#(?:true|false|t|f)(?=[\s()"'`;,]|$)/, "boolean").pipe(
-  Grammar.transform({
-    decode: (raw): typeof BooleanAtom.Type => ({
-      kind: "boolean",
-      value: raw === "#t" || raw === "#true",
+const stringAtom = Grammar.gen(function*() {
+  const value = yield* Grammar.regex(/"(?:[^"\\]|\\.)*"/, "string").pipe(
+    Grammar.transform({
+      to: Schema.String,
+      decode: Schema.decodeSync(Schema.fromJsonString(Schema.String)),
+      encode: Schema.encodeSync(Schema.fromJsonString(Schema.String)),
     }),
-    encode: (b) => (b.value ? "#t" : "#f"),
-  }),
-)
+  )
+  return { kind: "string" as const, value }
+})
 
-const symbolAtom = Grammar.regex(/[^\s()"'`;,]+/, "symbol").pipe(
-  Grammar.transform({
-    decode: (value): typeof SymbolAtom.Type => ({ kind: "symbol", value }),
-    encode: (s) => s.value,
-  }),
-)
+const booleanAtom = Grammar.gen(function*() {
+  const value = yield* Grammar.choice([
+    Grammar.regex(/#(?:true|t)(?=[\s()"'`;,]|$)/, "boolean").pipe(Grammar.skip("#t"), Grammar.as(true)),
+    Grammar.regex(/#(?:false|f)(?=[\s()"'`;,]|$)/, "boolean").pipe(Grammar.skip("#f"), Grammar.as(false)),
+  ], { print: "first" })
+  return { kind: "boolean" as const, value }
+})
+
+const symbolAtom = Grammar.gen(function*() {
+  const value = yield* Grammar.regex(/[^\s()"'`;,]+/, "symbol")
+  return { kind: "symbol" as const, value }
+})
 
 const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   () =>
@@ -84,24 +56,22 @@ const expr: Grammar.Grammar<Expr> = Grammar.suspend(
   "expr",
 )
 
-const list = expr.pipe(
-  Grammar.sepBy(Grammar.spaces),
-  Grammar.between(Grammar.seq(Grammar.literal("("), Grammar.trivia), Grammar.seq(Grammar.trivia, Grammar.literal(")"))),
-  Grammar.transform({
-    decode: (elements): List => ({ kind: "list", elements }),
-    encode: (l) => l.elements,
-  }),
-)
+const list = Grammar.gen(function*() {
+  const elements = yield* expr.pipe(
+    Grammar.sepBy(Grammar.spaces),
+    Grammar.between(
+      Grammar.seq(Grammar.literal("("), Grammar.trivia),
+      Grammar.seq(Grammar.trivia, Grammar.literal(")")),
+    ),
+  )
+  return { kind: "list" as const, elements }
+})
 
-const quoteExpr: Grammar.Grammar<Quote> = expr.pipe(
-  Grammar.prefix("'"),
-  Grammar.transform({
-    decode: (inner): Quote => ({ kind: "quote", inner }),
-    encode: (q) => q.inner,
-  }),
-)
-
-const document = expr.pipe(Grammar.between(Grammar.trivia, Grammar.trivia))
+const quoteExpr = Grammar.gen(function*() {
+  yield* Grammar.literal("'")
+  const inner = yield* expr
+  return { kind: "quote" as const, inner }
+})
 
 interface FormSpec {
   readonly min: number
@@ -168,9 +138,12 @@ const arityIssue = (node: List): Result.Result<Schema.FilterIssue, void> => {
   return Result.succeed({ path: [name], issue: `expected ${bound} argument(s), got ${arity}` })
 }
 
-const catalogIssues = Schema.makeFilter((e: Expr) => Array.from(Iterable.filterMap(walkLists(e), arityIssue)))
-
-const ValidScheme = GrammarSchema.codec(document, ExprSchema, { identifier: "Scheme" }).check(catalogIssues)
+const ValidScheme = GrammarSchema.codec(
+  expr.pipe(Grammar.between(Grammar.trivia, Grammar.trivia)),
+  { identifier: "Scheme" },
+).check(
+  Schema.makeFilter((e: Expr) => Array.from(Iterable.filterMap(walkLists(e), arityIssue))),
+)
 
 const decode = Schema.decodeEffect(ValidScheme)
 const encode = Schema.encodeEffect(ValidScheme)

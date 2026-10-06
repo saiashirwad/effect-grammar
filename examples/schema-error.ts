@@ -10,11 +10,12 @@ const person = Grammar.gen(function*() {
   return { name, age }
 })
 
-const Person = GrammarSchema.codec(
-  person,
-  Schema.Struct({
-    name: Schema.String.check(Schema.isMinLength(3)),
-    age: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 120 })),
+const Person = GrammarSchema.codec(person).check(
+  Schema.makeFilter(({ name, age }: Grammar.Type<typeof person>) => {
+    const issues: Array<Schema.FilterIssue> = []
+    if (name.length < 3) issues.push({ path: ["name"], issue: "Expected a value with a length of at least 3" })
+    if (age < 0 || age > 120) issues.push({ path: ["age"], issue: "Expected a value between 0 and 120" })
+    return issues
   }),
 )
 

@@ -20,7 +20,8 @@ const attempt = (run: () => string): string => {
 }
 
 const header = G.gen(function*() {
-  const kind = yield* G.choice([G.literal("raw:").pipe(G.as("raw")), G.literal("pair:").pipe(G.as("pair"))])
+  const kind = yield* G.literals("raw", "pair")
+  yield* G.literal(":")
   const size = yield* G.integer.pipe(G.filter((n: number) => n >= 0 && n <= 16, "a size from 0 to 16"))
   return { kind, size }
 })

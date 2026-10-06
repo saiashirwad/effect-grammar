@@ -71,11 +71,34 @@ describe("HTTP range example parity", () => {
         "bytes=0",
         "bytes=0-1,",
         "bytes=5-2",
+        "bytes=-1-2",
+        "bytes=0--1",
         "bytes=-0",
+        "bytes=--1",
         "bytes=9007199254740992-",
       ]
       for (const source of invalid) {
         for (const codec of codecs) assert.ok(Result.isFailure(decode(codec, source)), source)
+      }
+    }))
+
+  it.effect("rejects invalid values with the derived domain checks in both codecs", () =>
+    Effect.sync(() => {
+      const invalid: ReadonlyArray<ByteRangesValue> = [
+        [],
+        [{ kind: "closed", start: 5, end: 2 }],
+        [{ kind: "closed", start: -1, end: 2 }],
+        [{ kind: "closed", start: 0, end: -1 }],
+        [{ kind: "open", start: -1 }],
+        [{ kind: "open", start: 0.5 }],
+        [{ kind: "open", start: 2 ** 53 }],
+        [{ kind: "suffix", length: 0 }],
+        [{ kind: "suffix", length: -1 }],
+        [{ kind: "suffix", length: 0.5 }],
+        [{ kind: "suffix", length: 2 ** 53 }],
+      ]
+      for (const value of invalid) {
+        for (const codec of codecs) assert.ok(Result.isFailure(encode(codec, value)))
       }
     }))
 
