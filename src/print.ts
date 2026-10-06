@@ -6,6 +6,7 @@ import {
   type Domain,
   type Grammar,
   isCount,
+  matchesWhole,
   nodeOf,
   refine,
   resolve,
@@ -94,9 +95,7 @@ const printNode = (grammar: AnyGrammar, value: Value, env: Frame | undefined, st
       return Result.succeed(node.value)
     case "Regex": {
       if (!Predicate.isString(value)) return fail({ _tag: "TypeMismatch", expected: "a string", actual: value })
-      const match = new RegExp(node.source, `${node.flags}y`).exec(value)
-      if (match === null || match[0].length !== value.length) return invalid(`/${node.source}/`, value)
-      return Result.succeed(value)
+      return matchesWhole(node, value) ? Result.succeed(value) : invalid(`/${node.source}/`, value)
     }
     case "Take": {
       if (state.domain === "bytes" && !Predicate.isUint8Array(value)) return invalid("bytes", value)

@@ -41,7 +41,8 @@ export const int64Schema = Schema.BigInt.check(
 export const bytes = (count: Ref<number> | number): Grammar<Uint8Array> =>
   make({ _tag: "Take", count: countExpr(count, "bytes") })
 
-export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> => prefixedBy(length, bytes)
+export const lengthPrefixed = (length: Grammar<number>): Grammar<Uint8Array> =>
+  prefixedBy(length, bytes, Schema.Uint8Array)
 
 export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
   if (values.some((value) => !Schema.is(uintSchema(8))(value))) {
@@ -53,13 +54,16 @@ export const literal = (...values: ReadonlyArray<number>): Grammar<void> => {
 
 export const ascii = (inner: Grammar<Uint8Array>): Grammar<string> =>
   inner.pipe(
-    transform<Uint8Array, string>({ decode: toByteString, encode: fromByteString }),
+    transform<Uint8Array, string>({ to: Schema.String, decode: toByteString, encode: fromByteString }),
     filter((value: Value) => Predicate.isString(value) && /^[\0-\x7f]*$/.test(value), "ascii"),
   )
 
 export const utf8 = (inner: Grammar<Uint8Array>): Grammar<string> =>
   inner.pipe(
     transformOrFail<Uint8Array, string>({
+      to: Schema.String.check(
+        Schema.makeFilter((value) => value.isWellFormed(), { expected: "a string without lone surrogates" }),
+      ),
       decode: (value) => {
         try {
           return Result.succeed(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(value))
@@ -78,6 +82,7 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
   bytes(size).pipe(
     label(name),
     transform({
+      to: Schema.BigInt,
       decode: (input) =>
         (littleEndian ? input.toReversed() : input).reduce((value, byte) => (value << 8n) | BigInt(byte), 0n),
       encode: (value) => {
@@ -90,13 +95,13 @@ const word = (size: number, name: string, littleEndian = false): Grammar<bigint>
 
 const uint = (size: number, name: string, littleEndian = false): Grammar<number> =>
   word(size, name, littleEndian).pipe(
-    transform({ decode: Number, encode: BigInt }),
+    transform({ to: uintSchema(8 * size), decode: Number, encode: BigInt }),
     filter(Schema.is(uintSchema(8 * size)), name),
   )
 
 const int = (size: number, name: string, littleEndian = false): Grammar<number> =>
   word(size, name, littleEndian).pipe(
-    transform({ decode: (value) => Number(BigInt.asIntN(8 * size, value)), encode: BigInt }),
+    transform({ to: intSchema(8 * size), decode: (value) => Number(BigInt.asIntN(8 * size, value)), encode: BigInt }),
     filter(Schema.is(intSchema(8 * size)), name),
   )
 
@@ -117,7 +122,7 @@ const uint64Of = (name: string, littleEndian = false): Grammar<bigint> =>
 
 const int64Of = (name: string, littleEndian = false): Grammar<bigint> =>
   word(8, name, littleEndian).pipe(
-    transform({ decode: (value) => BigInt.asIntN(64, value), encode: (value: bigint) => value }),
+    transform({ to: Schema.BigInt, decode: (value) => BigInt.asIntN(64, value), encode: (value: bigint) => value }),
     filter(Schema.is(int64Schema), name),
   )
 
@@ -131,6 +136,8 @@ const float = (size: 4 | 8, name: string, littleEndian = false): Grammar<number>
   return bytes(size).pipe(
     label(name),
     transform({
+      // oxlint-disable-next-line effecttsgo/schema-number -- IEEE floats include NaN and the infinities.
+      to: Schema.Number,
       decode: (input) => {
         input.forEach((byte, index) => scratch.setUint8(index, byte))
         return size === 4 ? scratch.getFloat32(0, littleEndian) : scratch.getFloat64(0, littleEndian)
@@ -173,6 +180,7 @@ const toLeb128 = (value: number): string => {
 
 export const varuint = leb128("varuint").pipe(
   transformOrFail({
+    to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     decode: (binary) => {
       const value = fromLeb128(binary)
       return Number.isSafeInteger(value)
@@ -185,6 +193,7 @@ export const varuint = leb128("varuint").pipe(
 
 export const varint = leb128("varint").pipe(
   transformOrFail({
+    to: Schema.Int.check(Schema.isBetween({ minimum: -(2 ** 52), maximum: 2 ** 52 - 1 })),
     decode: (binary) => {
       const value = fromLeb128(binary)
       return Number.isSafeInteger(value)
@@ -221,15 +230,16 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
     fits: Schema.is(uintSchema(size)),
   }))
 
-  return transformNode(word(width / 8, name), {
+  return transformNode(
+    word(width / 8, name),
     // SAFETY: slots holds every key of the layout, each within its declared width.
-    decode: (value) =>
+    (value) =>
       Result.succeed(
         Object.fromEntries(
           slots.map(({ key, size, shift }) => [key, Number(BigInt.asUintN(size, value >> shift))]),
         ) as Bits<Layout>,
       ),
-    encode: (value: Bits<Layout>) => {
+    (value: Bits<Layout>) => {
       const extra = Reflect.ownKeys(value).find((key) => !Object.hasOwn(layout, key))
       if (extra !== undefined) return Result.fail(`no field named ${String(extra)}`)
       let packed = 0n
@@ -240,7 +250,9 @@ export const bits = <const Layout extends BitLayout>(layout: Layout): Grammar<Bi
       }
       return Result.succeed(packed)
     },
-  })
+    () =>
+      Schema.Struct(Object.fromEntries(fields.map(([key, size]) => [key, size === 1 ? bitSchema : uintSchema(size)]))),
+  )
 }
 
 export const parse = <A>(grammar: Grammar<A>, input: Uint8Array): Result.Result<A, ParseError> =>
@@ -276,4 +288,4 @@ export const print = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Arra
 export const printUnchecked = <A>(grammar: Grammar<A>, value: A): Result.Result<Uint8Array, PrintError> =>
   toByteResult(value, printUncheckedDomain(grammar, value, "bytes"))
 
-export const codec = codecWith(Schema.Uint8Array, parse, print)
+export const codec = codecWith(Schema.Uint8Array, "bytes", parse, print)

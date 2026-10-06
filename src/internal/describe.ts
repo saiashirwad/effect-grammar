@@ -9,6 +9,7 @@ export const describe = (grammar: AnyGrammar): string => {
     case "Regex":
       return `/${node.source}/${node.flags}`
     case "Label":
+    case "Filter":
       return node.name
     case "Suspend":
       return node.name ?? "suspend"

@@ -1,8 +1,11 @@
+import assert from "node:assert/strict"
+
 import { describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Result, Schema } from "effect"
 import * as FastCheck from "effect/testing/FastCheck"
 
 import * as Grammar from "../src/index.ts"
+import * as GrammarSchema from "../src/schema.ts"
 import { assertRoundTrip } from "./helpers.ts"
 
 type Nested = number | ReadonlyArray<Nested>
@@ -86,6 +89,31 @@ describe("round-trip law: parse(print(a)) == a", () => {
       FastCheck.assert(
         FastCheck.property(FastCheck.string({ maxLength: 64 }), (payload) => {
           assertRoundTrip(netstring, { length: payload.length, payload })
+        }),
+      )
+    }))
+})
+
+describe("derived codec law: decode(encode(a)) == a", () => {
+  it.effect("gen grammar with optional and repeated bindings", () =>
+    Effect.sync(() => {
+      const codec = GrammarSchema.codec(endpoint)
+      FastCheck.assert(
+        FastCheck.property(endpointArb, (value) => {
+          const text = Result.getOrThrow(Schema.encodeResult(codec)(value))
+          assert.deepEqual(Result.getOrThrow(Schema.decodeResult(codec)(text)), { ...value })
+        }),
+      )
+    }))
+
+  it.effect("a length dependency agrees with checked printing", () =>
+    Effect.sync(() => {
+      const codec = GrammarSchema.codec(netstring)
+      FastCheck.assert(
+        FastCheck.property(FastCheck.nat(8), FastCheck.string({ maxLength: 8 }), (length, payload) => {
+          const consistent = length === payload.length
+          assert.equal(Result.isSuccess(Schema.encodeResult(codec)({ length, payload })), consistent)
+          assert.equal(Result.isSuccess(Grammar.print(netstring, { length, payload })), consistent)
         }),
       )
     }))

@@ -1,4 +1,4 @@
-import { Predicate, Result } from "effect"
+import { Predicate, Result, Schema } from "effect"
 
 import {
   type AnyGrammar,
@@ -10,6 +10,7 @@ import {
   make,
   type MatchKey,
   nodeOf,
+  type OutputSchema,
   type Ref,
   type ScopeId,
   type Type,
@@ -193,30 +194,47 @@ export const repeat =
   }
 
 export interface TransformOptions<A, B> {
+  /**
+   * The schema of every decoded value. `codec(grammar)` uses its type side to describe this
+   * transform's output; parsing and printing do not consult it.
+   */
+  readonly to?: Schema.Schema<B> | undefined
   readonly decode: (a: A) => B
   readonly encode: (b: B) => A
 }
 
 export interface TransformOrFailOptions<A, B> {
+  /**
+   * The schema of every decoded value. `codec(grammar)` uses its type side to describe this
+   * transform's output; parsing and printing do not consult it.
+   */
+  readonly to?: Schema.Schema<B> | undefined
   readonly decode: (a: A) => Result.Result<B, string>
   readonly encode: (b: B) => Result.Result<A, string>
 }
 
 export const transformNode = <A, B, D extends Domain>(
   inner: Grammar<A, D>,
-  options: TransformOrFailOptions<A, B>,
-): Grammar<B, D> => make({ _tag: "Transform", inner, ...options })
+  decode: (a: A) => Result.Result<B, string>,
+  encode: (b: B) => Result.Result<A, string>,
+  schema: OutputSchema | undefined,
+): Grammar<B, D> => make({ _tag: "Transform", inner, decode, encode, schema })
+
+const declared = <B>(to: Schema.Schema<B> | undefined): OutputSchema | undefined =>
+  to === undefined ? undefined : () => Schema.toType(to)
 
 export const transform =
   <A, B>(options: TransformOptions<A, B>) => <D extends Domain>(inner: Grammar<A, D>): Grammar<B, D> =>
-    transformNode(inner, {
-      decode: (value) => Result.succeed(options.decode(value)),
-      encode: (value) => Result.succeed(options.encode(value)),
-    })
+    transformNode(
+      inner,
+      (value) => Result.succeed(options.decode(value)),
+      (value) => Result.succeed(options.encode(value)),
+      declared(options.to),
+    )
 
 export const transformOrFail =
   <A, B>(options: TransformOrFailOptions<A, B>) => <D extends Domain>(inner: Grammar<A, D>): Grammar<B, D> =>
-    transformNode(inner, options)
+    transformNode(inner, options.decode, options.encode, declared(options.to))
 
 export function filter<A, B extends A>(
   refinement: (value: A) => value is B,

@@ -1,5 +1,5 @@
 // This fixture is also compiled against the installed package declarations.
-import { Result, Schema } from "effect"
+import { Context, Effect, Result, Schema, SchemaTransformation } from "effect"
 
 import * as B from "../src/binary.ts"
 import * as G from "../src/index.ts"
@@ -206,3 +206,46 @@ Testing.assertPrintParse(G.integer, 1)
 Testing.Binary.assertPrintParse(G.integer, 1)
 // @ts-expect-error text law helpers require text grammars
 Testing.assertPrintParse(B.uint8, 1)
+
+type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+const derivedText = S.codec(G.integer)
+const derivedBytes = B.codec(bytesGen)
+const derivedTextIsExact: Equals<typeof derivedText, Schema.Codec<number, string>> = true
+const derivedBytesIsExact: Equals<
+  typeof derivedBytes,
+  Schema.Codec<{ size: number; body: Uint8Array }, Uint8Array>
+> = true
+const facadeIsExact: Equals<typeof Text.codec, typeof S.codec> = true
+void [derivedTextIsExact, derivedBytesIsExact, facadeIsExact]
+// @ts-expect-error the derived text codec has a fixed domain
+S.codec(B.uint8)
+// @ts-expect-error the derived byte codec has a fixed domain
+B.codec(G.integer)
+// @ts-expect-error derived codecs reject mixed domains
+S.codec(mixedChoice)
+
+const declared = G.integer.pipe(G.transform({ to: Schema.Literals([1, 2]), decode: (n) => n, encode: (n) => n }))
+const declaredIsNumber: Equals<typeof declared, G.Grammar<number>> = true
+const decodedFrom = G.regex(/\d+/).pipe(G.transform({ to: Schema.FiniteFromString, decode: Number, encode: String }))
+const decodedFromIsNumber: Equals<typeof decodedFrom, G.Grammar<number>> = true
+void [declaredIsNumber, decodedFromIsNumber]
+// @ts-expect-error `to` describes the decoded value
+G.integer.pipe(G.transform({ to: Schema.String, decode: (n: number) => n, encode: (n: number) => n }))
+G.integer.pipe(
+  // @ts-expect-error `to` describes the decoded value of transformOrFail too
+  G.transformOrFail({ to: Schema.String, decode: Result.succeed, encode: (n: number) => Result.succeed(n) }),
+)
+
+class Prefix extends Context.Service<Prefix, string>()("test/Prefix") {}
+const prefixed = Schema.Finite.pipe(Schema.decodeTo(
+  Schema.String,
+  SchemaTransformation.transformOrFail({
+    decode: (n: number) => Effect.map(Prefix, (prefix) => `${prefix}${n}`),
+    encode: (s: string) => Effect.succeed(Number(s)),
+  }),
+))
+const explicit = S.codec(G.integer, prefixed)
+const explicitServices: Equals<typeof explicit["DecodingServices"], Prefix> = true
+const explicitEncoded: Equals<typeof explicit["Encoded"], string> = true
+const explicitType: Equals<typeof explicit["Type"], string> = true
+void [explicitServices, explicitEncoded, explicitType]

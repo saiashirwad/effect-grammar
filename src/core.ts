@@ -1,4 +1,4 @@
-import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
+import { Pipeable, Predicate, Result, type Schema, type Types, Utils } from "effect"
 
 import type { ReturnLayout, SequenceStep } from "./internal/generator.ts"
 
@@ -71,16 +71,11 @@ export interface ScopeId {
   readonly _tag: "ScopeId"
 }
 
-export interface RefExpr {
-  readonly _tag: "Ref"
-  readonly scope: ScopeId
-  readonly slot: number
-}
+export type BoundExpr =
+  | { readonly _tag: "Ref"; readonly scope: ScopeId; readonly slot: number }
+  | { readonly _tag: "Prop"; readonly object: BoundExpr; readonly key: PropertyKey }
 
-export type Expr =
-  | RefExpr
-  | { readonly _tag: "Prop"; readonly object: Expr; readonly key: PropertyKey }
-  | { readonly _tag: "Const"; readonly value: number }
+export type Expr = BoundExpr | { readonly _tag: "Const"; readonly value: number }
 
 export const isCount = (value: Value): value is number =>
   Predicate.isNumber(value) && Number.isSafeInteger(value) && value >= 0
@@ -94,6 +89,9 @@ export interface Case {
 
 export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
   cases.find((matchCase) => Object.is(matchCase.key, value))
+
+/** Builds a transform's output value schema, deriving any child grammar it reuses. */
+export type OutputSchema = (derive: (grammar: AnyGrammar) => Schema.Top) => Schema.Top
 
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }
@@ -118,7 +116,7 @@ export type Node =
     readonly inner: AnyGrammar
     readonly close: Grammar<void, Domain>
   }
-  | { readonly _tag: "Match"; readonly scrutinee: Expr; readonly cases: ReadonlyArray<Case> }
+  | { readonly _tag: "Match"; readonly scrutinee: BoundExpr; readonly cases: ReadonlyArray<Case> }
   | {
     readonly _tag: "Repeat"
     readonly inner: AnyGrammar
@@ -131,6 +129,7 @@ export type Node =
     readonly inner: AnyGrammar
     readonly decode: (a: any) => Result.Result<Value, string>
     readonly encode: (b: any) => Result.Result<Value, string>
+    readonly schema: OutputSchema | undefined
   }
   | {
     readonly _tag: "Filter"
@@ -149,6 +148,9 @@ export type Node =
   }
 
 export type Suspension = Extract<Node, { readonly _tag: "Suspend" }>
+
+export const matchesWhole = (node: Extract<Node, { readonly _tag: "Regex" }>, value: string): boolean =>
+  new RegExp(node.source, `${node.flags}y`).exec(value)?.[0].length === value.length
 
 export const refine = (node: Extract<Node, { readonly _tag: "Filter" }>, value: Value): Result.Result<Value, string> =>
   node.predicate(value) ? Result.succeed(value) : Result.fail(node.name)
