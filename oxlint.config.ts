@@ -46,6 +46,7 @@ export default defineConfig({
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
     "anti-slop-effect/no-service-constructor-imports": "error",
+    "effecttsgo/node-builtin-import": "error",
     "effecttsgo/effect-succeed-with-void": "off",
     "effecttsgo/layer-merge-all-with-dependencies": "off",
     "effecttsgo/return-effect-in-gen": "off",
