@@ -103,7 +103,3 @@ changes.
 - The printer rejects a suspended grammar re-entered with the same value at any
   active depth. A nonproductive recursive choice branch can fall through instead
   of overflowing the stack.
-
-See the repository's
-[architecture guide](https://github.com/saiashirwad/effect-grammar/blob/main/docs/architecture.md)
-for module ownership and invariants.

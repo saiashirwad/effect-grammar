@@ -1,6 +1,7 @@
-import { Pipeable, Predicate, Result, type Schema, type Types, Utils } from "effect"
+import { Pipeable, Predicate, Result, type Types, Utils } from "effect"
 
 import type { ReturnLayout, SequenceStep } from "./internal/generator.ts"
+import type { ValueNode } from "./internal/value-schema.ts"
 
 const GrammarTypeId: unique symbol = Symbol.for("effect-grammar/Grammar")
 const NodeTypeId: unique symbol = Symbol("effect-grammar/Node")
@@ -90,7 +91,7 @@ export interface Case {
 export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
   cases.find((matchCase) => Object.is(matchCase.key, value))
 
-export type OutputSchema = (derive: (grammar: AnyGrammar) => Schema.Top) => Schema.Top
+export type OutputSchema = (derive: (grammar: AnyGrammar) => ValueNode) => ValueNode
 
 export type Node =
   | { readonly _tag: "Literal"; readonly value: string }

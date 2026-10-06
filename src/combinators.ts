@@ -221,7 +221,7 @@ export const transformNode = <A, B, D extends Domain>(
 ): Grammar<B, D> => make({ _tag: "Transform", inner, decode, encode, schema })
 
 const declared = <B>(to: Schema.Schema<B> | undefined): OutputSchema | undefined =>
-  to === undefined ? undefined : () => Schema.toType(to)
+  to === undefined ? undefined : () => ({ _tag: "Schema", schema: Schema.toType(to) })
 
 export const transform =
   <A, B>(options: TransformOptions<A, B>) => <D extends Domain>(inner: Grammar<A, D>): Grammar<B, D> =>

@@ -50,7 +50,10 @@ export function taggedChoice<Tag extends string>(tag: Tag, entries: Entries): An
         if (!Object.hasOwn(value, "value")) return Result.fail("expected an object with a value field")
         return Result.succeed(value.value)
       },
-      (derive) => Schema.Struct({ [tag]: Schema.Literal(key), value: derive(grammar) }),
+      (derive) => ({
+        _tag: "Struct",
+        fields: [[tag, { _tag: "Schema", schema: Schema.Literal(key) }], ["value", derive(grammar)]],
+      }),
     )
     return [key, branch] as const
   })
@@ -79,7 +82,13 @@ export const defaulted = <A>(value: A) => <D extends Domain>(inner: Grammar<A | 
     inner,
     (input) => Result.succeed(input === undefined ? value : input),
     (input) => Result.succeed(Equal.equals(input, value) ? undefined : input),
-    (derive) => Schema.Union([derive(inner).check(isDefined), constantSchema(value)]),
+    (derive) => ({
+      _tag: "Union",
+      members: [
+        { _tag: "Check", inner: derive(inner), check: () => isDefined },
+        { _tag: "Schema", schema: constantSchema(value) },
+      ],
+    }),
   )
 
 export const lengthPrefixed = (length: Grammar<number>): Grammar<string> => prefixedBy(length, take, Schema.String)
@@ -95,7 +104,7 @@ export const countPrefixed =
       }),
       ({ items }) => Result.succeed(items),
       (items: ReadonlyArray<A>) => Result.succeed({ size: items.length, items }),
-      (derive) => Schema.Array(derive(item)),
+      (derive) => ({ _tag: "Array", item: derive(item) }),
     )
 
 export const lexeme = suffix(trivia)
