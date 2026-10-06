@@ -90,7 +90,6 @@ export interface Case {
 export const caseFor = (cases: ReadonlyArray<Case>, value: Value) =>
   cases.find((matchCase) => Object.is(matchCase.key, value))
 
-/** Builds a transform's output value schema, deriving any child grammar it reuses. */
 export type OutputSchema = (derive: (grammar: AnyGrammar) => Schema.Top) => Schema.Top
 
 export type Node =

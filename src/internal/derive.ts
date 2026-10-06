@@ -1,4 +1,4 @@
-import { Equal, Predicate, Schema } from "effect"
+import { Equal, Predicate, Schema, SchemaAST } from "effect"
 
 import {
   type AnyGrammar,
@@ -122,7 +122,7 @@ const deriveSequence = (node: Extract<Node, { readonly _tag: "Sequence" }>, path
       return issue === undefined ? [] : [{ path: at, issue }]
     })
   )
-  return { schema: schema.check(related), dependencies: outer }
+  return { schema: checkable(schema).check(related), dependencies: outer }
 }
 
 const units = (domain: Domain, count: Value): string =>
@@ -160,6 +160,9 @@ const deriveRepeat = (node: Extract<Node, { readonly _tag: "Repeat" }>, inner: S
     ]
   return { schema, dependencies }
 }
+
+/** Effect does not allow checks directly on Suspend. */
+const checkable = (schema: Schema.Top): Schema.Top => SchemaAST.isSuspend(schema.ast) ? Schema.Union([schema]) : schema
 
 const union = (members: ReadonlyArray<Schema.Top>): Schema.Top =>
   members.length === 1 ? members[0]! : Schema.Union(members)
@@ -212,7 +215,7 @@ const derive = (grammar: AnyGrammar, path: GraphPath, state: State): Derived => 
       return independent(
         union(
           node.cases.map(({ key, grammar: branch }, index) =>
-            derive(branch, [...path, "cases", index, "grammar"], state).schema.check(
+            checkable(derive(branch, [...path, "cases", index, "grammar"], state).schema).check(
               Schema.makeFilter((value: Value) =>
                 Predicate.isObject(value) && Object.hasOwn(value, node.tag) && Object.is(value[node.tag], key)
                   ? undefined
@@ -257,7 +260,7 @@ const derive = (grammar: AnyGrammar, path: GraphPath, state: State): Derived => 
           return `${node.name}: ${exceptionMessage(error)}`
         }
       }, { expected: node.name })
-      return { ...inner, schema: inner.schema.check(check) }
+      return { ...inner, schema: checkable(inner.schema).check(check) }
     }
     case "Transform": {
       if (node.schema === undefined) {
@@ -292,6 +295,7 @@ const derive = (grammar: AnyGrammar, path: GraphPath, state: State): Derived => 
  * callbacks. Object keys are preserved, so printing reports unexpected fields as it does directly.
  */
 export const valueSchema = (grammar: AnyGrammar, domain: Domain): Schema.Top =>
-  derive(grammar, [], { domain, suspensions: new Map() }).schema.annotate({
+  // Composite checks move to encodingChecks when flipped; annotate that side to preserve object keys.
+  checkable(derive(grammar, [], { domain, suspensions: new Map() }).schema).pipe(Schema.annotateEncoded({
     parseOptions: { onExcessProperty: "preserve" },
-  })
+  }))
