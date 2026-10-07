@@ -1,6 +1,6 @@
 {
   "name": "effect-grammar",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Bidirectional grammar combinators and Schema codecs for Effect.",
   "keywords": [
     "bidirectional",
