@@ -1,15 +1,28 @@
 # Repository rules
 
-| Rule                                                                                                                                                                                                           | Enforcement                                                                                                                                                                                | Evidence                                                                                                                                                                                             |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| In `examples/`, define grammar-owned object structure with `Grammar.gen`, then derive codecs with `GrammarSchema.codec` and value schemas with `Schema.toType`. Do not restate it with Effect `Schema.Struct`. | `anti-slop/no-example-schema-struct` in `oxlint.config.ts`, exercised by `test/example-schema-struct-lint.test.ts`; `pnpm check` runs lint and tests, as does CI.                          | `6a1c0c2` removed `ConnectionInfo` from connection-string; `3cd7935` removed parallel object schemas from scheme and github-search.                                                                  |
-| Use Effect `FileSystem`, `Path`, and `ChildProcess` services for test I/O, with scoped resource cleanup; run tests through `@effect/vitest` `it.effect`.                                                       | `effecttsgo/node-builtin-import` is an error in `oxlint.config.ts`, enforced by `pnpm check` and CI; review enforces `it.effect` and scoped cleanup (the import rule does not cover them). | PR #24 comments `4052322291` and `4052322837`, fixed in `370108a`; repeated by the Node builtin imports and plain Vitest tests in `0db4da6`, corrected in `test/example-schema-struct-lint.test.ts`. |
-| Preserve ordered query pairs, duplicate keys, and absent versus empty queries in the examples.                                                                                                                 | `test/query-examples.test.ts` exercises the same pure grammar modules imported by the demos; `pnpm check` and CI run it.                                                                   | `3cd7935` removed independently lossy record transforms from connection-string and printing. Restoring both pre-fix grammars makes all three new tests fail.                                         |
-
-The grammar-structure rule is an example-authoring constraint, not a library API
-restriction. Explicit schema targets remain supported by the library and its
-tests. Semantic scalar schemas, JSON `Schema.Record`, and external API
-`Schema.Union` are not structural restatements and must remain usable. The lint
-rule detects direct calls through Effect imports (including import aliases and
-static computed property access); it does not attempt whole-program alias or
-data-flow analysis. There are no rule-specific exceptions or allowlists.
+- **Derive grammar-owned structure in examples.**
+  - In `examples/`, define object structure with `Grammar.gen`, then derive
+    codecs with `GrammarSchema.codec` and value schemas with `Schema.toType`. Do
+    not restate it with Effect `Schema.Struct`.
+  - **Enforcement:** `anti-slop/no-example-schema-struct` in `oxlint.config.ts`,
+    exercised by `test/example-schema-struct-lint.test.ts`; `pnpm check` runs
+    lint and tests, as does CI.
+  - **Scope:** This is an example-authoring constraint, not a library API
+    restriction. Explicit schema targets remain supported by the library and its
+    tests. Semantic scalar schemas, JSON `Schema.Record`, and external API
+    `Schema.Union` remain usable.
+  - **Limits:** The lint rule detects direct calls through Effect imports,
+    including import aliases and static computed property access. It does not
+    attempt whole-program alias or data-flow analysis. There are no
+    rule-specific exceptions or allowlists.
+- **Use Effect services for test I/O.**
+  - Use Effect `FileSystem`, `Path`, and `ChildProcess` services with scoped
+    resource cleanup; run tests through `@effect/vitest` `it.effect`.
+  - **Enforcement:** `effecttsgo/node-builtin-import` is an error in
+    `oxlint.config.ts`, enforced by `pnpm check` and CI. Review enforces
+    `it.effect` and scoped cleanup; the import rule does not cover them.
+- **Preserve natural query parameter values.**
+  - Preserve ordered query pairs, duplicate keys, and absent versus empty
+    queries in the examples.
+  - **Enforcement:** `test/query-examples.test.ts` exercises the same pure
+    grammar modules imported by the demos; `pnpm check` and CI run it.
